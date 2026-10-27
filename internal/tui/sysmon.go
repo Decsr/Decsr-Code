@@ -439,9 +439,9 @@ func (m SysmonModel) View() string {
 		contentW = 20
 	}
 
-	borderColor := lipgloss.Color("#3b4261")
-	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#2ac3de")).Bold(true)
-	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7aa2f7")).Bold(true)
+	borderColor := crt.border
+	titleStyle := lipgloss.NewStyle().Foreground(galaxyCyan).Bold(true)
+	headerStyle := lipgloss.NewStyle().Foreground(galaxyBlue).Bold(true)
 	labelStyle := lipgloss.NewStyle().Foreground(crt.dim)
 	valueStyle := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
@@ -558,8 +558,8 @@ func (m SysmonModel) View() string {
 
 	// ── NET ──
 	addSection("NET")
-	netDnColor := lipgloss.Color("#73daca")
-	netUpColor := lipgloss.Color("#7aa2f7")
+	netDnColor := galaxyCyan
+	netUpColor := galaxyBlue
 	dnStyle := lipgloss.NewStyle().Foreground(netDnColor).Bold(true)
 	upStyle := lipgloss.NewStyle().Foreground(netUpColor).Bold(true)
 	addLine(dnStyle.Render(" ▼ "+formatRate(m.recvRate)) + "  " +
@@ -571,7 +571,7 @@ func (m SysmonModel) View() string {
 	const tokenAgentRows = 5
 	if total := m.totalTokens(); total > 0 {
 		addSection("TOKENS")
-		totalColor := lipgloss.Color("#e0af68")
+		totalColor := galaxyGold
 		totalStyle := lipgloss.NewStyle().Foreground(totalColor).Bold(true)
 		addLine(labelStyle.Render(" Total: ") + totalStyle.Render(formatTokens(total)))
 
@@ -1060,7 +1060,7 @@ func renderSegmentedBar(percent float64, maxWidth int) string {
 		}
 		// Insert thin gap at segment boundaries.
 		if i > 0 && i%segmentSize == 0 {
-			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#1a1b26")).Render("▏"))
+			sb.WriteString(lipgloss.NewStyle().Foreground(crt.bg).Render("▏"))
 		} else {
 			sb.WriteString(lipgloss.NewStyle().Foreground(gradientColors[bucketIdx]).Render("█"))
 		}
@@ -1150,13 +1150,13 @@ func renderBrailleGraph(history []float64, width, graphRows int, color lipgloss.
 	return strings.Join(rowStrings, "\n")
 }
 
-// gradientColors defines the bar gradient from green (low) through yellow to red (high).
+// gradientColors defines the bar gradient from aurora mint (low) through star gold to pulsar red (high).
 var gradientColors = []lipgloss.Color{
-	"#9ece6a", "#9ece6a", // 0-19%  green
-	"#b5c96a", "#c8c46a", // 20-39% green-yellow
-	"#e0af68", "#e0af68", // 40-59% yellow
-	"#ff9e64", "#ff9e64", // 60-79% orange
-	"#f7768e", "#f7768e", // 80-100% red
+	galaxyMint, galaxyMint, // 0-19%  aurora mint
+	lipgloss.Color("#a7e78f"), lipgloss.Color("#d3dc7a"), // 20-39% mint-gold blend
+	galaxyGold, galaxyGold, // 40-59% star gold
+	galaxyOrange, galaxyOrange, // 60-79% solar orange
+	galaxyRed, galaxyRed, // 80-100% pulsar red
 }
 
 // renderGradientBar renders a horizontal bar with a btop-style color gradient.
@@ -1191,7 +1191,7 @@ func renderGradientBar(percent float64, maxWidth int) string {
 
 // renderSparkline renders a Unicode sparkline from a history of values.
 func renderSparkline(history []float64, maxWidth int) string {
-	return renderSparklineColored(history, maxWidth, lipgloss.Color("#7aa2f7"))
+	return renderSparklineColored(history, maxWidth, galaxyBlue)
 }
 
 // renderSparklineColored renders a sparkline with a custom color.
@@ -1255,13 +1255,13 @@ func renderBar(percent float64, maxWidth int, color lipgloss.Color) string {
 func percentColor(pct float64) lipgloss.Color {
 	switch {
 	case pct >= 90:
-		return lipgloss.Color("#f7768e") // red/coral
+		return galaxyRed // pulsar red
 	case pct >= 70:
-		return lipgloss.Color("#e0af68") // gold/yellow
+		return galaxyGold // star gold
 	case pct >= 50:
-		return lipgloss.Color("#ff9e64") // orange
+		return galaxyOrange // solar orange
 	default:
-		return lipgloss.Color("#9ece6a") // green
+		return galaxyMint // aurora mint
 	}
 }
 
@@ -1270,13 +1270,13 @@ func percentColor(pct float64) lipgloss.Color {
 func tempPercentColor(tempC float64) lipgloss.Color {
 	switch {
 	case tempC >= 90:
-		return lipgloss.Color("#f7768e")
+		return galaxyRed
 	case tempC >= 75:
-		return lipgloss.Color("#e0af68")
+		return galaxyGold
 	case tempC >= 60:
-		return lipgloss.Color("#ff9e64")
+		return galaxyOrange
 	default:
-		return lipgloss.Color("#9ece6a")
+		return galaxyMint
 	}
 }
 

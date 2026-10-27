@@ -98,18 +98,18 @@ type statusBarShortcut struct {
 
 // statusBarShortcuts defines the shortcut hints with per-action accent colors.
 var statusBarShortcuts = []statusBarShortcut{
-	{"↑↓", "scroll", lipgloss.Color("#7aa2f7")},      // blue — navigation
-	{"Ctrl+R", "req", lipgloss.Color("#9ece6a")},     // green — requirements
-	{"Ctrl+G", "git", lipgloss.Color("#73daca")},     // teal — git
-	{"Ctrl+C", "chat", lipgloss.Color("#2ac3de")},    // cyan — chat
-	{"Ctrl+T", "sysmon", lipgloss.Color("#ff9e64")},  // orange — system monitor
-	{"Tab", "files", lipgloss.Color("#bb9af7")},      // purple — browse tree
-	{"Ctrl+A", "approve", lipgloss.Color("#9ece6a")}, // green — approve
-	{"Ctrl+O", "gate", lipgloss.Color("#7dcfff")},    // cyan — reopen gate
-	{"Ctrl+P", "pause", lipgloss.Color("#e0af68")},   // gold — pause to change model
-	{"Ctrl+E", "error", lipgloss.Color("#f7768e")},   // coral — toggle error banner
-	{"Ctrl+X", "cancel", lipgloss.Color("#f7768e")},  // coral — cancel
-	{"q", "quit", lipgloss.Color("#6b553f")},         // dim — quit
+	{"↑↓", "scroll", galaxyBlue},       // nebula blue — navigation
+	{"Ctrl+R", "req", galaxyMint},      // aurora mint — requirements
+	{"Ctrl+G", "git", galaxyCyan},      // comet cyan — git
+	{"Ctrl+C", "chat", galaxyCyan},     // comet cyan — chat
+	{"Ctrl+T", "sysmon", galaxyOrange}, // solar orange — system monitor
+	{"Tab", "files", galaxyPurple},     // nebula purple — browse tree
+	{"Ctrl+A", "approve", galaxyMint},  // aurora mint — approve
+	{"Ctrl+O", "gate", galaxyIce},      // ice — reopen gate
+	{"Ctrl+P", "pause", galaxyGold},    // star gold — pause to change model
+	{"Ctrl+E", "error", galaxyRed},     // pulsar red — toggle error banner
+	{"Ctrl+X", "cancel", galaxyRed},    // pulsar red — cancel
+	{"q", "quit", crt.dim},             // dim — quit
 }
 
 func (m StatusBarModel) View() string {
@@ -141,7 +141,7 @@ func (m StatusBarModel) viewLines() []string {
 
 	versionTag := lipgloss.NewStyle().
 		Background(crt.panelBg).
-		Foreground(lipgloss.Color("#e0af68")).
+		Foreground(galaxyGold).
 		Bold(true).
 		Render("v" + Version)
 

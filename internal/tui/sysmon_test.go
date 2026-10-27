@@ -327,10 +327,10 @@ func TestPercentColor(t *testing.T) {
 		pct      float64
 		expected lipgloss.Color
 	}{
-		{10.0, lipgloss.Color("#9ece6a")},
-		{55.0, lipgloss.Color("#ff9e64")},
-		{75.0, lipgloss.Color("#e0af68")},
-		{95.0, lipgloss.Color("#f7768e")},
+		{10.0, galaxyMint},
+		{55.0, galaxyOrange},
+		{75.0, galaxyGold},
+		{95.0, galaxyRed},
 	}
 	for _, tt := range tests {
 		got := percentColor(tt.pct)

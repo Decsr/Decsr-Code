@@ -11,13 +11,13 @@ import (
 // structured markdown instead of one flat color. (Artifact rendering has its
 // own styles in artifact_style.go; mdBoldStyle is shared.)
 var (
-	chatHeadingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#2ac3de")).Bold(true) // cyan
-	chatMoscowStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#e0af68")).Bold(true) // gold
-	chatBulletMark   = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ece6a")).Bold(true) // green
-	chatNumberMark   = lipgloss.NewStyle().Foreground(lipgloss.Color("#2ac3de")).Bold(true) // cyan
+	chatHeadingStyle = lipgloss.NewStyle().Foreground(galaxyCyan).Bold(true) // comet cyan
+	chatMoscowStyle  = lipgloss.NewStyle().Foreground(galaxyGold).Bold(true) // star gold
+	chatBulletMark   = lipgloss.NewStyle().Foreground(galaxyMint).Bold(true) // aurora mint
+	chatNumberMark   = lipgloss.NewStyle().Foreground(galaxyCyan).Bold(true) // comet cyan
 	chatLabelStyle   = lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
 	chatQuoteStyle   = lipgloss.NewStyle().Foreground(crt.dim).Italic(true)
-	chatCodeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#2ac3de"))
+	chatCodeStyle    = lipgloss.NewStyle().Foreground(galaxyCyan)
 )
 
 // moscowHeaders are MoSCoW section titles the PM emits; they get a distinct

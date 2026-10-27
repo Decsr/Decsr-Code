@@ -49,14 +49,14 @@ var homePalette = struct {
 	accent, green, dim, bright, gold, cyan, red lipgloss.Color
 	border, activeBg, headerBg, footerBg        lipgloss.Color
 }{
-	accent:   lipgloss.Color("#9d7cff"), // nebula violet accent for titles
-	green:    lipgloss.Color("#6ff2b4"), // aurora mint
+	accent:   galaxyViolet, // nebula violet accent for titles
+	green:    galaxyMint,   // aurora mint
 	dim:      crt.dim,
 	bright:   crt.bright,
-	gold:     lipgloss.Color("#ffd166"), // star gold
-	cyan:     lipgloss.Color("#5ce1e6"), // comet cyan
-	red:      lipgloss.Color("#ff5c7a"), // pulsar red
-	border:   lipgloss.Color("#3a3a44"), // galaxy border
+	gold:     galaxyGold, // star gold
+	cyan:     galaxyCyan, // comet cyan
+	red:      galaxyRed,  // pulsar red
+	border:   crt.border, // galaxy border
 	activeBg: crt.muted,
 	headerBg: crt.panelBg,
 	footerBg: crt.panelBg,
@@ -572,9 +572,9 @@ func (m HomeModel) renderLogo(maxW int) string {
 
 	// Nebula gradient, one colour per display row.
 	nebula := []lipgloss.Style{
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#9d7cff")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#c77dff")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#ff7ac6")),
+		lipgloss.NewStyle().Foreground(galaxyViolet).Bold(true),
+		lipgloss.NewStyle().Foreground(galaxyPurple).Bold(true),
+		lipgloss.NewStyle().Foreground(galaxyPink),
 	}
 
 	lines := []string{renderStars(logoStarsTop)}
