@@ -1,21 +1,8 @@
 <p align="center">
-  <h1 align="center">Decsr Code</h1>
-  <p align="center">
-    A terminal-native multi-agent pipeline that coordinates multiple AI agents to plan, code, test, review, and fix your projects — autonomously.
-  </p>
+  <img src="doc/assets/banner.svg" alt="DECSR" width="100%">
 </p>
 
-<p align="center">
-
-```text
-                                ·       ✦        +      ⋆       ✦
-                                 ·       █▀▀▄ █▀▀▀ ▄▀▀▀ █▀▀▀ █▀▀▄  ·
-                                ⋆        █  █ █▀▀  █     ▀▀▄ █▀█     ✦
-                                   ·     ▀▀▀  ▀▀▀▀  ▀▀▀ ▀▀▀▀ ▀  ▀   ✦
-                                  ⋆       ·          ✦              ✦
-```
-
-</p>
+<p align="center"><b>Decsr Code</b> — command: <code>decsr</code></p>
 
 <p align="center">
   <a href="https://github.com/Decsr/Decsr-Code/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Decsr/Decsr-Code?style=flat-square&color=9d7cff&labelColor=1b1b1f" alt="License"></a>
@@ -25,7 +12,16 @@
   <a href="https://pkg.go.dev/github.com/Decsr/Decsr-Code"><img src="https://img.shields.io/badge/go.dev-reference-9d7cff?style=flat-square&logo=go&logoColor=white&labelColor=1b1b1f" alt="Go Reference"></a>
 </p>
 
----
+<p align="center">
+  <a href="#features">Features</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#usage">Usage</a> ·
+  <a href="#pipeline">Pipeline</a> ·
+  <a href="#theme-galaxy--pixel">Theme</a> ·
+  <a href="#docs">Docs</a>
+</p>
+
+<p align="center"><img src="doc/assets/divider.svg" width="100%" alt=""></p>
 
 ## What Is It?
 
@@ -33,14 +29,22 @@ Decsr Code (command: `decsr`) is an open-source CLI tool written in Go that driv
 
 It ships with a rich terminal UI (built with [Bubble Tea](https://github.com/charmbracelet/bubbletea)) and also supports a headless plain-text mode for CI or scripting.
 
-## What Problem Does It Solve?
+### Why DECSR
 
 Manual back-and-forth with AI coding assistants is slow, error-prone, and hard to reproduce. DECSR:
 
-- **Structures the work** into well-defined phases so nothing gets skipped.
-- **Runs multiple specialist agents** (PM, Coder, QA, UX Reviewer, Security Auditor) — each with its own prompt, skills, and model.
-- **Iterates automatically** — if tests fail or reviewers find must-fix issues, the Coder fixes and the entire quality gate restarts.
-- **Keeps humans in the loop** — approval gates let you review and revise the task spec and execution plan before any code is written.
+<table>
+  <tr>
+    <td width="50%" valign="top">✦ <b>Structures the work</b><br>into well-defined phases so nothing gets skipped.</td>
+    <td width="50%" valign="top">✦ <b>Runs multiple specialist agents</b><br>(PM, Coder, QA, UX Reviewer, Security Auditor) — each with its own prompt, skills, and model.</td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">✦ <b>Iterates automatically</b><br>— if tests fail or reviewers find must-fix issues, the Coder fixes and the entire quality gate restarts.</td>
+    <td width="50%" valign="top">✦ <b>Keeps humans in the loop</b><br>— approval gates let you review and revise the task spec and execution plan before any code is written.</td>
+  </tr>
+</table>
+
+<p align="center"><img src="doc/assets/divider.svg" width="100%" alt=""></p>
 
 ## Features
 
@@ -48,11 +52,11 @@ Manual back-and-forth with AI coding assistants is slow, error-prone, and hard t
 
 | Agent | Role |
 |-------|------|
-| **PM** | Negotiates the task spec, decomposes work into sub-tasks, and arbitrates review feedback |
-| **Coder** | Writes and fixes code, runs builds and tests |
-| **QA** | Generates tests (TDD), verifies test runs, and reviews code quality, logic, and corner cases |
-| **UX Reviewer** | UX/UI heuristic review |
-| **Security** | Security audit and vulnerability scanning |
+| ![PM](https://img.shields.io/badge/PM-9d7cff?style=flat-square&labelColor=1b1b1f) | Negotiates the task spec, decomposes work into sub-tasks, and arbitrates review feedback |
+| ![Coder](https://img.shields.io/badge/Coder-6ff2b4?style=flat-square&labelColor=1b1b1f) | Writes and fixes code, runs builds and tests |
+| ![QA](https://img.shields.io/badge/QA-ff7ac6?style=flat-square&labelColor=1b1b1f) | Generates tests (TDD), verifies test runs, and reviews code quality, logic, and corner cases |
+| ![UX Reviewer](https://img.shields.io/badge/UX%20Reviewer-ffd166?style=flat-square&labelColor=1b1b1f) | UX/UI heuristic review |
+| ![Security](https://img.shields.io/badge/Security-ff5c7a?style=flat-square&labelColor=1b1b1f) | Security audit and vulnerability scanning |
 
 ### Interactive TUI
 
@@ -61,13 +65,6 @@ Full-featured terminal user interface with agent panels, live token streaming, a
 A built-in **System Monitor** (toggle with `Ctrl+T`) shows live CPU, memory, network, and per-agent token usage. Token lines use `↓` for input (prompt) tokens, `↑` for output (generated) tokens, and a trailing `~` when the count is estimated — e.g. `coder ↓33.7k ↑4.5k~`.
 
 See [`doc/tui.md`](doc/tui.md) for a full reference of every panel, status indicator, keyboard shortcut, and token notation, with examples.
-
-
-
-
-
-
-
 
 ### Configurable LLM Backends
 
@@ -88,10 +85,19 @@ Supports multiple runners out of the box:
 
 Each agent can use a different runner and model — configure globally (`~/.decsr/config.yaml`) or per-project (`.decsr/project.yaml`).
 
+### Human Approval Gates
 
+The pipeline pauses for your approval before any code is written:
+- **Repository context pack** — the PM reads the repository and writes a compact Markdown briefing (`.decsr/context_pack.md`) with a user-editable section for extra text, notes, and URLs. Review, edit, and approve it before planning starts.
+- **Task spec** — title, scope, and description negotiated with the PM
+- **Execution plan** — the decomposition into sub-tasks (`task_plan.md`), pre-reviewed by Security and QA
 
+You can review, revise via chat, and approve — all from the TUI.
 
-### Layered Configuration
+<details>
+<summary><b>Layered Configuration</b> — three-layer config with sensible defaults</summary>
+
+<br>
 
 Three-layer config with sensible defaults:
 
@@ -99,15 +105,30 @@ Three-layer config with sensible defaults:
 2. **Global user config** (`~/.decsr/config.yaml`) — your preferred models and runners
 3. **Project config** (`.decsr/project.yaml`) — project-specific overrides (language, test commands, scoping)
 
-### Local Model Memory Cap
+</details>
+
+<details>
+<summary><b>Local Model Memory Cap</b> — bound RAM / context for Ollama, LM Studio, MLX</summary>
+
+<br>
 
 When running local models (Ollama, LM Studio, MLX), the **Model Memory** screen lets you bound resource use: pick a **RAM limit** (auto-converted to a per-agent context window based on the model and your system RAM) or a fixed **context-token limit** applied verbatim to every agent. This keeps large local models from exhausting memory.
 
-### Skills System
+</details>
+
+<details>
+<summary><b>Skills System</b> — embedded skill documents injected into agent prompts</summary>
+
+<br>
 
 Agents are augmented with embedded skill documents (Go patterns, testing strategies, security checklists, etc.) that are injected into their system prompts.
 
-### Project Memory (OpenClaw-style)
+</details>
+
+<details>
+<summary><b>Project Memory (OpenClaw-style)</b> — Markdown files in <code>.decsr/memory/</code></summary>
+
+<br>
 
 DECSR persists everything important about a project as Markdown files in `.decsr/memory/`:
 
@@ -123,7 +144,12 @@ decsr memory search "JWT auth"
 decsr memory add "Use sqlc for typed queries"
 ```
 
-### Context-First Planning
+</details>
+
+<details>
+<summary><b>Context-First Planning</b> — the PM writes a context pack before any planning</summary>
+
+<br>
 
 Before any planning starts, the **PM** reads the repository and writes a compact
 Markdown **context pack** to `.decsr/context_pack.md`. It contains the
@@ -133,17 +159,20 @@ URLs. You review and edit the pack in the TUI, approve it, and only then does th
 PM ask what you want to do. The approved pack becomes the shared context for all
 planning and review agents. See [`doc/context-pack.md`](doc/context-pack.md).
 
-### Human Approval Gates
+</details>
 
-The pipeline pauses for your approval before any code is written:
-- **Repository context pack** — the PM reads the repository and writes a compact Markdown briefing (`.decsr/context_pack.md`) with a user-editable section for extra text, notes, and URLs. Review, edit, and approve it before planning starts.
-- **Task spec** — title, scope, and description negotiated with the PM
-- **Execution plan** — the decomposition into sub-tasks (`task_plan.md`), pre-reviewed by Security and QA
+<p align="center"><img src="doc/assets/divider.svg" width="100%" alt=""></p>
 
-You can review, revise via chat, and approve — all from the TUI.
+## Pipeline
 
+<p align="center">
+  <img src="doc/assets/pipeline.svg" alt="Pipeline: context, negotiate, decompose, tests, code, build/fix, review, done" width="100%">
+</p>
 
+<details>
+<summary><b>How the pipeline works</b></summary>
 
+<br>
 
 ### Pipeline Algorithm
 
@@ -171,33 +200,11 @@ After implementation, the pipeline runs all quality checks:
 
 If the PM classifies any feedback as must-fix, those items become new sub-tasks (beads), the Coder fixes them, and the loop restarts from implementation. The cycle continues until all checks pass (or a configurable max iteration limit is reached).
 
-### Theme: Galaxy × Pixel
+</details>
 
-A dark-grey base with starlight text and nebula, aurora and pulsar accents.
+<p align="center"><img src="doc/assets/divider.svg" width="100%" alt=""></p>
 
-| Role / purpose | Colour | Hex |
-|---|---|---|
-| Base background | dark grey | `#1b1b1f` |
-| Panels | panel grey | `#232329` |
-| Borders | border grey | `#3a3a44` |
-| Text | starlight | `#c8c6d8` |
-| Highlights | bright starlight | `#f4f2ff` |
-| Secondary text | dim starlight | `#77758a` |
-| PM | nebula violet | `#9d7cff` |
-| Coder, success | aurora mint | `#6ff2b4` |
-| Coder fixer | deeper mint | `#4fcf95` |
-| QA | cosmic pink | `#ff7ac6` |
-| UX | star gold | `#ffd166` |
-| Security, warnings | pulsar red | `#ff5c7a` |
-| PR, done | comet cyan | `#5ce1e6` |
-| Logo gradient, file-tree hint | nebula purple | `#c77dff` |
-| Navigation, system monitor headers & network | nebula blue | `#7c9cff` |
-| System monitor load warnings | solar orange | `#ffa36b` |
-| Reopen-gate hint | ice | `#9ee8ff` |
-
-The previous amber CRT theme remains available in `internal/tui/styles.go`.
-
-## Quick Start
+## Install
 
 ### Prerequisites
 
@@ -206,7 +213,17 @@ The previous amber CRT theme remains available in `internal/tui/styles.go`.
 - At least one LLM backend installed and configured — a CLI runner (**OpenCode**, **Claude CLI**, **Codex CLI**, or **GitHub Copilot CLI**) or a local model server (**Ollama**, **LM Studio**, or **MLX**)
 - **[bd (beads)](https://github.com/gastownhall/beads)** — recommended. Sub-tasks are tracked as durable beads, which makes runs resumable across sessions. Without `bd` the pipeline still runs, but multi-session resume of a bead-backed task is unavailable.
 
-### Install
+### Option 1 — Prebuilt binaries
+
+Download an archive for Linux, macOS or Windows (amd64/arm64) from the [Releases page](https://github.com/Decsr/Decsr-Code/releases), unpack it and put `decsr` on your `PATH`.
+
+### Option 2 — `go install`
+
+```bash
+go install github.com/Decsr/Decsr-Code/cmd/decsr@latest
+```
+
+### Option 3 — From source
 
 ```bash
 # Clone and build
@@ -218,25 +235,9 @@ make build install
 decsr help
 ```
 
-Or install directly:
+<p align="center"><img src="doc/assets/divider.svg" width="100%" alt=""></p>
 
-```bash
-go install github.com/Decsr/Decsr-Code/cmd/decsr@latest
-```
-
-**Prebuilt binaries** — download an archive for Linux, macOS or Windows (amd64/arm64) from the [Releases page](https://github.com/Decsr/Decsr-Code/releases), unpack it and put `decsr` on your `PATH`.
-
-### Releasing
-
-Maintainers: bump `.Version` (`make bump-patch|minor|major`), commit, then tag and push:
-
-```bash
-git tag v$(cat .Version) && git push origin v$(cat .Version)
-```
-
-The Release workflow builds the binaries and publishes them to GitHub Releases. (`make release bump=patch|minor|major` does the bump, commit and local tag in one step; push the tag yourself afterwards.)
-
-### Run
+## Usage
 
 **Interactive mode** — launch the TUI and start a new task or pick a requirements file:
 
@@ -280,7 +281,46 @@ decsr run --requirements requirements.md --branch feat/my-feature
 7. **QA**, **UX Reviewer**, and **Security** review the result; the **PM** arbitrates. Must-fix issues become new sub-tasks and the loop restarts.
 8. A final summary and all artifacts land in `.decsr/`.
 
+<p align="center"><img src="doc/assets/divider.svg" width="100%" alt=""></p>
 
-## License
+## Theme: Galaxy × Pixel
 
-[MIT](LICENSE) © DECSR
+A dark-grey base with starlight text and nebula, aurora and pulsar accents.
+
+<p align="center">
+  <img src="doc/assets/palette.svg" alt="Galaxy × Pixel palette" width="100%">
+</p>
+
+**Role legend:** PM nebula violet `#9d7cff` · Coder / success aurora mint `#6ff2b4` · Coder fixer deeper mint `#4fcf95` · QA cosmic pink `#ff7ac6` · UX star gold `#ffd166` · Security / warnings pulsar red `#ff5c7a` · PR / done comet cyan `#5ce1e6`. Also: logo gradient and file-tree hint use nebula purple `#c77dff`; navigation and system monitor headers & network use nebula blue `#7c9cff`; system monitor load warnings use solar orange `#ffa36b`; the reopen-gate hint uses ice `#9ee8ff`.
+
+The previous amber CRT theme remains available in `internal/tui/styles.go`.
+
+<p align="center"><img src="doc/assets/divider.svg" width="100%" alt=""></p>
+
+## Docs
+
+- [`doc/tui.md`](doc/tui.md) — TUI reference: panels, status indicators, keyboard shortcuts, token notation
+- [`doc/memory.md`](doc/memory.md) — project memory details
+- [`doc/context-pack.md`](doc/context-pack.md) — context pack format, editing flow, and configuration
+
+<details>
+<summary><b>For maintainers: releasing</b></summary>
+
+<br>
+
+Maintainers: bump `.Version` (`make bump-patch|minor|major`), commit, then tag and push:
+
+```bash
+git tag v$(cat .Version) && git push origin v$(cat .Version)
+```
+
+The Release workflow builds the binaries and publishes them to GitHub Releases. (`make release bump=patch|minor|major` does the bump, commit and local tag in one step; push the tag yourself afterwards.)
+
+</details>
+
+<p align="center"><img src="doc/assets/divider.svg" width="100%" alt=""></p>
+
+<p align="center">
+  <a href="LICENSE">MIT</a> © DECSR<br>
+  <sub>✦ built in the terminal ✦</sub>
+</p>
