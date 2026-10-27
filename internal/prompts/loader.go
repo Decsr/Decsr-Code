@@ -18,6 +18,7 @@ type Loader struct {
 	mu       sync.RWMutex
 	cache    map[string]string
 	override string // project override directory (empty = no overrides)
+	gen      uint64 // bumped by SetOverrideDir; guards against stale cache stores
 }
 
 // New creates a Loader backed by embedded prompt files.
@@ -32,6 +33,7 @@ func New() *Loader {
 func SetOverrideDir(dir string) {
 	defaultLoader.mu.Lock()
 	defaultLoader.override = dir
+	defaultLoader.gen++
 	defaultLoader.cache = make(map[string]string) // clear cache to pick up overrides
 	defaultLoader.mu.Unlock()
 }
@@ -49,15 +51,14 @@ func (l *Loader) Load(name string) (string, error) {
 		l.mu.RUnlock()
 		return content, nil
 	}
+	override, gen := l.override, l.gen
 	l.mu.RUnlock()
 
 	// Check project-level override first.
-	if l.override != "" {
-		if data, err := safefile.ReadFile(l.override, name+".md"); err == nil {
+	if override != "" {
+		if data, err := safefile.ReadFile(override, name+".md"); err == nil {
 			content := string(data)
-			l.mu.Lock()
-			l.cache[name] = content
-			l.mu.Unlock()
+			l.store(name, content, gen)
 			return content, nil
 		}
 	}
@@ -69,12 +70,18 @@ func (l *Loader) Load(name string) (string, error) {
 	}
 
 	content := string(data)
-
-	l.mu.Lock()
-	l.cache[name] = content
-	l.mu.Unlock()
+	l.store(name, content, gen)
 
 	return content, nil
+}
+
+// store caches content unless the override dir changed since gen was read.
+func (l *Loader) store(name, content string, gen uint64) {
+	l.mu.Lock()
+	if l.gen == gen {
+		l.cache[name] = content
+	}
+	l.mu.Unlock()
 }
 
 // MustLoad returns the content of a prompt or panics if not found.

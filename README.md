@@ -18,10 +18,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Decsr/Decsr-Code/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Decsr/Decsr-Code?style=flat-square" alt="MIT License"></a>
-  <a href="https://github.com/Decsr/Decsr-Code/releases"><img src="https://img.shields.io/github/v/release/Decsr/Decsr-Code?style=flat-square" alt="Latest Release"></a>
-  <a href="https://github.com/Decsr/Decsr-Code/actions"><img src="https://img.shields.io/github/actions/workflow/status/Decsr/Decsr-Code/ci.yml?style=flat-square&label=CI" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.26+">
+  <a href="https://github.com/Decsr/Decsr-Code/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Decsr/Decsr-Code?style=flat-square&color=9d7cff&labelColor=1b1b1f" alt="License"></a>
+  <a href="https://github.com/Decsr/Decsr-Code/releases"><img src="https://img.shields.io/github/v/release/Decsr/Decsr-Code?style=flat-square&color=9d7cff&labelColor=1b1b1f" alt="Latest Release"></a>
+  <a href="https://github.com/Decsr/Decsr-Code/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Decsr/Decsr-Code/ci.yml?branch=main&label=CI&style=flat-square&labelColor=1b1b1f" alt="CI"></a>
+  <a href="https://github.com/Decsr/Decsr-Code/blob/main/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/Decsr/Decsr-Code?style=flat-square&color=9d7cff&labelColor=1b1b1f" alt="Go version"></a>
   <a href="https://goreportcard.com/report/github.com/Decsr/Decsr-Code"><img src="https://goreportcard.com/badge/github.com/Decsr/Decsr-Code?style=flat-square" alt="Go Report Card"></a>
 </p>
 
@@ -223,6 +223,18 @@ Or install directly:
 ```bash
 go install github.com/Decsr/Decsr-Code/cmd/decsr@latest
 ```
+
+**Prebuilt binaries** — download an archive for Linux, macOS or Windows (amd64/arm64) from the [Releases page](https://github.com/Decsr/Decsr-Code/releases), unpack it and put `decsr` on your `PATH`.
+
+### Releasing
+
+Maintainers: bump `.Version` (`make bump-patch|minor|major`), commit, then tag and push:
+
+```bash
+git tag v$(cat .Version) && git push origin v$(cat .Version)
+```
+
+The Release workflow builds the binaries and publishes them to GitHub Releases. (`make release bump=patch|minor|major` does the bump, commit and local tag in one step; push the tag yourself afterwards.)
 
 ### Run
 

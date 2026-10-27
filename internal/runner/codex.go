@@ -177,7 +177,9 @@ func streamCodexOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffer
 
 	waitErr := cmd.Wait()
 	output := collected.String()
-	if waitErr != nil && strings.TrimSpace(output) == "" {
+	// A non-zero exit with a rate-limit stderr is a failure even if partial
+	// output was streamed first.
+	if waitErr != nil && (strings.TrimSpace(output) == "" || ClassifyRateLimit("codex", stderr.String()) != nil) {
 		errMsg := strings.TrimSpace(stderr.String())
 		if errMsg == "" {
 			errMsg = waitErr.Error()

@@ -2,6 +2,8 @@ package runner
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
 	"os/exec"
 	"reflect"
@@ -130,4 +132,29 @@ func TestStreamCopilotOutput_IncrementalUsage(t *testing.T) {
 	if want := tokenutil.EstimateTokens(output); outputTotal != want {
 		t.Errorf("output tokens (sum of deltas + reconciliation): got %d, want %d", outputTotal, want)
 	}
+}
+
+func TestCopilotStartStreamingProcess_RejectsOversizedPrompt(t *testing.T) {
+	_, _, _, err := CopilotRunner{Binary: "true"}.startStreamingProcess(context.Background(), strings.Repeat("x", 200*1024), "", "")
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected too-large error, got %v", err)
+	}
+}
+
+func TestStreamCopilotOutput_NonZeroExitRateLimitWithPartialOutput(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "echo 'rate limit exceeded' >&2; exit 1")
+	stderrBuf := &bytes.Buffer{}
+	cmd.Stderr = stderrBuf
+	if err := cmd.Start(); err != nil {
+		t.Skip(err)
+	}
+	ch := make(chan Token, 16)
+	go streamCopilotOutput(cmd, io.NopCloser(strings.NewReader("partial")), stderrBuf, "in", ch)
+	var rl *RateLimitError
+	for tok := range ch {
+		if tok.Error != nil && errors.As(tok.Error, &rl) {
+			return
+		}
+	}
+	t.Fatal("expected rate-limit error token")
 }

@@ -3,6 +3,7 @@ package prompts
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -135,4 +136,39 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestLoad_ConcurrentWithSetOverrideDir(t *testing.T) {
+	dir := t.TempDir()
+	custom := "custom pm"
+	if err := os.WriteFile(filepath.Join(dir, "pm-system.md"), []byte(custom), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { SetOverrideDir("") })
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				if _, err := Load("pm-system"); err != nil {
+					t.Errorf("Load: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	for i := 0; i < 50; i++ {
+		SetOverrideDir("")
+		SetOverrideDir(dir)
+	}
+	wg.Wait()
+
+	// Final state must reflect the last SetOverrideDir, never a stale cache.
+	SetOverrideDir(dir)
+	got, err := Load("pm-system")
+	if err != nil || got != custom {
+		t.Fatalf("got %q, %v; want override content", got, err)
+	}
 }

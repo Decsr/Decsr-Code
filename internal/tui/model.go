@@ -671,6 +671,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.treePreviewFocused = false
 				m.sysmon.FocusTree()
 				m.filePreview = NewFilePreview(m.root, m.contentWidth(), m.height-3)
+				m.layout()
 				m.syncTreePreview()
 			}
 			return m, nil
@@ -900,8 +901,9 @@ func (m Model) updateOverlay(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// overlayNone is handled before this method is called.
 	}
 
-	// Overlay closed — resume listening to bus events.
-	return m, waitForBusEvent(m.events)
+	// The BusMessageMsg handler keeps the single bus waiter armed (bus messages
+	// bypass overlays), so closing an overlay must not start another reader.
+	return m, nil
 }
 
 func (m Model) View() string {
@@ -977,7 +979,6 @@ func (m Model) view() string {
 		var agentView string
 		if m.treeBrowsing {
 			// Replace the agent output with the selected file's preview.
-			m.filePreview.SetSize(agentW, panelH)
 			m.filePreview.SetFocused(m.treePreviewFocused)
 			agentView = m.filePreview.View()
 		} else {
@@ -1509,6 +1510,9 @@ func (m *Model) layout() {
 		p.SetSize(agentW, panelH)
 		m.panels[role] = p
 	}
+	// Sized here (not in View) so the stored width stays current and the
+	// previewed file is only re-read/re-highlighted when the width changes.
+	m.filePreview.SetSize(agentW, panelH)
 }
 
 // buildPMChatPrompt constructs a system prompt for PM chat with current project context.

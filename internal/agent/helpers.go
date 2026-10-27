@@ -93,6 +93,7 @@ func parseCmds(input string) []string {
 		cleaned := stripListMarker(line)
 		cleaned = strings.Trim(cleaned, "`")
 		cleaned = strings.TrimSpace(cleaned)
+		cleaned = strings.TrimSpace(strings.TrimPrefix(cleaned, "$ "))
 		if cleaned == "" {
 			continue
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // Recalled bundles everything an agent needs to know about the project from
@@ -125,9 +126,20 @@ func capChars(s string, n int) string {
 	if n <= 0 || len(s) <= n {
 		return s
 	}
-	cut := s[:n]
+	cut := s[:runeStart(s, n)]
 	if i := strings.LastIndex(cut, "\n"); i > n/2 {
 		cut = cut[:i]
 	}
 	return cut + "\n... (truncated)"
+}
+
+// runeStart returns the largest index <= i that lies on a rune boundary of s.
+func runeStart(s string, i int) int {
+	if i >= len(s) {
+		return len(s)
+	}
+	for i > 0 && !utf8.RuneStart(s[i]) {
+		i--
+	}
+	return i
 }

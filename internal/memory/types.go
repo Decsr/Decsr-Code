@@ -28,7 +28,7 @@ func (h Hit) String() string {
 // SearchOptions tunes a search query.
 type SearchOptions struct {
 	K                int     // top results to return (default 8)
-	HybridAlpha      float64 // weight of BM25 vs cosine; 1.0 = pure BM25 (default 0.5)
+	HybridAlpha      float64 // weight of BM25 vs cosine; 1.0 = pure BM25, 0 = pure cosine (zero value; only out-of-range values default to 0.5)
 	MaxChars         int     // total body chars across results (0 = unlimited)
 	RerankCandidates int     // how many BM25 candidates to rerank by cosine (default 4*K)
 }

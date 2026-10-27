@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type ftEntry struct {
@@ -202,8 +203,8 @@ func (m FileTreeModel) View() string {
 			maxW = 20
 		}
 		label := e.name
-		if len(label) > maxW {
-			label = label[:maxW-1] + "…"
+		if ansi.StringWidth(label) > maxW {
+			label = ansi.Truncate(label, maxW, "…")
 		}
 
 		var icon string

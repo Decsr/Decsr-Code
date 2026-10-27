@@ -459,3 +459,49 @@ func TestSysmonClip_KeepsTreeVisibleWhenFocused(t *testing.T) {
 		t.Errorf("expected the bottom (Session footer + tree) to remain visible while browsing:\n%s", out)
 	}
 }
+
+func TestSysmonUpdate_NetCounterDropYieldsZeroRate(t *testing.T) {
+	sm := NewSysmon()
+	sm.prevNetRecv = 5000
+	sm.prevNetSent = 5000
+	updated, _ := sm.Update(sysmonTickMsg{netRecv: 1000, netSent: 1000})
+	if updated.recvRate != 0 || updated.sentRate != 0 {
+		t.Fatalf("rates after counter drop = %v/%v, want 0/0", updated.recvRate, updated.sentRate)
+	}
+	if updated.prevNetRecv != 1000 {
+		t.Fatalf("prevNetRecv = %d, want baseline reset to 1000", updated.prevNetRecv)
+	}
+}
+
+func TestSysmonRefreshTree_CursorFollowsSelectedPath(t *testing.T) {
+	root := t.TempDir()
+	for _, n := range []string{"b.txt", "c.txt"} {
+		if err := os.WriteFile(filepath.Join(root, n), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sm := NewSysmon()
+	sm.SetProjectRoot(root)
+	sm.FocusTree()
+	for sm.projectTree[sm.treeCursor].relPath != "c.txt" {
+		sm.MoveTreeCursor(1)
+	}
+
+	// A new entry sorts above the selection.
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sm.refreshProjectTree()
+	if rel, _, ok := sm.SelectedTreeEntry(); !ok || rel != "c.txt" {
+		t.Fatalf("selected = %q, want c.txt", rel)
+	}
+
+	// Selected entry disappears: cursor is clamped, not out of range.
+	if err := os.Remove(filepath.Join(root, "c.txt")); err != nil {
+		t.Fatal(err)
+	}
+	sm.refreshProjectTree()
+	if _, _, ok := sm.SelectedTreeEntry(); !ok {
+		t.Fatalf("cursor %d out of range for %d entries", sm.treeCursor, len(sm.projectTree))
+	}
+}

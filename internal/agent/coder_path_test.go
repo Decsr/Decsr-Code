@@ -1,6 +1,10 @@
 package agent
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestSanitizeFilePath(t *testing.T) {
 	tests := []struct {
@@ -78,5 +82,52 @@ func TestSanitizeFilePath(t *testing.T) {
 				t.Errorf("sanitizeFilePath(%q, %q) = %q, want %q", tt.path, tt.root, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestSanitizeFilePath_RootOnlyStrippedAsPrefix(t *testing.T) {
+	if got := sanitizeFilePath("internal/app/server.go", "/app"); got != "internal/app/server.go" {
+		t.Errorf("got %q", got)
+	}
+	if got := sanitizeFilePath("app/server.go", "/app"); got != "server.go" {
+		t.Errorf("got %q", got)
+	}
+	if got := sanitizeFilePath("application/server.go", "/app"); got != "application/server.go" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestParseCmds_StripsPromptPrefix(t *testing.T) {
+	got := parseCmds("$ go test ./...\n`$ go vet ./...`")
+	want := []string{"go test ./...", "go vet ./..."}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestFindPathInRecent_RejectsProse(t *testing.T) {
+	if got := findPathInRecent([]string{"The response from `api/user.json` looks like this:"}); got != "" {
+		t.Errorf("prose sentence yielded path %q", got)
+	}
+	if got := findPathInRecent([]string{"**cmd/app/main.go**"}); got != "cmd/app/main.go" {
+		t.Errorf("bold header got %q", got)
+	}
+}
+
+func TestStreamAndWriteFiles_GuessedPathNeverOverwrites(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte("real\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	written := runStreamLines(t, root, []string{
+		"Example response:", "```json", `{"name":"alice"}`, "```",
+	})
+	data, _ := os.ReadFile(filepath.Join(root, "package.json"))
+	if string(data) != "real\n" || len(written) != 0 {
+		t.Errorf("existing file overwritten: %q written=%v", data, written)
+	}
+	written = runStreamLines(t, root, []string{"```html", "<html><body>x</body></html>", "```"})
+	if _, err := os.Stat(filepath.Join(root, "index.html")); err != nil || len(written) != 1 {
+		t.Errorf("guessed path should still create new files: %v written=%v", err, written)
 	}
 }

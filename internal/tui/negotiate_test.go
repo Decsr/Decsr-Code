@@ -180,3 +180,30 @@ func TestNegotiate_SetWaitingShowsThinking(t *testing.T) {
 		t.Errorf("expected the seeded brief to be visible:\n%s", m.vp.View())
 	}
 }
+
+func TestNegotiate_TypedLettersDoNotScrollTranscript(t *testing.T) {
+	m := NewNegotiate(nil, "")
+	m.SetSize(80, 24)
+	m.vp.SetContent(strings.Repeat("line\n", 200))
+	m.vp.GotoTop()
+
+	for _, k := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune{'f'}},
+		{Type: tea.KeyRunes, Runes: []rune{'d'}},
+		{Type: tea.KeyRunes, Runes: []rune{'j'}},
+		{Type: tea.KeySpace, Runes: []rune{' '}},
+	} {
+		m, _ = m.Update(k)
+	}
+	if m.vp.YOffset != 0 {
+		t.Fatalf("typing scrolled the transcript: YOffset=%d", m.vp.YOffset)
+	}
+	if m.input != "fdj " {
+		t.Fatalf("input = %q, want %q", m.input, "fdj ")
+	}
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	if m.vp.YOffset == 0 {
+		t.Fatal("pgdown should still scroll the transcript")
+	}
+}

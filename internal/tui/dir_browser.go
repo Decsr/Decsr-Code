@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // DirSelectedMsg is emitted when a directory is chosen as a project.
@@ -38,6 +39,7 @@ type DirBrowserModel struct {
 	showHidden bool
 	width      int
 	height     int
+	err        string // last navigation error, shown until the next successful move
 }
 
 // NewDirBrowser creates a directory browser starting at $HOME.
@@ -105,6 +107,20 @@ func (m *DirBrowserModel) reload() error {
 	return nil
 }
 
+// chdir switches to path and reloads the listing. If the directory cannot be
+// read, the previous directory and entries are kept and the error is recorded.
+func (m *DirBrowserModel) chdir(path string) bool {
+	prev := m.cwd
+	m.cwd = path
+	if err := m.reload(); err != nil {
+		m.cwd = prev
+		m.err = err.Error()
+		return false
+	}
+	m.err = ""
+	return true
+}
+
 func (m DirBrowserModel) Init() tea.Cmd { return nil }
 
 func (m DirBrowserModel) Update(msg tea.Msg) (DirBrowserModel, tea.Cmd) {
@@ -140,12 +156,12 @@ func (m DirBrowserModel) Update(msg tea.Msg) (DirBrowserModel, tea.Cmd) {
 			e := m.entries[m.cursor]
 			if e.name == ".." {
 				prevDir := filepath.Base(m.cwd)
-				m.cwd = filepath.Dir(m.cwd)
-				_ = m.reload()
-				for i, re := range m.entries {
-					if re.name == prevDir {
-						m.cursor = i
-						break
+				if m.chdir(filepath.Dir(m.cwd)) {
+					for i, re := range m.entries {
+						if re.name == prevDir {
+							m.cursor = i
+							break
+						}
 					}
 				}
 				return m, nil
@@ -155,8 +171,7 @@ func (m DirBrowserModel) Update(msg tea.Msg) (DirBrowserModel, tea.Cmd) {
 			if e.isProject {
 				return m, func() tea.Msg { return DirSelectedMsg{Path: fullPath} }
 			}
-			m.cwd = fullPath
-			_ = m.reload()
+			m.chdir(fullPath)
 
 		case "o", "O":
 			// Force-select current highlighted directory as project.
@@ -175,12 +190,12 @@ func (m DirBrowserModel) Update(msg tea.Msg) (DirBrowserModel, tea.Cmd) {
 		case "backspace", "left", "h":
 			if m.cwd != "/" {
 				prevDir := filepath.Base(m.cwd)
-				m.cwd = filepath.Dir(m.cwd)
-				_ = m.reload()
-				for i, re := range m.entries {
-					if re.name == prevDir {
-						m.cursor = i
-						break
+				if m.chdir(filepath.Dir(m.cwd)) {
+					for i, re := range m.entries {
+						if re.name == prevDir {
+							m.cursor = i
+							break
+						}
 					}
 				}
 			}
@@ -191,8 +206,7 @@ func (m DirBrowserModel) Update(msg tea.Msg) (DirBrowserModel, tea.Cmd) {
 
 		case "~":
 			if home, err := os.UserHomeDir(); err == nil {
-				m.cwd = home
-				_ = m.reload()
+				m.chdir(home)
 			}
 
 		case "esc", "q":
@@ -212,7 +226,7 @@ func (m DirBrowserModel) View() string {
 		Foreground(crt.bright).
 		Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	sep := strings.Repeat("─", m.width)
+	sep := strings.Repeat("─", max(m.width, 0))
 
 	header := titleStyle.Render("Open Project") + "  " + pathStyle.Render(m.cwd)
 
@@ -228,13 +242,16 @@ func (m DirBrowserModel) View() string {
 	for i := start; i < len(m.entries) && i < start+rows; i++ {
 		e := m.entries[i]
 		maxW := m.width - 6
+		if maxW < 1 {
+			maxW = 1
+		}
 
 		label := e.name + "/"
 		if e.name == ".." {
 			label = ".."
 		}
-		if len(label) > maxW {
-			label = label[:maxW-1] + "…"
+		if ansi.StringWidth(label) > maxW {
+			label = ansi.Truncate(label, maxW, "…")
 		}
 
 		var rendered string
@@ -263,10 +280,13 @@ func (m DirBrowserModel) View() string {
 			pct = m.cursor * 100 / (len(m.entries) - 1)
 		}
 		lines = append(lines, dimStyle.Render(
-			strings.Repeat("─", m.width-8)+"  "+
+			strings.Repeat("─", max(m.width-8, 0))+"  "+
 				strings.Repeat("░", pct/10)+strings.Repeat("·", 10-pct/10)))
 	}
 
+	if m.err != "" {
+		lines = append(lines, styleError.Render("  "+m.err))
+	}
 	lines = append(lines, sep)
 
 	legend := "↑↓ navigate  Enter "

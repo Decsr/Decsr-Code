@@ -137,6 +137,11 @@ func (r *OllamaRunner) streamResponseFromBytes(data []byte, inputText string, ch
 			ch <- Token{Done: true}
 			return
 		}
+		if chunk.Error != "" {
+			ch <- Token{Error: fmt.Errorf("ollama: %s", chunk.Error)}
+			ch <- Token{Done: true}
+			return
+		}
 		if chunk.Message.Content != "" {
 			buf.WriteString(chunk.Message.Content)
 		}
@@ -275,6 +280,7 @@ type ollamaChatResponse struct {
 	Done            bool              `json:"done"`
 	PromptEvalCount int               `json:"prompt_eval_count"` // input tokens
 	EvalCount       int               `json:"eval_count"`        // output tokens
+	Error           string            `json:"error"`
 }
 
 // Unload asks Ollama to evict the given model from memory immediately by

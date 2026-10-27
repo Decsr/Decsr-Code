@@ -4,8 +4,12 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/binary"
+	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Decsr/Decsr-Code/internal/chunker"
 )
@@ -85,5 +89,73 @@ func TestIndex_Remove(t *testing.T) {
 		if h.Path == "x.go" {
 			t.Errorf("expected x.go to be removed, found in hits: %+v", hits)
 		}
+	}
+}
+
+func TestIndex_AddIsIdempotentPerPath(t *testing.T) {
+	idx := New(&fakeEmbedder{}).(*memIndex)
+	c := []chunker.Chunk{{Name: "A", Body: "a"}}
+	for i := 0; i < 2; i++ {
+		if err := idx.Add(context.Background(), c, []string{"x.go"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(idx.entries) != 1 {
+		t.Fatalf("want 1 entry after re-adding same path, got %d", len(idx.entries))
+	}
+}
+
+type recordingEmbedder struct {
+	fakeEmbedder
+	max int
+}
+
+func (r *recordingEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	for _, s := range texts {
+		if len(s) > r.max {
+			r.max = len(s)
+		}
+		if !utf8.ValidString(s) {
+			return nil, errors.New("invalid utf8 sent to embedder")
+		}
+	}
+	return r.fakeEmbedder.Embed(ctx, texts)
+}
+
+func TestIndex_AddTruncatesEmbedInput(t *testing.T) {
+	emb := &recordingEmbedder{}
+	idx := New(emb)
+	body := strings.Repeat("việt日本😀", 5000)
+	if err := idx.Add(context.Background(), []chunker.Chunk{{Body: body}}, []string{"big.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if emb.max == 0 || emb.max > maxEmbedBytes {
+		t.Fatalf("embed input len = %d, want 0 < len <= %d", emb.max, maxEmbedBytes)
+	}
+}
+
+func TestIndex_PersistAtomic(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "sub", "chunks.gob")
+	idx := New(&fakeEmbedder{})
+	_ = idx.Add(context.Background(), []chunker.Chunk{{Name: "A", Body: "a"}}, []string{"x.go"})
+	for i := 0; i < 2; i++ {
+		if err := idx.Persist(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ents, _ := os.ReadDir(filepath.Dir(p))
+	if len(ents) != 1 {
+		t.Fatalf("want only the final file, got %v", ents)
+	}
+	// A corrupt existing file must be replaced wholesale, never half-written.
+	if err := os.WriteFile(p, []byte("garbage"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Persist(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := New(&fakeEmbedder{}).Load(p); err != nil {
+		t.Fatal(err)
 	}
 }

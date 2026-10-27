@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -60,6 +62,27 @@ func totalNiceToHave(items map[string][]string) int {
 	return total
 }
 
+// niceToHavePhaseOrder returns the known phases first (in a fixed order),
+// followed by any other keys sorted alphabetically, so no collected item is
+// silently dropped from the output file.
+func niceToHavePhaseOrder(items map[string][]string) []string {
+	known := []string{"Could Have (from plan)", "Won't Have (from plan)", "Code Review", "QA Review", "UX/UI", "Security", "PM Deferred"}
+	seen := make(map[string]bool, len(known))
+	order := make([]string, 0, len(items))
+	for _, k := range known {
+		seen[k] = true
+		order = append(order, k)
+	}
+	var extra []string
+	for k := range items {
+		if !seen[k] {
+			extra = append(extra, k)
+		}
+	}
+	sort.Strings(extra)
+	return append(order, extra...)
+}
+
 // saveNiceToHaveFile writes all collected nice-to-have suggestions to a markdown file.
 func saveNiceToHaveFile(ws artifacts.Workspace, items map[string][]string, log *slog.Logger) {
 	if len(items) == 0 {
@@ -70,7 +93,7 @@ func saveNiceToHaveFile(ws artifacts.Workspace, items map[string][]string, log *
 	sb.WriteString("# Nice to Have / Recommendations\n\n")
 	sb.WriteString("Items deferred from MoSCoW plan and suggestions from review phases.\n\n")
 
-	for _, phase := range []string{"Could Have (from plan)", "Won't Have (from plan)", "Code Review", "UX/UI", "Security"} {
+	for _, phase := range niceToHavePhaseOrder(items) {
 		phaseItems := items[phase]
 		if len(phaseItems) == 0 {
 			continue
@@ -387,19 +410,16 @@ func isProjectScaffolded(root string) bool {
 }
 
 // bootstrapGoModule creates a minimal go.mod for greenfield Go projects so
-// the tester step can write valid imports before the coder runs. Returns the
-// inferred module path (or empty when go.mod already exists / non-Go project).
-func bootstrapGoModule(root, projectName string) (string, error) {
+// the tester step can write valid imports before the coder runs. modulePath
+// (from config) wins when set; otherwise projectName is sanitized into a valid
+// module path. Returns the module path (or empty when go.mod already exists).
+func bootstrapGoModule(root, projectName, modulePath string) (string, error) {
 	if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
 		return "", nil
 	}
-	module := strings.ToLower(strings.TrimSpace(projectName))
+	module := strings.TrimSpace(modulePath)
 	if module == "" {
-		module = filepath.Base(root)
-	}
-	module = strings.ReplaceAll(module, " ", "-")
-	if module == "" || module == "." || module == "/" {
-		return "", nil
+		module = sanitizeModuleName(projectName)
 	}
 	content := fmt.Sprintf("module %s\n\ngo 1.24\n", module)
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(content), 0o600); err != nil {
@@ -408,17 +428,38 @@ func bootstrapGoModule(root, projectName string) (string, error) {
 	return module, nil
 }
 
+var nonModuleChars = regexp.MustCompile(`[^a-z0-9._-]+`)
+
+// sanitizeModuleName turns a free-form title into a valid, simple module path:
+// lowercase, only [a-z0-9._-], runs collapsed to "-", trimmed, "app" fallback.
+func sanitizeModuleName(name string) string {
+	m := nonModuleChars.ReplaceAllString(strings.ToLower(name), "-")
+	m = regexp.MustCompile(`-{2,}`).ReplaceAllString(m, "-")
+	m = strings.Trim(m, "-._")
+	if m == "" {
+		return "app"
+	}
+	return m
+}
+
 // specImpliesGo reports whether the user's task description (title + scope hints)
 // targets the Go language. Used to decide whether to bootstrap go.mod for TDD.
 func specImpliesGo(spec agent.TaskSpec, configuredLang string) bool {
-	if strings.EqualFold(configuredLang, "go") {
-		return true
-	}
-	joined := strings.ToLower(spec.Title + " " + spec.Description + " " + strings.Join(spec.Constraints, " "))
+	joined := " " + strings.ToLower(spec.Title+" "+spec.Description+" "+strings.Join(spec.Constraints, " ")) + " "
 	for _, kw := range []string{" golang", " in go ", " w go ", "języku go", "language go", "język go"} {
-		if strings.Contains(" "+joined+" ", kw) {
+		if strings.Contains(joined, kw) {
 			return true
 		}
 	}
-	return false
+	if !strings.EqualFold(configuredLang, "go") {
+		return false
+	}
+	// The configured language defaults to "go", so it only counts when the
+	// spec does not explicitly target another language.
+	for _, kw := range []string{"python", "javascript", "typescript", "node.js", "nodejs", "rust", "java ", "ruby", "c#", "php", "kotlin", "swift"} {
+		if strings.Contains(joined, kw) {
+			return false
+		}
+	}
+	return true
 }

@@ -21,16 +21,17 @@ const (
 
 // GitPanelModel is a lazygit-inspired git panel overlay.
 type GitPanelModel struct {
-	gc        *gitclient.GitClient
-	files     []gitclient.FileStatus
-	cursor    int
-	focus     gitFocus
-	diff      viewport.Model
-	commitMsg string
-	statusMsg string
-	err       string
-	width     int
-	height    int
+	gc           *gitclient.GitClient
+	files        []gitclient.FileStatus
+	cursor       int
+	focus        gitFocus
+	diff         viewport.Model
+	commitMsg    string
+	confirmReset bool // true while waiting for y/n on a file reset
+	statusMsg    string
+	err          string
+	width        int
+	height       int
 }
 
 // NewGitPanel creates a GitPanelModel for the given repo root.
@@ -110,6 +111,20 @@ func (m GitPanelModel) Update(msg tea.Msg) (GitPanelModel, tea.Cmd) {
 }
 
 func (m GitPanelModel) updateFiles(msg tea.KeyMsg) (GitPanelModel, tea.Cmd) {
+	if m.confirmReset {
+		m.confirmReset = false
+		if k := msg.String(); (k == "y" || k == "Y") && len(m.files) > 0 {
+			f := m.files[m.cursor]
+			if err := m.gc.ResetFile(f.Path); err != nil {
+				m.statusMsg = "error: " + err.Error()
+			} else {
+				m.statusMsg = "reset: " + f.Path
+			}
+			return m, func() tea.Msg { return GitRefreshMsg{} }
+		}
+		m.statusMsg = "reset cancelled"
+		return m, nil
+	}
 	switch msg.String() {
 	case "esc", "q":
 		return m, func() tea.Msg { return GitPanelClosedMsg{} }
@@ -144,13 +159,8 @@ func (m GitPanelModel) updateFiles(msg tea.KeyMsg) (GitPanelModel, tea.Cmd) {
 		if len(m.files) == 0 {
 			break
 		}
-		f := m.files[m.cursor]
-		if err := m.gc.ResetFile(f.Path); err != nil {
-			m.statusMsg = "error: " + err.Error()
-		} else {
-			m.statusMsg = "reset: " + f.Path
-		}
-		return m, func() tea.Msg { return GitRefreshMsg{} }
+		m.confirmReset = true
+		m.statusMsg = "discard changes to " + m.files[m.cursor].Path + "? (y/n)"
 	case "tab":
 		m.focus = gitFocusDiff
 	case "c":
@@ -192,13 +202,14 @@ func (m GitPanelModel) updateCommit(msg tea.KeyMsg) (GitPanelModel, tea.Cmd) {
 		}
 		return m, func() tea.Msg { return GitRefreshMsg{} }
 	case "backspace":
-		if len(m.commitMsg) > 0 {
-			m.commitMsg = m.commitMsg[:len(m.commitMsg)-1]
+		if r := []rune(m.commitMsg); len(r) > 0 {
+			m.commitMsg = string(r[:len(r)-1])
 		}
 	default:
-		// Only printable single chars
-		if len(msg.String()) == 1 {
-			m.commitMsg += msg.String()
+		// Typed or pasted text (any width); line breaks become spaces.
+		if len(msg.Runes) > 0 && !msg.Alt {
+			text := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(string(msg.Runes))
+			m.commitMsg += text
 		}
 	}
 	return m, nil
@@ -214,6 +225,11 @@ func (m *GitPanelModel) SetSize(w, h int) {
 	}
 	m.diff.Width = diffW
 	m.diff.Height = diffH
+}
+
+// fileRows is the number of file entries that fit in the files panel.
+func (m GitPanelModel) fileRows() int {
+	return max(m.height-7, 3)
 }
 
 func (m GitPanelModel) View() string {
@@ -243,7 +259,15 @@ func (m GitPanelModel) View() string {
 	if len(m.files) == 0 {
 		filesSB.WriteString(dimStyle.Render("  nothing to commit") + "\n")
 	}
-	for i, f := range m.files {
+	// Window the list so the cursor stays visible and the panel never grows
+	// past the terminal height (the diff pane is height-7 rows).
+	rows := m.fileRows()
+	start := 0
+	if m.cursor >= rows {
+		start = m.cursor - rows + 1
+	}
+	for i := start; i < len(m.files) && i < start+rows; i++ {
+		f := m.files[i]
 		code := f.Code
 		name := f.Path
 		var line string

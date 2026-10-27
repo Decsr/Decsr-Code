@@ -564,10 +564,10 @@ func parseArbitrateAllResult(text string) ArbitrateAllResult {
 		switch {
 		case strings.Contains(upper, "===VERDICT==="):
 			section = "verdict"
-		case section == "verdict" && strings.Contains(upper, "FIX"):
+		case section == "verdict" && strings.HasPrefix(strings.TrimLeft(upper, "*_`# "), "FIX"):
 			result.Pass = false
 			section = ""
-		case section == "verdict" && strings.Contains(upper, "PASS"):
+		case section == "verdict" && strings.HasPrefix(strings.TrimLeft(upper, "*_`# "), "PASS"):
 			result.Pass = true
 			section = ""
 		case strings.Contains(upper, "===REVIEW_SCOPE==="):
@@ -687,10 +687,13 @@ func (a *PMAgent) CompactRepository(ctx context.Context, projectCtx string, maxT
 // returned without invoking the LLM. Cache is invalidated automatically when
 // either the user input or the project context changes by a single byte.
 func (a *PMAgent) NegotiateTask(ctx context.Context, input, projectCtx string, humanCh <-chan string) (TaskSpec, error) {
-	cacheKey := negotiateCacheKey(input, projectCtx)
-	if spec, ok := a.loadCachedTaskSpec(cacheKey); ok {
-		a.emit(bus.MsgEvent, fmt.Sprintf("reusing cached task spec (key=%s)", cacheKey[:8]))
-		return spec, nil
+	cacheKey := ""
+	if strings.TrimSpace(input) != "" {
+		cacheKey = negotiateCacheKey(input, projectCtx)
+		if spec, ok := a.loadCachedTaskSpec(cacheKey); ok {
+			a.emit(bus.MsgEvent, fmt.Sprintf("reusing cached task spec (key=%s)", cacheKey[:8]))
+			return spec, nil
+		}
 	}
 
 	systemPrompt := fmt.Sprintf(prompts.MustLoad("pm-negotiate"), projectCtx)
@@ -709,6 +712,11 @@ func (a *PMAgent) NegotiateTask(ctx context.Context, input, projectCtx string, h
 				return TaskSpec{}, fmt.Errorf("pm negotiate: human channel closed before any input")
 			}
 			messages = append(messages, runner.ConvMessage{Role: "user", Content: reply})
+			cacheKey = negotiateCacheKey(reply, projectCtx)
+			if spec, ok := a.loadCachedTaskSpec(cacheKey); ok {
+				a.emit(bus.MsgEvent, fmt.Sprintf("reusing cached task spec (key=%s)", cacheKey[:8]))
+				return spec, nil
+			}
 		case <-ctx.Done():
 			return TaskSpec{}, ctx.Err()
 		}
@@ -817,24 +825,34 @@ func parseRnDAction(output string) RnDAction {
 
 // stripMarker removes the first case-insensitive occurrence of marker from s.
 func stripMarker(s, marker string) (string, bool) {
-	i := strings.Index(strings.ToUpper(s), strings.ToUpper(marker))
+	i := indexFold(s, marker)
 	if i < 0 {
 		return s, false
 	}
 	return s[:i] + s[i+len(marker):], true
 }
 
+// indexFold returns the byte offset in s of the first ASCII case-insensitive
+// occurrence of marker, or -1. Offsets are always into s itself.
+func indexFold(s, marker string) int {
+	for i := 0; i+len(marker) <= len(s); i++ {
+		if strings.EqualFold(s[i:i+len(marker)], marker) {
+			return i
+		}
+	}
+	return -1
+}
+
 // cutBlock extracts the text between the first case-insensitive start and end
 // markers, returning the inner text and s with the whole block removed. When
 // start is present but end is missing, the rest of s after start is taken.
 func cutBlock(s, start, end string) (inner, remainder string, ok bool) {
-	up := strings.ToUpper(s)
-	i := strings.Index(up, strings.ToUpper(start))
+	i := indexFold(s, start)
 	if i < 0 {
 		return "", s, false
 	}
 	innerStart := i + len(start)
-	j := strings.Index(up[innerStart:], strings.ToUpper(end))
+	j := indexFold(s[innerStart:], end)
 	if j < 0 {
 		return s[innerStart:], s[:i], true
 	}

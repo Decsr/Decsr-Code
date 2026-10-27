@@ -3,6 +3,7 @@ package bus
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 )
@@ -58,6 +59,7 @@ func (b *Bus) handleSocketConn(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 
 	sub := b.Subscribe()
+	defer b.Unsubscribe(sub)
 	readerDone := make(chan struct{})
 
 	// Writer goroutine: fan bus messages to conn.
@@ -80,16 +82,16 @@ func (b *Bus) handleSocketConn(conn net.Conn) {
 	}()
 
 	// Reader: publish incoming messages from conn to bus.
-	dec := json.NewDecoder(conn)
+	// The limiter is re-armed before each Decode so a single value can never
+	// buffer more than maxSocketMessageSize+1 bytes; an oversized value hits
+	// EOF mid-decode and the connection is dropped.
+	lr := &io.LimitedReader{R: conn}
+	dec := json.NewDecoder(lr)
 	for {
 		var m Message
+		lr.N = maxSocketMessageSize + 1
 		if err := dec.Decode(&m); err != nil {
 			close(readerDone) // signal writer to stop
-			return
-		}
-		// Reject oversized payloads by checking serialized size.
-		if raw, err := json.Marshal(m); err == nil && int64(len(raw)) > maxSocketMessageSize {
-			close(readerDone)
 			return
 		}
 		b.Publish(m)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -118,4 +119,16 @@ func TestOllamaRunner_SendsUnlimitedNumPredict(t *testing.T) {
 	if captured.Options.NumPredict != ollamaMaxPredict {
 		t.Errorf("expected num_predict=%d, got %d", ollamaMaxPredict, captured.Options.NumPredict)
 	}
+}
+
+func TestOllamaStreamResponseFromBytes_MidStreamError(t *testing.T) {
+	r := &OllamaRunner{}
+	ch := make(chan Token, 16)
+	go r.streamResponseFromBytes([]byte(`{"message":{"content":"hi"},"done":false}`+"\n"+`{"error":"model crashed"}`+"\n"), "", ch)
+	for tok := range ch {
+		if tok.Error != nil && strings.Contains(tok.Error.Error(), "model crashed") {
+			return
+		}
+	}
+	t.Fatal("expected error token for mid-stream error")
 }

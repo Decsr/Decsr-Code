@@ -285,3 +285,31 @@ func TestNegotiateCacheKey_DiffersOnInputChange(t *testing.T) {
 		t.Error("expected whitespace-trimmed input to produce same key")
 	}
 }
+
+func TestNegotiateTask_EmptyInputDoesNotReplayPreviousTask(t *testing.T) {
+	b := bus.New()
+	defer b.Close()
+	ws, err := artifacts.EnsureWorkspace(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := func(title string) string {
+		return "===TASKSPEC===\nTITLE: " + title + "\nSCOPE: feature\nDESCRIPTION:\nd\nACCEPTANCE_CRITERIA:\n- a\n===END==="
+	}
+	run := func(reply, title string) TaskSpec {
+		pm := NewPMAgent(b, &runner.MockRunner{Responses: []string{spec(title)}}, ws, nil, "")
+		ch := make(chan string, 1)
+		ch <- reply
+		got, err := pm.NegotiateTask(context.Background(), "", "ctx", ch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := run("build A", "Task A"); got.Title != "Task A" {
+		t.Fatalf("first = %q", got.Title)
+	}
+	if got := run("build B", "Task B"); got.Title != "Task B" {
+		t.Errorf("second empty-input task replayed cached spec: %q", got.Title)
+	}
+}

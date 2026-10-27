@@ -33,17 +33,24 @@ func New(root string) *GitClient {
 
 // Status returns modified/staged/untracked files.
 func (g *GitClient) Status() ([]FileStatus, error) {
-	out, err := g.run("status", "--porcelain")
+	out, err := g.run("status", "--porcelain=v1", "-z")
 	if err != nil {
 		return nil, err
 	}
 	var files []FileStatus
-	for _, line := range strings.Split(out, "\n") {
-		if len(line) < 3 {
+	entries := strings.Split(out, "\x00")
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
+		if len(entry) < 4 {
 			continue
 		}
-		code := line[:2]
-		path := strings.TrimSpace(line[2:])
+		code := entry[:2]
+		path := entry[3:]
+		// Renames and copies are followed by an extra NUL-separated entry
+		// holding the original path; skip it.
+		if code[0] == 'R' || code[0] == 'C' || code[1] == 'R' || code[1] == 'C' {
+			i++
+		}
 		files = append(files, FileStatus{
 			Path:     path,
 			Code:     code,
@@ -66,13 +73,13 @@ func (g *GitClient) StagedDiff(path string) (string, error) {
 
 // Stage stages a file.
 func (g *GitClient) Stage(path string) error {
-	_, err := g.run("add", path)
+	_, err := g.run("add", "--", path)
 	return err
 }
 
 // Unstage removes a file from staging.
 func (g *GitClient) Unstage(path string) error {
-	_, err := g.run("restore", "--staged", path)
+	_, err := g.run("restore", "--staged", "--", path)
 	return err
 }
 

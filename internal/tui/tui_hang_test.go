@@ -5,7 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/Decsr/Decsr-Code/internal/config"
+	"github.com/Decsr/Decsr-Code/internal/runner"
 )
 
 func TestChat_TokenMsgErrorFinalisesTurn(t *testing.T) {
@@ -43,5 +46,32 @@ func TestModel_StatusBarTickHandledWithOverlayOpen(t *testing.T) {
 	_, cmd := m.Update(statusBarTickMsg{})
 	if cmd == nil {
 		t.Fatal("expected tick to re-arm while overlay open")
+	}
+}
+
+func TestChat_CancelIgnoresStaleStreamMessages(t *testing.T) {
+	m := NewChat(nil, "sys")
+	m.waiting = true
+	m.lines = append(m.lines, chatLine{role: "user", content: "hi"})
+
+	got, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if got.waiting {
+		t.Fatal("expected waiting to be cleared by Esc")
+	}
+	nLines, nHist := len(got.lines), len(got.history)
+
+	ch := make(chan runner.Token)
+	got, cmd := got.Update(chatStreamStartMsg{ch: ch, gen: 0})
+	if cmd != nil {
+		t.Error("stale stream start must not continue draining")
+	}
+	got, cmd = got.Update(chatRawToken{text: "late", done: true, ch: ch, gen: 0})
+	if cmd != nil {
+		t.Error("stale token must not continue draining")
+	}
+	got, _ = got.Update(ChatTokenMsg{Text: "late", Done: true, Gen: 0})
+	if len(got.lines) != nLines || len(got.history) != nHist {
+		t.Fatalf("stale messages mutated chat: lines %d->%d history %d->%d",
+			nLines, len(got.lines), nHist, len(got.history))
 	}
 }

@@ -236,8 +236,15 @@ func (m SysmonModel) Update(msg tea.Msg) (SysmonModel, tea.Cmd) {
 
 	// Calculate network rates (bytes/s).
 	if m.prevNetRecv > 0 {
-		m.recvRate = float64(tick.netRecv-m.prevNetRecv) / sysmonTickInterval.Seconds()
-		m.sentRate = float64(tick.netSent-m.prevNetSent) / sysmonTickInterval.Seconds()
+		// Counters can drop (e.g. an interface disappears); treat that as 0
+		// instead of letting the uint64 subtraction wrap around.
+		m.recvRate, m.sentRate = 0, 0
+		if tick.netRecv >= m.prevNetRecv {
+			m.recvRate = float64(tick.netRecv-m.prevNetRecv) / sysmonTickInterval.Seconds()
+		}
+		if tick.netSent >= m.prevNetSent {
+			m.sentRate = float64(tick.netSent-m.prevNetSent) / sysmonTickInterval.Seconds()
+		}
 	}
 	m.prevNetRecv = tick.netRecv
 	m.prevNetSent = tick.netSent
@@ -694,7 +701,23 @@ func (m *SysmonModel) refreshProjectTree() {
 	rootName := filepath.Base(m.projectRoot)
 	entries := []projectTreeEntry{{relPath: ".", name: rootName + "/", depth: 0, isDir: true}}
 	m.walkProjectTree(".", 0, &entries)
+
+	// The cursor is an index: re-locate the selected entry by path so it
+	// doesn't drift when entries are added or removed above it.
+	selected := ""
+	if m.treeCursor >= 0 && m.treeCursor < len(m.projectTree) {
+		selected = m.projectTree[m.treeCursor].relPath
+	}
 	m.projectTree = entries
+	for i, e := range entries {
+		if selected != "" && e.relPath == selected {
+			m.treeCursor = i
+			return
+		}
+	}
+	if m.treeCursor >= len(entries) {
+		m.treeCursor = max(len(entries)-1, 0)
+	}
 }
 
 func (m *SysmonModel) walkProjectTree(rel string, depth int, entries *[]projectTreeEntry) {

@@ -25,6 +25,7 @@ func parseReviewSections(text string, niceToHaveHeaders ...string) reviewSection
 	var mustFix, niceToHave []string
 	section := ""
 	approved := false
+	verdictSet := false
 	foundAnySection := false
 
 	for _, line := range lines {
@@ -38,7 +39,10 @@ func parseReviewSections(text string, niceToHaveHeaders ...string) reviewSection
 			section = "nicetohave"
 			foundAnySection = true
 		case isApproveHeading(norm):
-			approved = strings.Contains(strings.ToUpper(norm), "YES")
+			if v, ok := approveVerdict(norm); ok && !verdictSet {
+				approved = v
+				verdictSet = true
+			}
 			section = ""
 			foundAnySection = true
 		default:
@@ -69,6 +73,29 @@ func parseReviewSections(text string, niceToHaveHeaders ...string) reviewSection
 		Approved:   approved,
 		Parsed:     foundAnySection,
 	}
+}
+
+// approveVerdict extracts the explicit verdict from an approval line such as
+// "Approve?: YES". Only the first token after the label counts, so trailing
+// commentary ("NO (would be YES after fix)") cannot flip it.
+func approveVerdict(norm string) (approved, ok bool) {
+	rest := norm
+	if i := strings.Index(norm, ":"); i >= 0 {
+		rest = norm[i+1:]
+	} else if i := strings.IndexAny(norm, " \t"); i >= 0 {
+		rest = norm[i+1:]
+	}
+	fields := strings.Fields(strings.Trim(rest, "*_` "))
+	if len(fields) == 0 {
+		return false, false
+	}
+	switch strings.ToUpper(strings.Trim(fields[0], "*_`.,;:!()")) {
+	case "YES", "APPROVE", "APPROVED":
+		return true, true
+	case "NO", "REJECT", "REJECTED":
+		return false, true
+	}
+	return false, false
 }
 
 // isMustFixHeading returns true if the normalized heading indicates a must-fix section.

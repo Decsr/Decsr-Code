@@ -79,8 +79,7 @@ func (w Workspace) WriteFile(name string, data []byte) error {
 	if strings.Contains(name, "..") {
 		return fmt.Errorf("write %s: path traversal rejected", name)
 	}
-	path := w.Path(name)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := safefile.WriteFile(w.Dir, name, data, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", name, err)
 	}
 	return nil

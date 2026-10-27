@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -575,10 +576,7 @@ func TestModel_ArtifactViewerApproveUsesTaskRunner(t *testing.T) {
 	m.overlay = overlayArtifact
 	m.gateArtifact = "task_spec.json"
 
-	updated, cmd := m.Update(artifactViewerClosedMsg{approved: true})
-	if cmd == nil {
-		t.Fatal("expected waitForBusEvent command after closing artifact viewer")
-	}
+	updated, _ := m.Update(artifactViewerClosedMsg{approved: true})
 	got := updated.(Model)
 
 	if got.overlay != overlayNone {
@@ -589,5 +587,23 @@ func TestModel_ArtifactViewerApproveUsesTaskRunner(t *testing.T) {
 	}
 	if !got.approvedGates["task_spec.json"] {
 		t.Fatal("expected task_spec.json to be marked approved")
+	}
+}
+
+func TestModel_OverlayCloseDoesNotRearmBusWaiter(t *testing.T) {
+	ch := make(chan bus.Message) // never delivers: a bus wait would block
+	m := New(ch, "/tmp/project", "/tmp/project/.decsr", nil, config.Config{})
+	m.overlay = overlayArtifact
+
+	_, cmd := m.Update(artifactViewerClosedMsg{})
+	if cmd == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() { cmd(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("closing an overlay started another bus waiter")
 	}
 }

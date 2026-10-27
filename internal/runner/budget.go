@@ -20,15 +20,30 @@ func (r *BudgetRunner) Complete(ctx context.Context, req CompletionRequest) (<-c
 
 	req.SystemPrompt = tokenutil.Truncate(req.SystemPrompt, systemBudget)
 
-	for i := range req.Messages {
-		msgTokens := tokenutil.EstimateTokens(req.Messages[i].Content)
-		if msgTokens > messageBudget {
-			req.Messages[i].Content = tokenutil.Truncate(req.Messages[i].Content, messageBudget)
+	// Allocate the message budget from the newest message backwards so the
+	// current request is always kept; older history is truncated or dropped.
+	if n := len(req.Messages); n > 0 {
+		kept := make([]ConvMessage, n)
+		copy(kept, req.Messages)
+		start := n
+		for i := n - 1; i >= 0; i-- {
+			if i < n-1 && messageBudget <= 0 {
+				break
+			}
+			tokens := tokenutil.EstimateTokens(kept[i].Content)
+			if tokens > messageBudget {
+				kept[i].Content = tokenutil.Truncate(kept[i].Content, messageBudget)
+				messageBudget = 0
+				start = i
+				if i < n-1 {
+					break
+				}
+				continue
+			}
+			messageBudget -= tokens
+			start = i
 		}
-		messageBudget -= tokenutil.EstimateTokens(req.Messages[i].Content)
-		if messageBudget <= 0 {
-			break
-		}
+		req.Messages = kept[start:]
 	}
 
 	return r.inner.Complete(ctx, req)

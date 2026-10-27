@@ -234,6 +234,9 @@ func (s *Store) IndexFile(ctx context.Context, relPath string) (bool, error) {
 	// the BM25 index.
 	if s.emb != nil && len(chunks) > 0 {
 		if err := s.embedChunks(ctx, insertedIDs, chunks); err != nil {
+			// Clear the recorded hash so the next IndexFile retries embeddings
+			// instead of treating the file as up to date.
+			_, _ = s.db.ExecContext(ctx, `UPDATE files SET hash = '' WHERE path = ?`, relPath)
 			// non-fatal — BM25 still works
 			return true, fmt.Errorf("memory: embed (non-fatal): %w", err)
 		}
@@ -437,6 +440,7 @@ func (s *Store) rerankWithCosine(ctx context.Context, hits []Hit, qvec []float32
 		return
 	}
 	defer func() { _ = rows.Close() }()
+	scored := make([]bool, len(hits))
 	for rows.Next() {
 		var id int64
 		var dim int
@@ -449,9 +453,18 @@ func (s *Store) rerankWithCosine(ctx context.Context, hits []Hit, qvec []float32
 			continue
 		}
 		vec := decodeVec(raw, dim)
-		hits[idx].Cosine = cosine(qvec, vec)
+		if c, ok := cosine(qvec, vec); ok {
+			hits[idx].Cosine = c
+			scored[idx] = true
+		}
 	}
 	for i := range hits {
+		if !scored[i] {
+			// No usable vector: fall back to BM25 alone rather than
+			// penalising the chunk as maximally dissimilar.
+			hits[i].Score = hits[i].BM25
+			continue
+		}
 		hits[i].Score = alpha*hits[i].BM25 + (1-alpha)*hits[i].Cosine
 	}
 }
@@ -547,9 +560,11 @@ func decodeVec(b []byte, dim int) []float32 {
 	return out
 }
 
-func cosine(a, b []float32) float64 {
+// cosine returns the similarity mapped to [0, 1]; ok is false when the
+// vectors are missing, differ in dimension, or have zero norm.
+func cosine(a, b []float32) (float64, bool) {
 	if len(a) == 0 || len(b) == 0 || len(a) != len(b) {
-		return 0
+		return 0, false
 	}
 	var dot, na, nb float64
 	for i := range a {
@@ -560,11 +575,11 @@ func cosine(a, b []float32) float64 {
 		nb += bf * bf
 	}
 	if na == 0 || nb == 0 {
-		return 0
+		return 0, false
 	}
 	v := dot / (math.Sqrt(na) * math.Sqrt(nb))
 	// cosine is in [-1, 1]; map to [0, 1] for blending with BM25.
-	return (v + 1) / 2
+	return (v + 1) / 2, true
 }
 
 // embedderModelName best-effort introspection so we can store which model
