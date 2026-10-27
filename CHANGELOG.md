@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-10-27
+
+### Changed
+- CI and release workflows moved to `actions/checkout` v7, `actions/setup-go`
+  v7 and `goreleaser/goreleaser-action` v7 (Node 24 runtime).
+- README: the retired Go Report Card badge is replaced with a Go Reference
+  (pkg.go.dev) badge.
+
+### Fixed
+- Release binaries are no longer stamped `+dirty`: GoReleaser's `dist/` output
+  directory is now git-ignored.
+
 ## [0.1.0] - 2026-10-23
 
 ### Added
