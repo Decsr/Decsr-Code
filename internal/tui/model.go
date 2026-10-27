@@ -905,6 +905,10 @@ func (m Model) updateOverlay(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	return paintBackground(m.view(), m.width, m.height)
+}
+
+func (m Model) view() string {
 	if m.quitting {
 		return "bye\n"
 	}

@@ -86,7 +86,9 @@ func (m modelSetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m modelSetupModel) View() string { return m.setup.View() }
+func (m modelSetupModel) View() string {
+	return paintBackground(m.setup.View(), m.width, m.height)
+}
 
 // RunModelSetup shows only the per-agent project setup screen and returns the
 // (possibly updated) config. Used by the pause-to-change-model flow.
