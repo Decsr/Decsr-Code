@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="225" viewBox="0 0 1000 225" role="img" aria-label="DECSR pipeline: context, negotiate, decompose, tests, code, build/fix, review, done">
+<title>DECSR pipeline: context, negotiate, decompose, tests, code, build/fix, review, done</title>
+<rect x="0.5" y="0.5" width="999" height="224" rx="10" fill="#1b1b1f" stroke="#3a3a44"/>
+<defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#c8c6d8"/></marker><marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#ff5c7a"/></marker></defs>
+<rect x="45.5" y="24.5" width="190" height="40" rx="2" fill="#232329" stroke="#7c9cff"/>
+<rect x="49" y="28" width="3" height="33" fill="#7c9cff"/>
+<text x="143" y="49" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="bold" fill="#7c9cff">CONTEXT</text>
+<rect x="285.5" y="24.5" width="190" height="40" rx="2" fill="#232329" stroke="#9d7cff"/>
+<rect x="289" y="28" width="3" height="33" fill="#9d7cff"/>
+<text x="383" y="49" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="bold" fill="#9d7cff">NEGOTIATE</text>
+<rect x="525.5" y="24.5" width="190" height="40" rx="2" fill="#232329" stroke="#9d7cff"/>
+<rect x="529" y="28" width="3" height="33" fill="#9d7cff"/>
+<text x="623" y="49" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="bold" fill="#9d7cff">DECOMPOSE</text>
+<rect x="765.5" y="24.5" width="190" height="40" rx="2" fill="#232329" stroke="#ff7ac6"/>
+<rect x="769" y="28" width="3" height="33" fill="#ff7ac6"/>
+<text x="863" y="49" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="bold" fill="#ff7ac6">TESTS·QA</text>
+<rect x="45.5" y="130.5" width="190" height="40" rx="2" fill="#232329" stroke="#6ff2b4"/>
+<rect x="49" y="134" width="3" height="33" fill="#6ff2b4"/>
+<text x="143" y="155" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="bold" fill="#6ff2b4">CODE</text>
+<rect x="285.5" y="130.5" width="190" height="40" rx="2" fill="#232329" stroke="#4fcf95"/>
+<rect x="289" y="134" width="3" height="33" fill="#4fcf95"/>
+<text x="383" y="155" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="bold" fill="#4fcf95">BUILD/FIX</text>
+<rect x="525.5" y="130.5" width="190" height="40" rx="2" fill="#232329" stroke="#ffd166"/>
+<rect x="529" y="134" width="3" height="33" fill="#ffd166"/>
+<text x="623" y="155" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" font-weight="bold" fill="#ffd166">REVIEW <tspan fill="#ff7ac6">QA</tspan><tspan fill="#77758a">·</tspan><tspan fill="#ffd166">UX</tspan><tspan fill="#77758a">·</tspan><tspan fill="#ff5c7a">SEC</tspan></text>
+<rect x="765.5" y="130.5" width="190" height="40" rx="2" fill="#232329" stroke="#5ce1e6"/>
+<rect x="769" y="134" width="3" height="33" fill="#5ce1e6"/>
+<text x="863" y="155" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="bold" fill="#5ce1e6">DONE</text>
+<line x1="239" y1="44" x2="280" y2="44" stroke="#c8c6d8" stroke-width="1.5" marker-end="url(#ah)"/>
+<line x1="479" y1="44" x2="520" y2="44" stroke="#c8c6d8" stroke-width="1.5" marker-end="url(#ah)"/>
+<line x1="719" y1="44" x2="760" y2="44" stroke="#c8c6d8" stroke-width="1.5" marker-end="url(#ah)"/>
+<line x1="239" y1="150" x2="280" y2="150" stroke="#c8c6d8" stroke-width="1.5" marker-end="url(#ah)"/>
+<line x1="479" y1="150" x2="520" y2="150" stroke="#c8c6d8" stroke-width="1.5" marker-end="url(#ah)"/>
+<line x1="719" y1="150" x2="760" y2="150" stroke="#c8c6d8" stroke-width="1.5" marker-end="url(#ah)"/>
+<text x="140" y="86" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#ffd166">◆ gate</text>
+<text x="380" y="86" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#ffd166">◆ gate</text>
+<text x="620" y="86" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#ffd166">◆ gate</text>
+<path d="M860 67 V100 H140 V125" fill="none" stroke="#c8c6d8" stroke-width="1.5" marker-end="url(#ah)"/>
+<path d="M620 173 V198 H140 V175" fill="none" stroke="#ff5c7a" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+<text x="380" y="216" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#ff5c7a">must-fix → loop</text>
+</svg>

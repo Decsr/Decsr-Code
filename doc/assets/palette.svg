@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="205" viewBox="0 0 1000 205" role="img" aria-label="Galaxy × Pixel colour palette">
+<title>Galaxy × Pixel colour palette</title>
+<rect x="0.5" y="0.5" width="999" height="204" rx="10" fill="#1b1b1f" stroke="#3a3a44"/>
+<text x="24" y="28" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="bold" fill="#9d7cff">✦ base</text>
+<rect x="24.5" y="38.5" width="26" height="26" rx="2" fill="#1b1b1f" stroke="#77758a"/>
+<text x="60" y="50" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">base</text>
+<text x="60" y="64" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#1b1b1f</text>
+<rect x="184.5" y="38.5" width="26" height="26" rx="2" fill="#232329" stroke="#77758a"/>
+<text x="220" y="50" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">panel</text>
+<text x="220" y="64" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#232329</text>
+<rect x="344.5" y="38.5" width="26" height="26" rx="2" fill="#3a3a44" stroke="#77758a"/>
+<text x="380" y="50" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">border</text>
+<text x="380" y="64" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#3a3a44</text>
+<rect x="504.5" y="38.5" width="26" height="26" rx="2" fill="#c8c6d8" stroke="#77758a"/>
+<text x="540" y="50" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">starlight</text>
+<text x="540" y="64" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#c8c6d8</text>
+<rect x="664.5" y="38.5" width="26" height="26" rx="2" fill="#f4f2ff" stroke="#77758a"/>
+<text x="700" y="50" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">bright</text>
+<text x="700" y="64" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#f4f2ff</text>
+<rect x="824.5" y="38.5" width="26" height="26" rx="2" fill="#77758a" stroke="#77758a"/>
+<text x="860" y="50" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">dim</text>
+<text x="860" y="64" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#77758a</text>
+<text x="24" y="98" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="bold" fill="#ff7ac6">✦ accents</text>
+<rect x="24.5" y="108.5" width="26" height="26" rx="2" fill="#9d7cff" stroke="#77758a"/>
+<text x="60" y="120" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">nebula violet</text>
+<text x="60" y="134" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#9d7cff</text>
+<rect x="184.5" y="108.5" width="26" height="26" rx="2" fill="#c77dff" stroke="#77758a"/>
+<text x="220" y="120" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">nebula purple</text>
+<text x="220" y="134" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#c77dff</text>
+<rect x="344.5" y="108.5" width="26" height="26" rx="2" fill="#ff7ac6" stroke="#77758a"/>
+<text x="380" y="120" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">cosmic pink</text>
+<text x="380" y="134" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#ff7ac6</text>
+<rect x="504.5" y="108.5" width="26" height="26" rx="2" fill="#6ff2b4" stroke="#77758a"/>
+<text x="540" y="120" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">aurora mint</text>
+<text x="540" y="134" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#6ff2b4</text>
+<rect x="664.5" y="108.5" width="26" height="26" rx="2" fill="#4fcf95" stroke="#77758a"/>
+<text x="700" y="120" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">deeper mint</text>
+<text x="700" y="134" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#4fcf95</text>
+<rect x="824.5" y="108.5" width="26" height="26" rx="2" fill="#ffd166" stroke="#77758a"/>
+<text x="860" y="120" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">star gold</text>
+<text x="860" y="134" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#ffd166</text>
+<rect x="24.5" y="154.5" width="26" height="26" rx="2" fill="#ff5c7a" stroke="#77758a"/>
+<text x="60" y="166" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">pulsar red</text>
+<text x="60" y="180" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#ff5c7a</text>
+<rect x="184.5" y="154.5" width="26" height="26" rx="2" fill="#5ce1e6" stroke="#77758a"/>
+<text x="220" y="166" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">comet cyan</text>
+<text x="220" y="180" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#5ce1e6</text>
+<rect x="344.5" y="154.5" width="26" height="26" rx="2" fill="#7c9cff" stroke="#77758a"/>
+<text x="380" y="166" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">nebula blue</text>
+<text x="380" y="180" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#7c9cff</text>
+<rect x="504.5" y="154.5" width="26" height="26" rx="2" fill="#ffa36b" stroke="#77758a"/>
+<text x="540" y="166" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">solar orange</text>
+<text x="540" y="180" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#ffa36b</text>
+<rect x="664.5" y="154.5" width="26" height="26" rx="2" fill="#9ee8ff" stroke="#77758a"/>
+<text x="700" y="166" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#c8c6d8">ice</text>
+<text x="700" y="180" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" fill="#77758a">#9ee8ff</text>
+</svg>
