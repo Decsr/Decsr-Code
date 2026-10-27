@@ -1,0 +1,186 @@
+package artifacts
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/Decsr/Decsr-Code/internal/safefile"
+)
+
+const (
+	DirName                  = ".decsr"
+	MemoryDirName            = "memory"    // .decsr/memory/
+	MemoryDBFile             = "memory.db" // .decsr/memory.db (sqlite cache, gitignored)
+	ProjectConfigFile        = "project.yaml"
+	ModulePathFile           = "module_path"
+	RequirementsFile         = "requirements.md"
+	VisionFile               = "vision.md"
+	VisionApprovedFile       = "vision.approved"
+	MoscowFile               = "moscow.md"
+	ArchitectureFile         = "architecture.md"
+	ArchitectureApprovedFile = "architecture.approved"
+	ImplementationPlanFile   = "implementation_plan.md"
+	PlanApprovedFile         = "plan.approved"
+	PromptsFile              = "prompts.md"
+	PromptsApprovedFile      = "prompts.approved"
+	PlanFile                 = "plan.json"
+	RawCoderOutputFile       = "coder_output.md"
+	ChangesFile              = "changes.md"
+	TestCmdsFile             = "test_cmds.txt"
+	TestReportFile           = "test_report.json"
+	TesterRawOutputFile      = "tester_output.md"
+	ReviewFile               = "review.md"
+	UXReviewFile             = "ux_review.md"
+	SecurityReviewFile       = "security_review.md"
+	NiceToHaveFile           = "nice_to_have.md"
+	SummaryFile              = "summary.md"
+	RunLogFile               = "runlog.txt"
+	TaskSpecFile             = "task_spec.json"
+	TaskPlanFile             = "task_plan.md"
+	ContextPackFile          = "context_pack.md"       // PM-compacted repository context, user-editable
+	ContextPackApprovedFile  = "context_pack.approved" // marker written after the context pack gate
+	ResearchReportFile       = "research_report.md"    // brown/fix Phase 0 codebase analysis
+	RunStateFile             = "run_state.json"        // links the active run to its top-level bead (resume)
+	SubTasksFile             = "sub_tasks.json"        // structured decomposition for resume
+)
+
+// Workspace represents the .decsr directory inside a repo root.
+type Workspace struct {
+	Root string
+	Dir  string
+}
+
+// EnsureWorkspace creates the .decsr directory if missing.
+func EnsureWorkspace(root string) (Workspace, error) {
+	if root == "" {
+		return Workspace{}, fmt.Errorf("root is required")
+	}
+	dir := filepath.Join(root, DirName)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return Workspace{}, fmt.Errorf("create workspace: %w", err)
+	}
+	return Workspace{Root: root, Dir: dir}, nil
+}
+
+// Path returns a path to a known artifact file inside the workspace.
+// Returns an empty string if name is empty.
+func (w Workspace) Path(name string) string {
+	if name == "" {
+		return w.Dir
+	}
+	return filepath.Join(w.Dir, name)
+}
+
+func (w Workspace) WriteFile(name string, data []byte) error {
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("write %s: path traversal rejected", name)
+	}
+	path := w.Path(name)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", name, err)
+	}
+	return nil
+}
+
+func (w Workspace) ReadFile(name string) ([]byte, error) {
+	data, err := safefile.ReadFile(w.Dir, name)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", name, err)
+	}
+	return data, nil
+}
+
+// FileExists returns true if the artifact file exists and is non-empty.
+func (w Workspace) FileExists(name string) bool {
+	info, err := safefile.Stat(w.Dir, name)
+	return err == nil && info.Size() > 0
+}
+
+func (w Workspace) WriteJSON(name string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal %s: %w", name, err)
+	}
+	data = append(data, '\n')
+	return w.WriteFile(name, data)
+}
+
+func (w Workspace) ReadJSON(name string, v any) error {
+	data, err := w.ReadFile(name)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, v); err != nil {
+		return fmt.Errorf("unmarshal %s: %w", name, err)
+	}
+	return nil
+}
+
+// MemoryDir returns the absolute path of the workspace memory directory.
+func (w Workspace) MemoryDir() string {
+	return filepath.Join(w.Dir, MemoryDirName)
+}
+
+// MemoryDBPath returns the absolute path of the SQLite memory index.
+func (w Workspace) MemoryDBPath() string {
+	return filepath.Join(w.Dir, MemoryDBFile)
+}
+
+// generatedArtifacts lists all files produced by PM, planner, and pipeline phases.
+// Requirements are intentionally excluded — they are user input.
+var generatedArtifacts = []string{
+	VisionFile,
+	VisionApprovedFile,
+	MoscowFile,
+	ArchitectureFile,
+	ArchitectureApprovedFile,
+	ImplementationPlanFile,
+	PlanApprovedFile,
+	PromptsFile,
+	PromptsApprovedFile,
+	PlanFile,
+	TaskSpecFile,
+	TaskPlanFile,
+	ContextPackFile,
+	ContextPackApprovedFile,
+	ResearchReportFile,
+	RunStateFile,
+	SubTasksFile,
+	RawCoderOutputFile,
+	ChangesFile,
+	TestCmdsFile,
+	TestReportFile,
+	TesterRawOutputFile,
+	ReviewFile,
+	UXReviewFile,
+	SecurityReviewFile,
+	NiceToHaveFile,
+	SummaryFile,
+}
+
+// CleanGeneratedArtifacts removes all generated artifacts from the workspace,
+// forcing the pipeline to regenerate everything from scratch.
+func (w Workspace) CleanGeneratedArtifacts() {
+	for _, name := range generatedArtifacts {
+		_ = os.Remove(w.Path(name))
+	}
+}
+
+// AppendRunLog appends a single line with RFC3339 timestamp.
+func (w Workspace) AppendRunLog(message string) error {
+	f, err := safefile.OpenFile(w.Dir, RunLogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("open runlog: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	line := fmt.Sprintf("%s %s\n", time.Now().Format(time.RFC3339), message)
+	if _, err := f.WriteString(line); err != nil {
+		return fmt.Errorf("write runlog: %w", err)
+	}
+	return nil
+}
