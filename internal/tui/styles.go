@@ -1,16 +1,21 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
 
-// ── CRT Theme ────────────────────────────────────────────────────────────────
-// Inspired by phosphor monitor aesthetics: amber / green / cyan monochrome.
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+)
 
-// crtTheme defines a monochromatic CRT phosphor palette.
-type crtTheme struct {
-	primary  lipgloss.Color // main phosphor text
+// ── Galaxy × Pixel Theme ─────────────────────────────────────────────────────
+// Dark-grey base with starlight text and nebula / aurora / pulsar accents.
+
+// galaxyTheme defines the base palette of the TUI.
+type galaxyTheme struct {
+	primary  lipgloss.Color // main text
 	dim      lipgloss.Color // subdued / secondary text
 	bright   lipgloss.Color // high-intensity highlights
-	bg       lipgloss.Color // deep CRT black
+	bg       lipgloss.Color // deep background
 	border   lipgloss.Color // panel borders
 	panelBg  lipgloss.Color // panel background tint
 	warn     lipgloss.Color // warning / danger accent
@@ -19,7 +24,8 @@ type crtTheme struct {
 	scanline lipgloss.Color // scanline stripe tint
 }
 
-var themeAmber = crtTheme{
+// themeAmber is the previous amber CRT palette, kept so it can be switched back.
+var themeAmber = galaxyTheme{
 	primary:  lipgloss.Color("#ffc66d"),
 	dim:      lipgloss.Color("#6b553f"),
 	bright:   lipgloss.Color("#ffe4a8"),
@@ -32,24 +38,37 @@ var themeAmber = crtTheme{
 	scanline: lipgloss.Color("#111111"),
 }
 
-// crt is the active CRT theme used across the TUI.
-var crt = themeAmber
+var themeGalaxy = galaxyTheme{
+	primary:  lipgloss.Color("#c8c6d8"), // starlight
+	dim:      lipgloss.Color("#77758a"),
+	bright:   lipgloss.Color("#f4f2ff"),
+	bg:       lipgloss.Color("#1b1b1f"),
+	border:   lipgloss.Color("#3a3a44"),
+	panelBg:  lipgloss.Color("#232329"),
+	warn:     lipgloss.Color("#ff5c7a"), // pulsar red
+	success:  lipgloss.Color("#6ff2b4"), // aurora mint
+	muted:    lipgloss.Color("#2c2c33"),
+	scanline: lipgloss.Color("#202026"),
+}
 
-// Role colors — each agent gets a distinct accent while keeping CRT aesthetics.
+// crt is the active theme used across the TUI.
+var crt = themeGalaxy
+
+// Role colors — each agent gets a distinct accent against the dark base.
 var roleColors = map[string]lipgloss.Color{
-	"pm":          lipgloss.Color("#e0af68"), // gold — project manager
-	"coder":       lipgloss.Color("#9ece6a"), // green
-	"coder_fixer": lipgloss.Color("#73b34d"), // darker green — fixer variant
-	"qa":          lipgloss.Color("#bb9af7"), // lavender — QA (tests + review)
-	"ux_reviewer": lipgloss.Color("#ff9e64"), // orange
-	"security":    lipgloss.Color("#e0af68"), // gold
-	"pr":          lipgloss.Color("#73daca"), // teal
+	"pm":          lipgloss.Color("#9d7cff"), // nebula violet — project manager
+	"coder":       lipgloss.Color("#6ff2b4"), // aurora mint
+	"coder_fixer": lipgloss.Color("#4fcf95"), // deeper mint — fixer variant
+	"qa":          lipgloss.Color("#ff7ac6"), // cosmic pink — QA (tests + review)
+	"ux_reviewer": lipgloss.Color("#ffd166"), // star gold
+	"security":    lipgloss.Color("#ff5c7a"), // pulsar red
+	"pr":          lipgloss.Color("#5ce1e6"), // comet cyan
 	"system":      crt.dim,
 	// Deprecated roles — kept for legacy Pipeline.
-	"architect": lipgloss.Color("#2ac3de"),
-	"planner":   lipgloss.Color("#7aa2f7"),
-	"tester":    lipgloss.Color("#bb9af7"),
-	"reviewer":  lipgloss.Color("#f7768e"),
+	"architect": lipgloss.Color("#5ce1e6"),
+	"planner":   lipgloss.Color("#9d7cff"),
+	"tester":    lipgloss.Color("#ff7ac6"),
+	"reviewer":  lipgloss.Color("#ff5c7a"),
 }
 
 func roleColor(role string) lipgloss.Color {
@@ -73,8 +92,8 @@ var pipelineColors = map[string]lipgloss.Color{
 	"UX_REVIEWER":  roleColors["ux_reviewer"],
 	"SEC":          roleColors["security"],
 	"SECURITY":     roleColors["security"],
-	"FIXING":       lipgloss.Color("#ff9e64"),
-	"DONE":         lipgloss.Color("#73daca"),
+	"FIXING":       lipgloss.Color("#ffd166"),
+	"DONE":         lipgloss.Color("#5ce1e6"),
 	// Legacy entries.
 	"ARCHITECT":    roleColors["architect"],
 	"ARCHITECTURE": roleColors["architect"],
@@ -90,10 +109,10 @@ var pipelineColors = map[string]lipgloss.Color{
 var (
 	styleWaiting = lipgloss.NewStyle().Foreground(crt.dim)
 	styleRunning = lipgloss.NewStyle().Foreground(crt.primary).Bold(true)
-	styleFixing  = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff9e64")).Bold(true)
-	styleDone    = lipgloss.NewStyle().Foreground(lipgloss.Color("#73daca")).Bold(true)
+	styleFixing  = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffd166")).Bold(true)
+	styleDone    = lipgloss.NewStyle().Foreground(lipgloss.Color("#5ce1e6")).Bold(true)
 	styleError   = lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
-	styleGate    = lipgloss.NewStyle().Foreground(lipgloss.Color("#bb9af7")).Bold(true)
+	styleGate    = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff7ac6")).Bold(true)
 )
 
 // Gate banner — phosphor highlight.
@@ -117,3 +136,40 @@ var styleStatusKey = lipgloss.NewStyle().
 	Foreground(crt.primary).
 	Bold(true).
 	Padding(0, 1)
+
+// paintBackground fills the whole width x height screen with crt.bg. Inner
+// styled segments end with an SGR reset that would drop the terminal back to
+// its default background, so the background is re-applied after every reset.
+// Returns view unchanged when the size is unknown or the profile has no colour.
+func paintBackground(view string, width, height int) string {
+	if width <= 0 || height <= 0 {
+		return view
+	}
+	// Render a marker to obtain the profile-aware background sequence.
+	seq, _, ok := strings.Cut(lipgloss.NewStyle().Background(crt.bg).Render("x"), "x")
+	if !ok || seq == "" {
+		return view
+	}
+	const reset = "\x1b[0m"
+	lines := strings.Split(view, "\n")
+	var b strings.Builder
+	for i := 0; i < height || i < len(lines); i++ {
+		line := ""
+		if i < len(lines) {
+			line = lines[i]
+		}
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(seq)
+		for _, r := range []string{"\x1b[0m", "\x1b[m", "\x1b[49m"} {
+			line = strings.ReplaceAll(line, r, r+seq)
+		}
+		b.WriteString(line)
+		if pad := width - ansi.StringWidth(line); pad > 0 {
+			b.WriteString(strings.Repeat(" ", pad))
+		}
+		b.WriteString(reset)
+	}
+	return b.String()
+}

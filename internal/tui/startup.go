@@ -417,6 +417,10 @@ func (m *startupModel) cleanAfterEditorSave(newContent string) {
 }
 
 func (m startupModel) View() string {
+	return paintBackground(m.view(), m.width, m.height)
+}
+
+func (m startupModel) view() string {
 	switch m.phase {
 	case startupPhaseSetup:
 		return m.setup.View()
@@ -788,6 +792,10 @@ func (m modulePathModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m modulePathModel) View() string {
+	return paintBackground(m.view(), m.width, m.height)
+}
+
+func (m modulePathModel) view() string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.primary)
 	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
 	exampleStyle := lipgloss.NewStyle().Foreground(crt.primary)

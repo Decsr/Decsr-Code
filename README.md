@@ -6,6 +6,18 @@
 </p>
 
 <p align="center">
+
+```text
+  ·       ✦        +      ⋆       ✦
+   ·       █▀▀▄ █▀▀▀ ▄▀▀▀ █▀▀▀ █▀▀▄  ·
+  ⋆        █  █ █▀▀  █     ▀▀▄ █▀█     ✦
+     ·     ▀▀▀  ▀▀▀▀  ▀▀▀ ▀▀▀▀ ▀  ▀   ✦
+    ⋆       ·          ✦              ✦
+```
+
+</p>
+
+<p align="center">
   <a href="https://github.com/Decsr/Decsr-Code/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Decsr/Decsr-Code?style=flat-square" alt="MIT License"></a>
   <a href="https://github.com/Decsr/Decsr-Code/releases"><img src="https://img.shields.io/github/v/release/Decsr/Decsr-Code?style=flat-square" alt="Latest Release"></a>
   <a href="https://github.com/Decsr/Decsr-Code/actions"><img src="https://img.shields.io/github/actions/workflow/status/Decsr/Decsr-Code/ci.yml?style=flat-square&label=CI" alt="CI"></a>
@@ -158,6 +170,27 @@ After implementation, the pipeline runs all quality checks:
 **QA Review → UX Review → Security Audit → PM Arbitration**
 
 If the PM classifies any feedback as must-fix, those items become new sub-tasks (beads), the Coder fixes them, and the loop restarts from implementation. The cycle continues until all checks pass (or a configurable max iteration limit is reached).
+
+### Theme: Galaxy × Pixel
+
+A dark-grey base with starlight text and nebula, aurora and pulsar accents.
+
+| Role / purpose | Colour | Hex |
+|---|---|---|
+| Base background | dark grey | `#1b1b1f` |
+| Panels | panel grey | `#232329` |
+| Borders | border grey | `#3a3a44` |
+| Text | starlight | `#c8c6d8` |
+| Highlights | bright starlight | `#f4f2ff` |
+| Secondary text | dim starlight | `#77758a` |
+| PM | nebula violet | `#9d7cff` |
+| Coder, success | aurora mint | `#6ff2b4` |
+| QA | cosmic pink | `#ff7ac6` |
+| UX | star gold | `#ffd166` |
+| Security, warnings | pulsar red | `#ff5c7a` |
+| PR, done | comet cyan | `#5ce1e6` |
+
+The previous amber CRT theme remains available in `internal/tui/styles.go`.
 
 ## Quick Start
 

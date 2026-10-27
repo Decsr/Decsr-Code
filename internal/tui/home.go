@@ -49,14 +49,14 @@ var homePalette = struct {
 	accent, green, dim, bright, gold, cyan, red lipgloss.Color
 	border, activeBg, headerBg, footerBg        lipgloss.Color
 }{
-	accent:   lipgloss.Color("#7aa2f7"), // blue accent for titles
-	green:    lipgloss.Color("#9ece6a"), // green
+	accent:   lipgloss.Color("#9d7cff"), // nebula violet accent for titles
+	green:    lipgloss.Color("#6ff2b4"), // aurora mint
 	dim:      crt.dim,
 	bright:   crt.bright,
-	gold:     lipgloss.Color("#e0af68"), // warm gold
-	cyan:     lipgloss.Color("#2ac3de"), // cyan
-	red:      lipgloss.Color("#f7768e"), // coral
-	border:   lipgloss.Color("#3b4261"), // slightly brighter border
+	gold:     lipgloss.Color("#ffd166"), // star gold
+	cyan:     lipgloss.Color("#5ce1e6"), // comet cyan
+	red:      lipgloss.Color("#ff5c7a"), // pulsar red
+	border:   lipgloss.Color("#3a3a44"), // galaxy border
 	activeBg: crt.muted,
 	headerBg: crt.panelBg,
 	footerBg: crt.panelBg,
@@ -527,11 +527,41 @@ func renderBlockText(text string) []string {
 
 // ── Logo ─────────────────────────────────────────────────────────────────────
 
+// logoStars is a fixed starfield around the pixel logo (46 cells wide, logo block
+// centred in the middle 24). '✦' is bright, 'G' is a gold star, the rest are dim.
+var (
+	logoStarsTop    = "  ·       ✦        +      ⋆       G           "
+	logoStarsBottom = "    ⋆       ·          ✦              G       "
+	logoStarsLeft   = [3]string{"   ·       ", "  ⋆        ", "     ·     "}
+	logoStarsRight  = [3]string{"  ·        ", "    G      ", "   ✦       "}
+)
+
+// renderStars colours a star pattern: ✦ bright, G gold ✦, other glyphs dim.
+func renderStars(s string) string {
+	dim := lipgloss.NewStyle().Foreground(crt.dim)
+	bright := lipgloss.NewStyle().Foreground(crt.bright)
+	gold := lipgloss.NewStyle().Foreground(homePalette.gold)
+	var sb strings.Builder
+	for _, r := range s {
+		switch r {
+		case ' ':
+			sb.WriteRune(r)
+		case '✦':
+			sb.WriteString(bright.Render(string(r)))
+		case 'G':
+			sb.WriteString(gold.Render("✦"))
+		default:
+			sb.WriteString(dim.Render(string(r)))
+		}
+	}
+	return sb.String()
+}
+
 func (m HomeModel) renderLogo(maxW int) string {
 	tagStyle := lipgloss.NewStyle().Foreground(homePalette.dim)
 
 	if maxW < 62 {
-		titleStyle := lipgloss.NewStyle().Foreground(homePalette.gold).Bold(true)
+		titleStyle := lipgloss.NewStyle().Foreground(homePalette.accent).Bold(true)
 		return lipgloss.JoinVertical(lipgloss.Center,
 			titleStyle.Render("◈ DECSR"),
 			tagStyle.Render("AI multi-agent coding pipeline"),
@@ -540,17 +570,18 @@ func (m HomeModel) renderLogo(maxW int) string {
 
 	blockLines := renderBlockText("DECSR")
 
-	glowBright := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffd787")).Bold(true)
-	glowDim := lipgloss.NewStyle().Foreground(lipgloss.Color("#d7af5f"))
-
-	var lines []string
-	for i, bl := range blockLines {
-		if i < 2 {
-			lines = append(lines, glowBright.Render(bl))
-		} else {
-			lines = append(lines, glowDim.Render(bl))
-		}
+	// Nebula gradient, one colour per display row.
+	nebula := []lipgloss.Style{
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#9d7cff")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#c77dff")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#ff7ac6")),
 	}
+
+	lines := []string{renderStars(logoStarsTop)}
+	for i, bl := range blockLines {
+		lines = append(lines, renderStars(logoStarsLeft[i])+nebula[i].Render(bl)+renderStars(logoStarsRight[i]))
+	}
+	lines = append(lines, renderStars(logoStarsBottom))
 	lines = append(lines, tagStyle.Render("       AI-powered multi-agent coding pipeline"))
 
 	return strings.Join(lines, "\n")
