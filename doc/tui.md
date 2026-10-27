@@ -12,6 +12,10 @@ The screen is split into three areas:
 3. **System Monitor** — an optional side panel (toggle with `Ctrl+T`) showing
    CPU, memory, network, and token usage.
 
+> **Recommended font:** DECSR cannot set its own font; it uses your terminal's.
+> [Monaspace Krypton](https://monaspace.githubnext.com) (free, OFL-licensed) is
+> a good fit: a clean, highly legible monospace face.
+
 ---
 
 ## Agent panels
