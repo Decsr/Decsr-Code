@@ -1,0 +1,83 @@
+package agent
+
+import (
+	"strings"
+
+	"github.com/Decsr/Decsr-Code/internal/bus"
+	"github.com/Decsr/Decsr-Code/internal/runner"
+)
+
+// BaseAgent holds shared state and helpers for all agents.
+type BaseAgent struct {
+	role bus.AgentRole
+	Bus  *bus.Bus
+}
+
+// NewBase creates a BaseAgent for the given role.
+func NewBase(role bus.AgentRole, b *bus.Bus) BaseAgent {
+	return BaseAgent{role: role, Bus: b}
+}
+
+// emit publishes a broadcast message from this agent.
+func (a *BaseAgent) emit(typ bus.MessageType, payload any) {
+	a.Bus.Publish(bus.NewMessage(a.role, "", typ, payload))
+}
+
+// emitToken publishes a streaming token event.
+func (a *BaseAgent) emitToken(text string, done bool) {
+	a.emit(bus.MsgEvent, bus.TokenPayload{Text: text, Done: done})
+}
+
+// emitUsage publishes a token usage event for this agent.
+func (a *BaseAgent) emitUsage(usage runner.TokenUsage) {
+	a.emit(bus.MsgUsage, bus.AgentUsage{
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+		Estimated:    usage.Estimated,
+	})
+}
+
+func (a *BaseAgent) emitOutput(text string) {
+	if text != "" {
+		a.emitToken(text, false)
+	}
+	a.emitToken("", true)
+}
+
+// Gate publishes a human_gate event (exported so decsr can call it if needed).
+func (a *BaseAgent) Gate(msg string) {
+	a.emit(bus.MsgHumanGate, msg)
+}
+
+// collectStream reads all tokens from a completion stream, publishing each
+// token via the bus and returning the full concatenated text.
+func (a *BaseAgent) collectStream(ch <-chan runner.Token) (string, error) {
+	var sb strings.Builder
+	for tok := range ch {
+		if tok.Error != nil {
+			return sb.String(), tok.Error
+		}
+		// Usage may arrive on intermediate tokens (live incremental estimates
+		// from streaming CLI runners) as well as on the final Done token. Emit
+		// it whenever present so the monitor's per-agent token counters climb
+		// live during long runs instead of only updating when the agent ends.
+		if tok.Usage != nil {
+			a.emitUsage(*tok.Usage)
+		}
+		if tok.Done {
+			break
+		}
+		// Reasoning is shown live but never accumulated into the result, so a
+		// reasoning model's chain-of-thought is visible during work without
+		// corrupting the parsed output (file blocks, TASKSPEC, etc).
+		if tok.Reasoning != "" {
+			a.emitToken(tok.Reasoning, false)
+		}
+		if tok.Text != "" {
+			a.emitToken(tok.Text, false)
+			sb.WriteString(tok.Text)
+		}
+	}
+	a.emitToken("", true)
+	return sb.String(), nil
+}
