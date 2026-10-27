@@ -5,11 +5,11 @@
 <p align="center"><b>Decsr Code</b> — command: <code>decsr</code></p>
 
 <p align="center">
-  <a href="https://github.com/Decsr/Decsr-Code/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Decsr/Decsr-Code?style=flat-square&color=9d7cff&labelColor=1b1b1f" alt="License"></a>
-  <a href="https://github.com/Decsr/Decsr-Code/releases"><img src="https://img.shields.io/github/v/release/Decsr/Decsr-Code?style=flat-square&color=9d7cff&labelColor=1b1b1f" alt="Latest Release"></a>
-  <a href="https://github.com/Decsr/Decsr-Code/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Decsr/Decsr-Code/ci.yml?branch=main&label=CI&style=flat-square&labelColor=1b1b1f" alt="CI"></a>
-  <a href="https://github.com/Decsr/Decsr-Code/blob/main/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/Decsr/Decsr-Code?style=flat-square&color=9d7cff&labelColor=1b1b1f" alt="Go version"></a>
-  <a href="https://pkg.go.dev/github.com/Decsr/Decsr-Code"><img src="https://img.shields.io/badge/go.dev-reference-9d7cff?style=flat-square&logo=go&logoColor=white&labelColor=1b1b1f" alt="Go Reference"></a>
+  <a href="https://github.com/Decsr/Decsr-Code/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Decsr/Decsr-Code?style=flat-square&color=4a86ff&labelColor=0b1426" alt="License"></a>
+  <a href="https://github.com/Decsr/Decsr-Code/releases"><img src="https://img.shields.io/github/v/release/Decsr/Decsr-Code?style=flat-square&color=4a86ff&labelColor=0b1426" alt="Latest Release"></a>
+  <a href="https://github.com/Decsr/Decsr-Code/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Decsr/Decsr-Code/ci.yml?branch=main&label=CI&style=flat-square&labelColor=0b1426" alt="CI"></a>
+  <a href="https://github.com/Decsr/Decsr-Code/blob/main/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/Decsr/Decsr-Code?style=flat-square&color=4a86ff&labelColor=0b1426" alt="Go version"></a>
+  <a href="https://pkg.go.dev/github.com/Decsr/Decsr-Code"><img src="https://img.shields.io/badge/go.dev-reference-4a86ff?style=flat-square&logo=go&logoColor=white&labelColor=0b1426" alt="Go Reference"></a>
 </p>
 
 <p align="center">
@@ -52,11 +52,11 @@ Manual back-and-forth with AI coding assistants is slow, error-prone, and hard t
 
 | Agent | Role |
 |-------|------|
-| ![PM](https://img.shields.io/badge/PM-9d7cff?style=flat-square&labelColor=1b1b1f) | Negotiates the task spec, decomposes work into sub-tasks, and arbitrates review feedback |
-| ![Coder](https://img.shields.io/badge/Coder-6ff2b4?style=flat-square&labelColor=1b1b1f) | Writes and fixes code, runs builds and tests |
-| ![QA](https://img.shields.io/badge/QA-ff7ac6?style=flat-square&labelColor=1b1b1f) | Generates tests (TDD), verifies test runs, and reviews code quality, logic, and corner cases |
-| ![UX Reviewer](https://img.shields.io/badge/UX%20Reviewer-ffd166?style=flat-square&labelColor=1b1b1f) | UX/UI heuristic review |
-| ![Security](https://img.shields.io/badge/Security-ff5c7a?style=flat-square&labelColor=1b1b1f) | Security audit and vulnerability scanning |
+| ![PM](https://img.shields.io/badge/PM-4a86ff?style=flat-square&labelColor=0b1426) | Negotiates the task spec, decomposes work into sub-tasks, and arbitrates review feedback |
+| ![Coder](https://img.shields.io/badge/Coder-5ce1e6?style=flat-square&labelColor=0b1426) | Writes and fixes code, runs builds and tests |
+| ![QA](https://img.shields.io/badge/QA-7cb8ff?style=flat-square&labelColor=0b1426) | Generates tests (TDD), verifies test runs, and reviews code quality, logic, and corner cases |
+| ![UX Reviewer](https://img.shields.io/badge/UX%20Reviewer-bfe3ff?style=flat-square&labelColor=0b1426) | UX/UI heuristic review |
+| ![Security](https://img.shields.io/badge/Security-ffd166?style=flat-square&labelColor=0b1426) | Security audit and vulnerability scanning |
 
 ### Interactive TUI
 
@@ -286,6 +286,8 @@ decsr run --requirements requirements.md --branch feat/my-feature
 ## Theme: Galaxy × Pixel
 
 A dark-grey base with starlight text and nebula, aurora and pulsar accents.
+
+The swatches below are the TUI's real colours; the artwork elsewhere in this README uses the blue variant of the theme.
 
 <p align="center">
   <img src="doc/assets/palette.svg" alt="Galaxy × Pixel palette" width="100%">
