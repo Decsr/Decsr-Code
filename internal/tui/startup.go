@@ -44,6 +44,7 @@ type startupModel struct {
 	setup         SetupModel
 	modelMemory   modelMemoryModel
 	moduleInput   textinput.Model
+	moduleGuess   string // module path guessed from git remote; computed once on entry
 	picker        PickerModel
 	editor        EditorModel
 	root          string
@@ -455,8 +456,9 @@ func (m *startupModel) showModulePathInput() tea.Cmd {
 	ti.CharLimit = 200
 	ti.Width = m.width - 10
 
-	if suggested := guessModulePath(m.root); suggested != "" {
-		ti.SetValue(suggested)
+	m.moduleGuess = guessModulePath(m.root)
+	if m.moduleGuess != "" {
+		ti.SetValue(m.moduleGuess)
 	}
 
 	m.moduleInput = ti
@@ -601,10 +603,10 @@ func (m startupModel) viewModulePath() string {
 		exampleStyle.Render("    " + projectName + "  (for local-only projects)"),
 	}
 
-	if suggested := guessModulePath(m.root); suggested != "" {
+	if m.moduleGuess != "" {
 		lines = append(lines,
 			"",
-			hintStyle.Render("  ✓ Detected from git remote: "+suggested),
+			hintStyle.Render("  ✓ Detected from git remote: "+m.moduleGuess),
 		)
 	}
 
@@ -729,6 +731,7 @@ func RunStartup(root, wsReqPath string, cfg config.Config) (StartupResult, error
 // input screen. Used when --requirements is provided but module path is missing.
 type modulePathModel struct {
 	moduleInput textinput.Model
+	moduleGuess string // module path guessed from git remote; computed once
 	root        string
 	wsDir       string
 	modulePath  string // result
@@ -743,13 +746,15 @@ func newModulePathModel(root, wsDir string) modulePathModel {
 	ti.CharLimit = 200
 	ti.Width = 70
 
-	if suggested := guessModulePath(root); suggested != "" {
-		ti.SetValue(suggested)
+	guess := guessModulePath(root)
+	if guess != "" {
+		ti.SetValue(guess)
 	}
 
 	ti.Focus()
 
 	return modulePathModel{
+		moduleGuess: guess,
 		root:        root,
 		wsDir:       wsDir,
 		moduleInput: ti,
@@ -819,10 +824,10 @@ func (m modulePathModel) view() string {
 		exampleStyle.Render("    " + projectName + "  (for local-only projects)"),
 	}
 
-	if suggested := guessModulePath(m.root); suggested != "" {
+	if m.moduleGuess != "" {
 		lines = append(lines,
 			"",
-			hintStyle.Render("  ✓ Detected from git remote: "+suggested),
+			hintStyle.Render("  ✓ Detected from git remote: "+m.moduleGuess),
 		)
 	}
 

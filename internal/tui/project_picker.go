@@ -251,7 +251,7 @@ func (m ProjectPickerModel) View() string {
 	}
 
 	lines = append(lines, "")
-	sep := dimStyle.Render(strings.Repeat("─", m.width-4))
+	sep := dimStyle.Render(strings.Repeat("─", max(m.width-4, 0)))
 	lines = append(lines, sep)
 
 	hints := dimStyle.Render("  ↑↓ navigate  Enter select  d remove  Esc back")

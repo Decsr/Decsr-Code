@@ -1,6 +1,10 @@
 package tokenutil
 
-import "strings"
+import (
+	"sort"
+	"strings"
+	"unicode/utf8"
+)
 
 // charsPerToken is the average characters per token for most LLMs.
 // This heuristic is ~85% accurate and avoids external dependencies.
@@ -27,6 +31,9 @@ func Truncate(text string, maxTokens int) string {
 	}
 
 	// Cut at the last newline before the limit to avoid breaking mid-line.
+	for maxChars > 0 && !utf8.RuneStart(text[maxChars]) {
+		maxChars--
+	}
 	cut := text[:maxChars]
 	if idx := strings.LastIndex(cut, "\n"); idx > maxChars/2 {
 		cut = cut[:idx]
@@ -45,7 +52,14 @@ func TruncateSourceFiles(files map[string]string, maxTokens int) map[string]stri
 	result := make(map[string]string, len(files))
 	remaining := maxTokens
 
-	for name, content := range files {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		content := files[name]
 		tokens := EstimateTokens(content)
 		if tokens <= remaining {
 			result[name] = content

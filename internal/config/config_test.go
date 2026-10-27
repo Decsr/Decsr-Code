@@ -409,3 +409,66 @@ func TestMerge_ContextPack(t *testing.T) {
 		t.Error("empty layer should not clear pack.disable")
 	}
 }
+
+func writeProjectYAML(t *testing.T, root, body string) {
+	t.Helper()
+	dir := filepath.Join(root, GlobalDir)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ProjectFilename), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoad_MemoryExplicitFalseAndZero(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeProjectYAML(t, root, "project:\n  context:\n    memory:\n      enabled: false\n      auto_promote: false\n      hybrid_alpha: 0\n")
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := cfg.Project.Context.Memory
+	if m.Enabled || m.AutoPromote || m.HybridAlpha != 0 {
+		t.Errorf("explicit false/0 ignored: %+v", m)
+	}
+	if m.TopK != 8 {
+		t.Errorf("unset TopK should keep default 8, got %d", m.TopK)
+	}
+}
+
+func TestLoad_MemoryUnsetKeepsDefaults(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeProjectYAML(t, root, "project:\n  name: x\n")
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := cfg.Project.Context.Memory
+	if !m.Enabled || !m.AutoPromote || m.HybridAlpha != 1.0 {
+		t.Errorf("defaults lost: %+v", m)
+	}
+}
+
+func TestSaveGlobal_UnparseableConfigNotClobbered(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, GlobalDir)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, GlobalFilename)
+	bad := []byte("agents: [unclosed\n  : :")
+	if err := os.WriteFile(path, bad, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveGlobal(Config{PromptLanguage: "en"}); err == nil {
+		t.Fatal("expected error for unparseable global config")
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != string(bad) {
+		t.Errorf("global config was overwritten: %q", got)
+	}
+}

@@ -138,3 +138,62 @@ func TestResetFile(t *testing.T) {
 		t.Errorf("file not reset, content: %q", string(data))
 	}
 }
+
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func TestStageUnstage_DashPrefixedPath(t *testing.T) {
+	dir, gc := initRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "-dash.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := gc.Stage("-dash.txt"); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	files, err := gc.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Path != "-dash.txt" || !files[0].Staged {
+		t.Fatalf("after stage: %+v", files)
+	}
+	if err := gc.Unstage("-dash.txt"); err != nil {
+		t.Fatalf("Unstage: %v", err)
+	}
+	files, _ = gc.Status()
+	if len(files) != 1 || files[0].Staged {
+		t.Fatalf("after unstage: %+v", files)
+	}
+}
+
+func TestStatus_RenameAndSpecialNames(t *testing.T) {
+	dir, gc := initRepo(t)
+	gitRun(t, dir, "mv", "hello.go", "renamed file.go")
+	uni := "café 日本.txt"
+	if err := os.WriteFile(filepath.Join(dir, uni), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files, err := gc.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, f := range files {
+		got[f.Path] = f.Code
+	}
+	if got["renamed file.go"] != "R " {
+		t.Errorf("rename not reported by new path: %+v", files)
+	}
+	if got[uni] != "??" {
+		t.Errorf("unicode path not verbatim: %+v", files)
+	}
+	if len(files) != 2 {
+		t.Errorf("expected 2 entries, got %+v", files)
+	}
+}

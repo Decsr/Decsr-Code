@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Decsr/Decsr-Code/internal/artifacts"
 	"github.com/Decsr/Decsr-Code/internal/chunker"
@@ -20,6 +21,10 @@ import (
 
 // maxSourceFileSize limits how large a single source file can be before truncation.
 const maxSourceFileSize = 4000
+
+// maxFileBytes is the largest source file read for prompt context or
+// indexing; bigger files (bundles, generated blobs) are skipped.
+const maxFileBytes = 1 << 20
 
 // maxTotalSourceContext caps total source content injected into prompts.
 const maxTotalSourceContext = 30000
@@ -272,7 +277,7 @@ func (p ProjectContext) SystemPromptFragment(profile ...ContextProfile) string {
 	if p.UnstagedDiff != "" {
 		sb.WriteString("### Uncommitted Changes\n```diff\n")
 		if len(p.UnstagedDiff) > 2000 {
-			sb.WriteString(p.UnstagedDiff[:2000])
+			sb.WriteString(truncateUTF8(p.UnstagedDiff, 2000))
 			sb.WriteString("\n... (truncated)")
 		} else {
 			sb.WriteString(p.UnstagedDiff)
@@ -284,13 +289,14 @@ func (p ProjectContext) SystemPromptFragment(profile ...ContextProfile) string {
 	if len(p.SourceFiles) > 0 {
 		sb.WriteString("### Existing Source Code\n")
 		sb.WriteString("Below are the key source files in the project. Study them carefully before making changes.\n\n")
-		for name, content := range p.SourceFiles {
+		for _, name := range sortedKeys(p.SourceFiles) {
+			content := p.SourceFiles[name]
 			_, _ = fmt.Fprintf(&sb, "**%s**\n```\n", name)
 			if len(content) > maxSourceFileSize {
 				// Defensive cap: collectSourceFiles already trims at chunk
 				// boundaries, but very large always-included files still
 				// get truncated here at byte level.
-				sb.WriteString(content[:maxSourceFileSize])
+				sb.WriteString(truncateUTF8(content, maxSourceFileSize))
 				sb.WriteString("\n... (truncated)")
 			} else {
 				sb.WriteString(content)
@@ -299,10 +305,11 @@ func (p ProjectContext) SystemPromptFragment(profile ...ContextProfile) string {
 		}
 	}
 
-	for name, content := range p.AlwaysInclude {
+	for _, name := range sortedKeys(p.AlwaysInclude) {
+		content := p.AlwaysInclude[name]
 		_, _ = fmt.Fprintf(&sb, "### %s\n```\n", name)
 		if len(content) > 3000 {
-			sb.WriteString(content[:3000])
+			sb.WriteString(truncateUTF8(content, 3000))
 			sb.WriteString("\n... (truncated)")
 		} else {
 			sb.WriteString(content)
@@ -394,6 +401,9 @@ func collectSourceFiles(root string, files []string, seeds []string) map[string]
 		if totalSize >= maxTotalSourceContext {
 			break
 		}
+		if st, err := os.Stat(filepath.Join(root, path)); err == nil && st.Size() > maxFileBytes {
+			continue
+		}
 		content, err := safefile.ReadFile(root, path)
 		if err != nil {
 			continue
@@ -436,8 +446,12 @@ func selectChunksWithinBudget(path string, content []byte, budget int) string {
 		if !strings.HasSuffix(body, "\n") {
 			body += "\n"
 		}
-		if used+len(body) > budget && included > 0 {
-			break
+		if used+len(body) > budget {
+			if included > 0 {
+				break
+			}
+			// Even the first chunk is over budget: keep only its head.
+			body = truncateUTF8(body, budget) + "\n... (truncated)\n"
 		}
 		sb.WriteString(body)
 		sb.WriteString("\n")
@@ -732,4 +746,25 @@ func isInternalPath(path string) bool {
 		}
 	}
 	return false
+}
+
+// truncateUTF8 cuts s to at most n bytes on a rune boundary.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+// sortedKeys returns the map's keys in lexical order for deterministic output.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

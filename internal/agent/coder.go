@@ -380,10 +380,15 @@ func (a *CoderAgent) streamAndWriteFiles(ch <-chan runner.Token) ([]string, stri
 
 		if inFence && fence.closes(trimmed) {
 			// Fence closing — write file if we have a path.
+			guessed := false
 			if currentPath == "" {
 				currentPath = guessFilePathFromContent(contentLines)
+				guessed = currentPath != ""
 			}
-			if currentPath != "" {
+			if guessed && fileExists(filepath.Join(a.root, sanitizeFilePath(currentPath, a.root))) {
+				// A path inferred from content may only create new files.
+				a.emitToken(fmt.Sprintf("skipped guessed path (file exists): %s\n", currentPath), false)
+			} else if currentPath != "" {
 				content := strings.Join(contentLines, "\n") + "\n"
 				if err := a.writeOneFile(currentPath, content); err != nil {
 					if errors.Is(err, errNoOpRewrite) {
@@ -513,11 +518,32 @@ func findPathInRecent(lines []string) string {
 		if trim == "" {
 			continue
 		}
+		if !isHeaderLikeLine(trim) {
+			continue
+		}
 		if p := parseFilePath(trim); p != "" {
 			return p
 		}
 	}
 	return ""
+}
+
+// isHeaderLikeLine reports whether a line looks like a file header (bold or
+// backticked path, "File: x", heading, list item, "Create x") rather than a
+// prose sentence that merely mentions a path.
+func isHeaderLikeLine(line string) bool {
+	if !strings.ContainsAny(line, " \t") {
+		return true
+	}
+	if strings.ContainsAny(line[:1], "#*-•→▶📁📄🔧⚙`([") || (line[0] >= '0' && line[0] <= '9') {
+		return true
+	}
+	for _, p := range []string{"file:", "filename:", "path:", "create", "update"} {
+		if strings.HasPrefix(strings.ToLower(line), p) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildPrompt constructs system and user prompts depending on the payload type.
@@ -1530,13 +1556,13 @@ func sanitizeFilePath(path, root string) string {
 		path = stripToProjectRelative(path)
 	}
 
-	// If root is provided and present in the path, strip it.
+	// If root is provided and the path starts with it, strip it.
 	if root != "" {
 		rootSlash := filepath.ToSlash(root)
 		rootSlash = strings.TrimPrefix(rootSlash, "/")
-		if idx := strings.Index(path, rootSlash); idx >= 0 {
-			path = path[idx+len(rootSlash):]
-			path = strings.TrimPrefix(path, "/")
+		rootSlash = strings.TrimSuffix(rootSlash, "/")
+		for rootSlash != "" && (path == rootSlash || strings.HasPrefix(path, rootSlash+"/")) {
+			path = strings.TrimPrefix(path[len(rootSlash):], "/")
 		}
 	}
 

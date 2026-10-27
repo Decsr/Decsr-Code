@@ -59,6 +59,20 @@ func (b *Bus) Subscribe() <-chan Message {
 	return ch
 }
 
+// Unsubscribe removes a channel returned by Subscribe so it no longer receives
+// messages. The channel is not closed: Publish fans out from a snapshot taken
+// outside the lock, and sending on a closed channel would panic.
+func (b *Bus) Unsubscribe(ch <-chan Message) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i, s := range b.subs {
+		if (<-chan Message)(s) == ch {
+			b.subs = append(b.subs[:i], b.subs[i+1:]...)
+			return
+		}
+	}
+}
+
 // Publish adds msg to the ring buffer, fans out to subscribers, and optionally persists.
 func (b *Bus) Publish(m Message) {
 	b.mu.Lock()

@@ -370,3 +370,46 @@ func assertNiceToHave(t *testing.T, s reviewSections, want int) {
 		t.Errorf("expected %d nice-to-have items, got %d: %v", want, len(s.NiceToHave), s.NiceToHave)
 	}
 }
+
+func TestParseReviewSections_FirstVerdictWins(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"summary after yes", "MUST FIX\n- none\nApprove?: YES\nSummary: clean.", true},
+		{"conditional no", "MUST FIX\n- none\nApprove?: NO (would be YES after fix)", false},
+		{"overall after no", "MUST FIX\n- x\nApprove?: NO\nOverall: YES it is fine", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := parseReviewSections(c.input)
+			if s.Approved != c.want {
+				t.Errorf("Approved = %v, want %v", s.Approved, c.want)
+			}
+		})
+	}
+}
+
+func TestParseArbitrateAllResult_LeadingVerdictWord(t *testing.T) {
+	r := parseArbitrateAllResult("===VERDICT===\nPASS — nothing to fix\n")
+	if !r.Pass {
+		t.Error("expected Pass=true for 'PASS — nothing to fix'")
+	}
+	r = parseArbitrateAllResult("===VERDICT===\nFIX\n")
+	if r.Pass {
+		t.Error("expected Pass=false for FIX")
+	}
+}
+
+func TestStripMarkerAndCutBlock_NonASCIICase(t *testing.T) {
+	s := "ſı text ===propose_end=== tail"
+	got, found := stripMarker(s, "===PROPOSE_END===")
+	if !found || got != "ſı text  tail" {
+		t.Errorf("stripMarker = %q, %v", got, found)
+	}
+	inner, rem, ok := cutBlock("ıſ ===coder=== do it ===end=== rest", "===CODER===", "===END===")
+	if !ok || inner != " do it " || rem != "ıſ  rest" {
+		t.Errorf("cutBlock = %q, %q, %v", inner, rem, ok)
+	}
+}

@@ -173,7 +173,7 @@ func (m AgentPanelModel) View() string {
 	vis = lipgloss.Width(scrollInfo)
 	bottomRule := hRule
 	if vis > 0 && vis+2 < contentW {
-		bottomRule = hRule[:contentW-vis-1] + scrollInfo + "─"
+		bottomRule = strings.Repeat("─", contentW-vis-1) + scrollInfo + "─"
 	}
 	sb.WriteString(bSt.Render("╰" + bottomRule + "╯"))
 	return sb.String()
@@ -243,6 +243,9 @@ func (m *AgentPanelModel) SetLanguage(lang string) {
 
 // SetSize updates panel dimensions.
 func (m *AgentPanelModel) SetSize(w, h int) {
+	if w == m.width && h == m.height {
+		return
+	}
 	m.log.Debug("resize", slog.Int("width", w), slog.Int("height", h))
 	m.width = w
 	m.height = h

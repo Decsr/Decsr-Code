@@ -74,3 +74,27 @@ func TestSaveLoadFingerprints(t *testing.T) {
 		t.Errorf("expected empty map for missing file, got %v", missing)
 	}
 }
+
+func TestEmbedMeta_RoundTripAndCompat(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "meta.json")
+	if _, ok := LoadMeta(p); ok {
+		t.Fatal("missing meta must report !ok")
+	}
+	m := EmbedMeta{Model: "openai:a", Dim: 4}
+	if err := SaveMeta(p, m); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := LoadMeta(p)
+	if !ok || got != m {
+		t.Fatalf("got %+v ok=%v", got, ok)
+	}
+	if !got.Compatible(EmbedMeta{Model: "openai:a", Dim: 4}) {
+		t.Error("same meta should be compatible")
+	}
+	if got.Compatible(EmbedMeta{Model: "openai:b", Dim: 4}) {
+		t.Error("model change must be incompatible")
+	}
+	if got.Compatible(EmbedMeta{Model: "openai:a", Dim: 8}) {
+		t.Error("dim change must be incompatible")
+	}
+}

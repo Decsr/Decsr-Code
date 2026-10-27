@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -17,6 +18,7 @@ const (
 	indexSubdir          = ".decsr/index"
 	indexFile            = "chunks.gob"
 	fingerprintsFileName = "fingerprints.json"
+	metaFileName         = "embed-meta.json"
 )
 
 // SemanticSearch returns deduplicated repository-relative file paths for the
@@ -85,11 +87,21 @@ func buildOrRefreshIndex(root string, files []string, emb embedder.Embedder) (in
 	idxPath := filepath.Join(root, indexSubdir, indexFile)
 	fpPath := filepath.Join(root, indexSubdir, fingerprintsFileName)
 
-	idx := index.New(emb)
-	_ = idx.Load(idxPath) // first run: empty, ignore error
+	metaPath := filepath.Join(root, indexSubdir, metaFileName)
 
+	idx := index.New(emb)
+	curMeta := index.MetaFor(emb)
 	prev, _ := index.LoadFingerprints(fpPath)
-	curr, err := index.BuildFingerprints(root, indexableFiles(files))
+	savedMeta, haveMeta := index.LoadMeta(metaPath)
+	// A missing/corrupt index, or one built by a different (or unknown)
+	// embedding model, cannot be diffed against: drop the fingerprints so
+	// every file is re-embedded into a fresh index.
+	if loadErr := idx.Load(idxPath); loadErr != nil || (len(prev) > 0 && (!haveMeta || !savedMeta.Compatible(curMeta))) {
+		prev = map[string]string{}
+		idx = index.New(emb)
+	}
+
+	curr, err := index.BuildFingerprints(root, withinSizeLimit(root, indexableFiles(files)))
 	if err != nil {
 		return idx, err
 	}
@@ -115,17 +127,37 @@ func buildOrRefreshIndex(root string, files []string, emb embedder.Embedder) (in
 			paths[i] = path
 		}
 		if err := idx.Add(ctx, chunks, paths); err != nil {
-			return idx, err
+			// Skip this file and leave it out of the saved fingerprints so
+			// the next run retries it; don't fail the whole build.
+			delete(curr, path)
+			continue
 		}
 	}
 
 	if err := idx.Persist(idxPath); err != nil {
 		return idx, err
 	}
+	if err := index.SaveMeta(metaPath, index.MetaFor(emb)); err != nil {
+		return idx, err
+	}
 	if err := index.SaveFingerprints(fpPath, curr); err != nil {
 		return idx, err
 	}
 	return idx, nil
+}
+
+// withinSizeLimit drops files larger than maxFileBytes (generated bundles,
+// vendored blobs) so they are neither read nor embedded. Files that cannot be
+// stat'ed are kept; the later read reports the real error.
+func withinSizeLimit(root string, files []string) []string {
+	out := make([]string, 0, len(files))
+	for _, f := range files {
+		if st, err := os.Stat(filepath.Join(root, f)); err == nil && st.Size() > maxFileBytes {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 func indexableFiles(files []string) []string {

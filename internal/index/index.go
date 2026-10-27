@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/Decsr/Decsr-Code/internal/chunker"
 	"github.com/Decsr/Decsr-Code/internal/embedder"
@@ -33,6 +34,10 @@ type Index interface {
 	Persist(path string) error
 	Load(path string) error
 }
+
+// maxEmbedBytes caps the text sent to the embedder per chunk so a huge
+// single-chunk file cannot exceed the embedding request limits.
+const maxEmbedBytes = 8 * 1024
 
 // New constructs an in-memory index backed by emb for embeddings.
 func New(emb embedder.Embedder) Index {
@@ -60,14 +65,30 @@ func (m *memIndex) Add(ctx context.Context, chunks []chunker.Chunk, paths []stri
 	}
 	texts := make([]string, len(chunks))
 	for i, c := range chunks {
-		texts[i] = c.Body
+		texts[i] = truncateUTF8(c.Body, maxEmbedBytes)
 	}
 	vecs, err := m.emb.Embed(ctx, texts)
 	if err != nil {
 		return err
 	}
+	if len(vecs) != len(chunks) {
+		return errors.New("index.Add: embedder returned wrong number of vectors")
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// Idempotent per path: drop previous entries for these paths first so a
+	// retried Add never leaves duplicates.
+	drop := make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		drop[p] = struct{}{}
+	}
+	kept := m.entries[:0]
+	for _, e := range m.entries {
+		if _, gone := drop[e.Path]; !gone {
+			kept = append(kept, e)
+		}
+	}
+	m.entries = kept
 	for i, v := range vecs {
 		m.entries = append(m.entries, entry{Path: paths[i], ChunkName: chunks[i].Name, Vector: v})
 	}
@@ -117,17 +138,30 @@ func (m *memIndex) Search(ctx context.Context, query string, k int) ([]Hit, erro
 }
 
 func (m *memIndex) Persist(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
-	f, err := os.Create(path) // #nosec G304 -- path is constructed from project root + constant
+	// Write to a temp file in the same directory and rename so a crash never
+	// leaves a truncated index behind.
+	f, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err
 	}
-	defer func() { _ = f.Close() }()
+	tmp := f.Name()
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return gob.NewEncoder(f).Encode(m.entries)
+	err = gob.NewEncoder(f).Encode(m.entries)
+	m.mu.RUnlock()
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+	}
+	return err
 }
 
 func (m *memIndex) Load(path string) error {
@@ -162,4 +196,15 @@ func cosine(a, b []float32) float32 {
 		return 0
 	}
 	return float32(dot / (math.Sqrt(na) * math.Sqrt(nb)))
+}
+
+// truncateUTF8 cuts s to at most n bytes on a rune boundary.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

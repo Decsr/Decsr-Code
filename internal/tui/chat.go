@@ -36,6 +36,7 @@ type ChatModel struct {
 	systemPrompt string
 	reviseFn     ReviseFunc // called when PM decides to revise an artifact
 	revising     bool       // true while a revision is in progress
+	gen          int        // stream generation; bumped on cancel so stale stream messages are dropped
 
 	root     string           // repo root, used to discover .md files
 	attached []chatAttachment // markdown files added to the chat context
@@ -74,36 +75,37 @@ func (m ChatModel) WithFileContext(root string) ChatModel {
 func (m ChatModel) Init() tea.Cmd { return nil }
 
 // chatSendCmd sends the current conversation to the LLM and streams tokens.
-func chatSendCmd(llm runner.LLMRunner, ctx context.Context, systemPrompt string, history []runner.ConvMessage) tea.Cmd {
+func chatSendCmd(llm runner.LLMRunner, ctx context.Context, gen int, systemPrompt string, history []runner.ConvMessage) tea.Cmd {
 	return func() tea.Msg {
 		ch, err := llm.Complete(ctx, runner.CompletionRequest{
 			SystemPrompt: systemPrompt,
 			Messages:     history,
 		})
 		if err != nil {
-			return ChatTokenMsg{Text: "error: " + err.Error(), Done: true}
+			return ChatTokenMsg{Text: "error: " + err.Error(), Done: true, Gen: gen}
 		}
 		// Return the channel wrapped so TUI can drain it.
-		return chatStreamStartMsg{ch: ch}
+		return chatStreamStartMsg{ch: ch, gen: gen}
 	}
 }
 
 // chatStreamStartMsg carries the token channel to the Update loop.
 type chatStreamStartMsg struct {
-	ch <-chan runner.Token
+	ch  <-chan runner.Token
+	gen int
 }
 
 // chatDrainCmd reads one token from the channel.
-func chatDrainCmd(ch <-chan runner.Token) tea.Cmd {
+func chatDrainCmd(ch <-chan runner.Token, gen int) tea.Cmd {
 	return func() tea.Msg {
 		tok, ok := <-ch
 		if !ok {
-			return ChatTokenMsg{Done: true}
+			return ChatTokenMsg{Done: true, Gen: gen}
 		}
 		if tok.Error != nil {
-			return ChatTokenMsg{Text: "error: " + tok.Error.Error(), Done: true}
+			return ChatTokenMsg{Text: "error: " + tok.Error.Error(), Done: true, Gen: gen}
 		}
-		return chatRawToken{text: tok.Text, done: tok.Done, ch: ch}
+		return chatRawToken{text: tok.Text, done: tok.Done, ch: ch, gen: gen}
 	}
 }
 
@@ -111,6 +113,7 @@ type chatRawToken struct {
 	text string
 	done bool
 	ch   <-chan runner.Token
+	gen  int
 }
 
 func (m ChatModel) Update(msg tea.Msg) (ChatModel, tea.Cmd) {
@@ -133,6 +136,7 @@ func (m ChatModel) Update(msg tea.Msg) (ChatModel, tea.Cmd) {
 			// Only allow cancel while waiting.
 			if msg.String() == "ctrl+c" || msg.String() == "esc" {
 				m.cancelFn()
+				m.gen++
 				m.waiting = false
 				// Recreate context for next use.
 				m.ctx, m.cancelFn = context.WithCancel(context.Background())
@@ -162,7 +166,7 @@ func (m ChatModel) Update(msg tea.Msg) (ChatModel, tea.Cmd) {
 			m.lines = append(m.lines, chatLine{role: "user", content: userMsg})
 			m.waiting = true
 			m.refreshViewport()
-			return m, chatSendCmd(m.llm, m.ctx, m.systemPrompt+attachmentBlock(m.attached), m.history)
+			return m, chatSendCmd(m.llm, m.ctx, m.gen, m.systemPrompt+attachmentBlock(m.attached), m.history)
 		case "left":
 			if m.cursor > 0 {
 				m.cursor--
@@ -186,19 +190,28 @@ func (m ChatModel) Update(msg tea.Msg) (ChatModel, tea.Cmd) {
 		}
 
 	case chatStreamStartMsg:
+		if msg.gen != m.gen {
+			return m, nil
+		}
 		// Start draining.
 		m.lines = append(m.lines, chatLine{role: "assistant", content: ""})
-		return m, chatDrainCmd(msg.ch)
+		return m, chatDrainCmd(msg.ch, msg.gen)
 
 	case ChatTokenMsg:
+		if msg.Gen != m.gen {
+			return m, nil
+		}
 		// Terminal message from chatSendCmd/chatDrainCmd (error or closed
 		// channel): finalise the turn through the normal done path.
 		if n := len(m.lines); msg.Text != "" && (n == 0 || m.lines[n-1].role != "assistant") {
 			m.lines = append(m.lines, chatLine{role: "assistant", content: ""})
 		}
-		return m.Update(chatRawToken{text: msg.Text, done: true})
+		return m.Update(chatRawToken{text: msg.Text, done: true, gen: msg.Gen})
 
 	case chatRawToken:
+		if msg.gen != m.gen {
+			return m, nil
+		}
 		if len(m.lines) > 0 {
 			last := &m.lines[len(m.lines)-1]
 			if last.role == "assistant" {
@@ -226,7 +239,7 @@ func (m ChatModel) Update(msg tea.Msg) (ChatModel, tea.Cmd) {
 			m.waiting = false
 			return m, nil
 		}
-		return m, chatDrainCmd(msg.ch)
+		return m, chatDrainCmd(msg.ch, msg.gen)
 
 	case chatRevisionDoneMsg:
 		m.revising = false

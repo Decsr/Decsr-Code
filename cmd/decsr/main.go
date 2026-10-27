@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -282,7 +283,9 @@ func runTaskFlow(root, taskInput, branch, uiMode string, cfg config.Config, ws a
 	pipelineCtx, pipelineCancel := context.WithCancel(ctx)
 	defer pipelineCancel()
 
+	pipelineDone := make(chan struct{})
 	go func() {
+		defer close(pipelineDone)
 		taskRunner := decsr.NewTaskRunner(b, agents, cfg, ws, root)
 		p.Send(tui.TaskRunnerReadyMsg{Runner: taskRunner, Cancel: pipelineCancel})
 		var err error
@@ -306,6 +309,13 @@ func runTaskFlow(root, taskInput, branch, uiMode string, cfg config.Config, ws a
 	final, ok := result.(tui.Model)
 	if !ok {
 		return
+	}
+
+	// A follow-up flow must not start while the cancelled pipeline is still
+	// touching .decsr artifacts and bd state.
+	if final.PauseForModelChange() || final.ReturnToMenu() {
+		pipelineCancel()
+		waitForPipeline(pipelineDone, pipelineShutdownTimeout)
 	}
 
 	// Pause-to-change-model: show the per-agent setup screen, then resume the
@@ -708,4 +718,20 @@ func detectGoModulePath(root string) string {
 		}
 	}
 	return ""
+}
+
+// pipelineShutdownTimeout bounds how long a follow-up flow waits for the
+// cancelled pipeline goroutine to exit.
+const pipelineShutdownTimeout = 15 * time.Second
+
+// waitForPipeline blocks until done is closed or timeout elapses (logging a
+// warning in the latter case). Returns true when the pipeline exited.
+func waitForPipeline(done <-chan struct{}, timeout time.Duration) bool {
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		slog.Warn("previous pipeline did not stop in time; continuing", slog.Duration("timeout", timeout))
+		return false
+	}
 }

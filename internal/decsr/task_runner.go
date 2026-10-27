@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Decsr/Decsr-Code/internal/agent"
@@ -66,7 +67,7 @@ type TaskRunner struct {
 	pipeline       string // execution pipeline: green/brown/fix/rnd
 	niceToHave     map[string][]string
 	agentDurations map[bus.AgentRole]time.Duration
-	codingStarted  time.Time
+	codingStarted  atomic.Pointer[time.Time]
 
 	// startedAt marks the start of the whole run, for the total wall-clock stat.
 	startedAt time.Time
@@ -146,7 +147,18 @@ func (tr *TaskRunner) SetInteractive(v bool) { tr.interactive = v }
 func (tr *TaskRunner) CurrentState() PipelineState { return tr.state }
 
 // CodingStarted returns the timestamp when the coder was first invoked.
-func (tr *TaskRunner) CodingStarted() time.Time { return tr.codingStarted }
+func (tr *TaskRunner) CodingStarted() time.Time {
+	if t := tr.codingStarted.Load(); t != nil {
+		return *t
+	}
+	return time.Time{}
+}
+
+// markCodingStarted records the first coder invocation time; later calls are no-ops.
+func (tr *TaskRunner) markCodingStarted() {
+	now := time.Now()
+	tr.codingStarted.CompareAndSwap(nil, &now)
+}
 
 // AgentDurations returns cumulative wall-clock time each agent has spent running.
 func (tr *TaskRunner) AgentDurations() map[bus.AgentRole]time.Duration {
@@ -542,6 +554,10 @@ func (tr *TaskRunner) implementAndReview(ctx context.Context, spec agent.TaskSpe
 		// Create new beads for the fix tasks.
 		tasks = verdict.SubTasks
 		beadIDs = tr.createSubTaskBeads(ctx, tasks)
+		// Persist the fix-round plan so a resume can resolve these beads' descriptions.
+		if err := tr.writeSubTasks(tasks, beadIDs); err != nil {
+			tr.event(fmt.Sprintf("warning: write sub-task plan: %v", err))
+		}
 	}
 
 	tr.event(fmt.Sprintf("quality review loop exhausted after %d iterations — remaining issues moved to nice-to-have", maxIters))
@@ -949,8 +965,17 @@ func (tr *TaskRunner) executeBeads(ctx context.Context, spec agent.TaskSpec, ctx
 	// ── Phase A: QA writes tests for ALL sub-tasks first (TDD across the whole
 	// plan) before any implementation begins. Skipped for the fix pipeline,
 	// where the coder applies the fix first and QA tends to tests afterwards. ──
+	// On resume, sub-tasks already closed keep their tests (they may have been
+	// fixed during implementation), so only open ones get new tests.
 	if !skipTDD {
-		tr.generateAllTests(ctx, ctxFragment, tasks)
+		var closedIDs map[string]bool
+		if closed, err := beads.Children(ctx, tr.root, tr.taskBeadID, "closed"); err == nil {
+			closedIDs = make(map[string]bool, len(closed))
+			for _, c := range closed {
+				closedIDs[c.ID] = true
+			}
+		}
+		tr.generateAllTests(ctx, ctxFragment, tasksNeedingTests(tasks, idByKey, closedIDs))
 	}
 
 	// ── Phase B: Coder implements ALL sub-tasks (bead-ordered), accumulating
@@ -999,6 +1024,18 @@ func (tr *TaskRunner) executeBeads(ctx context.Context, spec agent.TaskSpec, ctx
 	// ── Phase C: one global build → test → fix loop over the whole project,
 	// only now that every stage is implemented. ──
 	return tr.globalBuildFix(ctx, ctxFragment, implFiles)
+}
+
+// tasksNeedingTests filters out sub-tasks whose bead is already closed.
+func tasksNeedingTests(tasks []agent.SubTask, idByKey map[string]string, closedIDs map[string]bool) []agent.SubTask {
+	out := make([]agent.SubTask, 0, len(tasks))
+	for _, t := range tasks {
+		if closedIDs[idByKey[t.Key]] {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 // verifySubtasksComplete returns an error if any child of the task bead is not
@@ -1125,9 +1162,7 @@ func (tr *TaskRunner) generateAllTests(ctx context.Context, ctxFragment string, 
 // happens globally (globalBuildFix), so this performs no build/fix loop.
 func (tr *TaskRunner) implementBead(ctx context.Context, ctxFragment, title, description string) ([]string, error) {
 	tr.setState(PipelineCoding)
-	if tr.codingStarted.IsZero() {
-		tr.codingStarted = time.Now()
-	}
+	tr.markCodingStarted()
 	resp, err := tr.runAgent(ctx, bus.RoleCoder, agent.CoderPayload{
 		Plan:           title + "\n\n" + description,
 		ProjectContext: ctxFragment,
@@ -1159,6 +1194,10 @@ func (tr *TaskRunner) globalBuildFix(ctx context.Context, ctxFragment string, fi
 		maxAttempts = tr.cfg.Project.MaxFixAttempts
 	}
 
+	// Hard cap so the loop terminates even without a QA agent: enough attempts
+	// to cover every QA escalation round plus a final batch.
+	hardCap := maxAttempts * (maxQAVerifyRounds + 1)
+
 	qaVerifyRound := 0
 	for attempt := 0; ; attempt++ {
 		tr.setState(PipelineCoding)
@@ -1179,6 +1218,10 @@ func (tr *TaskRunner) globalBuildFix(ctx context.Context, ctxFragment string, fi
 				tr.event("implementation complete — tests pass")
 				return nil
 			}
+		}
+
+		if attempt > hardCap {
+			return fmt.Errorf("build/test still failing after %d fix attempts — giving up", attempt)
 		}
 
 		if attempt > 0 && attempt%maxAttempts == 0 && hasQA {
@@ -1392,8 +1435,8 @@ func (tr *TaskRunner) runAgent(ctx context.Context, role bus.AgentRole, payload 
 		return bus.Message{}, fmt.Errorf("no agent for role %q", role)
 	}
 
-	if role == bus.RoleCoder && tr.codingStarted.IsZero() {
-		tr.codingStarted = time.Now()
+	if role == bus.RoleCoder {
+		tr.markCodingStarted()
 	}
 
 	tr.unloadOnSwitch(ctx, role)
@@ -1479,7 +1522,7 @@ func (tr *TaskRunner) bootstrapForTDD(spec agent.TaskSpec) {
 	if !specImpliesGo(spec, tr.cfg.Project.Language) {
 		return
 	}
-	module, err := bootstrapGoModule(tr.root, spec.Title)
+	module, err := bootstrapGoModule(tr.root, spec.Title, tr.cfg.Project.ModulePath)
 	if err != nil {
 		tr.event(fmt.Sprintf("warning: go.mod bootstrap: %v", err))
 		return
@@ -1614,7 +1657,7 @@ func (tr *TaskRunner) collectStats() summaryStats {
 	}
 	return summaryStats{
 		startedAt:      tr.startedAt,
-		codingStarted:  tr.codingStarted,
+		codingStarted:  tr.CodingStarted(),
 		agentDurations: tr.agentDurations,
 		usageByRole:    usage,
 		subTasks:       tr.subTaskCount,

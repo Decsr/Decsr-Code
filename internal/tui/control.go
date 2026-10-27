@@ -206,8 +206,9 @@ func (m ControlModel) updateOverlay(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// does not host it. Nothing to dispatch here.
 	}
 
-	// Overlay closed — resume listening to bus events.
-	return m, waitForBusEvent(m.events)
+	// The BusMessageMsg handler keeps the single bus waiter armed (bus messages
+	// bypass overlays), so closing an overlay must not start another reader.
+	return m, nil
 }
 
 func (m ControlModel) View() string {

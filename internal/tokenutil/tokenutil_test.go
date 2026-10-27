@@ -3,6 +3,7 @@ package tokenutil
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestEstimateTokens(t *testing.T) {
@@ -67,5 +68,36 @@ func TestTruncateSourceFiles(t *testing.T) {
 	}
 	if totalChars >= 4800 {
 		t.Error("expected truncation to reduce total size")
+	}
+}
+
+func TestTruncate_RuneSafe(t *testing.T) {
+	text := strings.Repeat("việt日本😀", 200)
+	for n := 1; n < 40; n++ {
+		if got := Truncate(text, n); !utf8.ValidString(got) {
+			t.Fatalf("Truncate(maxTokens=%d) produced invalid UTF-8", n)
+		}
+	}
+}
+
+func TestTruncateSourceFiles_Deterministic(t *testing.T) {
+	files := map[string]string{}
+	for _, n := range []string{"e", "b", "d", "a", "c", "f", "g", "h"} {
+		files[n] = strings.Repeat("x", 400) // 100 tokens each
+	}
+	first := TruncateSourceFiles(files, 350)
+	for i := 0; i < 30; i++ {
+		got := TruncateSourceFiles(files, 350)
+		if len(got) != len(first) {
+			t.Fatalf("run %d: %d files vs %d", i, len(got), len(first))
+		}
+		for k, v := range first {
+			if got[k] != v {
+				t.Fatalf("run %d: file set/content differs at %q", i, k)
+			}
+		}
+	}
+	if _, ok := first["a"]; !ok {
+		t.Error("lexically first file must survive")
 	}
 }

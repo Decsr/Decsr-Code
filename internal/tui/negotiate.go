@@ -183,6 +183,16 @@ func (m NegotiateModel) Update(msg tea.Msg) (NegotiateModel, tea.Cmd) {
 		}
 	}
 
+	// Only navigation keys scroll the transcript; typed characters (f, b, d,
+	// u, space, j, k, ...) belong to the input line.
+	if km, ok := msg.(tea.KeyMsg); ok {
+		switch km.String() {
+		case "pgup", "pgdown", "up", "down":
+		default:
+			return m, nil
+		}
+	}
+
 	var cmd tea.Cmd
 	m.vp, cmd = m.vp.Update(msg)
 	return m, cmd

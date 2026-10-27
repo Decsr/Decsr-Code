@@ -2,7 +2,9 @@ package bus
 
 import (
 	"fmt"
+	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -103,4 +105,90 @@ func TestHandleSocketConn_NoGoroutineLeak(t *testing.T) {
 	// Publish after close — writer goroutine must not block indefinitely.
 	b.Publish(NewMessage(RoleSystem, "", MsgEvent, "post-close"))
 	time.Sleep(50 * time.Millisecond) // give handler time to notice the close
+}
+
+func (b *Bus) subCount() int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.subs)
+}
+
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestUnsubscribe(t *testing.T) {
+	b := New()
+	ch := b.Subscribe()
+	other := b.Subscribe()
+	b.Unsubscribe(ch)
+	if n := b.subCount(); n != 1 {
+		t.Fatalf("subs = %d, want 1", n)
+	}
+	b.Publish(NewMessage(RoleSystem, "", MsgEvent, "x"))
+	select {
+	case <-ch:
+		t.Fatal("unsubscribed channel received message")
+	default:
+	}
+	select {
+	case <-other:
+	default:
+		t.Fatal("remaining subscriber missed message")
+	}
+	b.Unsubscribe(ch) // idempotent
+}
+
+func TestHandleSocketConn_UnsubscribesOnDisconnect(t *testing.T) {
+	b := New()
+	sock := tempSock(t, "unsub")
+	stop := startServer(t, b, sock)
+	defer close(stop)
+
+	client, err := DialUnix(sock)
+	if err != nil {
+		t.Fatalf("DialUnix: %v", err)
+	}
+	waitFor(t, "subscribe", func() bool { return b.subCount() == 1 })
+	_ = client.Close()
+	waitFor(t, "unsubscribe", func() bool { return b.subCount() == 0 })
+}
+
+func TestHandleSocketConn_RejectsOversizedMessage(t *testing.T) {
+	b := New()
+	sock := tempSock(t, "big")
+	stop := startServer(t, b, sock)
+	defer close(stop)
+	ch := b.Subscribe()
+
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	// One JSON value larger than the cap.
+	payload := `{"content":"` + strings.Repeat("a", maxSocketMessageSize+1024) + `"}` + "\n"
+	go func() { _, _ = conn.Write([]byte(payload)) }()
+
+	// Server must drop the connection (read returns EOF/error) without publishing.
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	buf := make([]byte, 1)
+	if _, err := conn.Read(buf); err == nil {
+		t.Fatal("expected connection to be closed")
+	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		t.Fatal("connection not closed for oversized message")
+	}
+	select {
+	case m := <-ch:
+		t.Fatalf("oversized message was published: %v", m.Type)
+	default:
+	}
 }

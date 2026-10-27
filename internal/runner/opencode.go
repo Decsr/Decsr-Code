@@ -89,10 +89,35 @@ func (r OpenCodeRunner) runRaw(ctx context.Context, prompt, model string) ([]byt
 		}
 		return nil, fmt.Errorf("opencode: %w: %s", err, stderrStr)
 	}
-	if rl := ClassifyRateLimit("opencode", out.String()); rl != nil {
+	// On success only error events are scanned; the model's own answer text
+	// may legitimately mention "rate limit" or "429".
+	if rl := ClassifyRateLimit("opencode", openCodeErrorFragments(out.Bytes())...); rl != nil {
 		return nil, rl
 	}
 	return out.Bytes(), nil
+}
+
+// openCodeErrorFragments returns the raw error payloads of "error" events in an
+// opencode NDJSON stream, ignoring text parts.
+func openCodeErrorFragments(data []byte) []string {
+	var frags []string
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var event struct {
+			Type  string          `json:"type"`
+			Error json.RawMessage `json:"error"`
+		}
+		if err := json.Unmarshal(line, &event); err != nil {
+			continue
+		}
+		if event.Type == "error" || len(event.Error) > 0 {
+			frags = append(frags, string(line))
+		}
+	}
+	return frags
 }
 
 // extractOpenCodeResponseWithUsage parses NDJSON event stream from opencode --format json.

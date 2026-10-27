@@ -187,7 +187,7 @@ func Save(root string, cfg Config) error {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, ProjectFilename), data, 0o600)
+	return safefile.WriteFile(dir, ProjectFilename, data, 0o600)
 }
 
 // SaveGlobal writes cfg to ~/.decsr/config.yaml.
@@ -199,8 +199,13 @@ func SaveGlobal(cfg Config) error {
 	// Merge with existing global config to preserve other settings.
 	existing := Config{}
 	if gDir := globalConfigDir(); gDir != "" {
-		if loaded, loadErr := loadFile(gDir, GlobalFilename); loadErr == nil {
+		loaded, loadErr := loadFile(gDir, GlobalFilename)
+		switch {
+		case loadErr == nil:
 			existing = loaded
+		case !errors.Is(loadErr, os.ErrNotExist):
+			// Do not clobber an existing but unreadable/unparseable config.
+			return loadErr
 		}
 	}
 	merge(&existing, cfg)
@@ -208,7 +213,7 @@ func SaveGlobal(cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, GlobalFilename), data, 0o600)
+	return safefile.WriteFile(dir, GlobalFilename, data, 0o600)
 }
 
 // Load reads config with layered precedence:
@@ -220,21 +225,26 @@ func Load(root string) (Config, error) {
 
 	// Layer 2: global user config.
 	if gDir := globalConfigDir(); gDir != "" {
-		if global, err := loadFile(gDir, GlobalFilename); err == nil {
+		if global, mem, err := loadLayer(gDir, GlobalFilename); err == nil {
 			merge(&cfg, global)
+			mem.apply(&cfg.Project.Context.Memory)
 		}
 	}
 
 	// Layer 3: project-level config.
 	projectDir := filepath.Join(root, GlobalDir)
-	if project, err := loadFile(projectDir, ProjectFilename); err == nil {
+	if project, mem, err := loadLayer(projectDir, ProjectFilename); err == nil {
 		merge(&cfg, project)
+		mem.apply(&cfg.Project.Context.Memory)
 	} else if errors.Is(err, os.ErrNotExist) {
 		// Fallback: try legacy root-level config and auto-migrate.
-		if project, legacyErr := loadFile(root, Filename); legacyErr == nil {
+		if project, mem, legacyErr := loadLayer(root, Filename); legacyErr == nil {
 			merge(&cfg, project)
-			_ = Save(root, project)                      // migrate to new location
-			_ = os.Remove(filepath.Join(root, Filename)) // remove legacy file
+			mem.apply(&cfg.Project.Context.Memory)
+			// Migrate to the new location; only drop the legacy file once saved.
+			if saveErr := Save(root, project); saveErr == nil {
+				_ = os.Remove(filepath.Join(root, Filename))
+			}
 		}
 	} else {
 		return cfg, err
@@ -256,15 +266,51 @@ func LoadProject(root string) Config {
 
 // loadFile reads and unmarshals a single YAML config file scoped to dir.
 func loadFile(dir, filename string) (Config, error) {
+	loaded, _, err := loadLayer(dir, filename)
+	return loaded, err
+}
+
+// memoryOverrides records memory settings whose zero value is meaningful
+// (false / 0) and therefore must be distinguished from "not set" in a layer.
+type memoryOverrides struct {
+	Enabled     *bool    `yaml:"enabled"`
+	HybridAlpha *float64 `yaml:"hybrid_alpha"`
+	AutoPromote *bool    `yaml:"auto_promote"`
+}
+
+func (o memoryOverrides) apply(dst *MemoryConfig) {
+	if o.Enabled != nil {
+		dst.Enabled = *o.Enabled
+	}
+	if o.HybridAlpha != nil {
+		dst.HybridAlpha = *o.HybridAlpha
+	}
+	if o.AutoPromote != nil {
+		dst.AutoPromote = *o.AutoPromote
+	}
+}
+
+// loadLayer is loadFile plus the explicitly-set memory overrides of the file.
+func loadLayer(dir, filename string) (Config, memoryOverrides, error) {
 	data, err := safefile.ReadFile(dir, filename)
 	if err != nil {
-		return Config{}, err
+		return Config{}, memoryOverrides{}, err
 	}
 	var loaded Config
 	if err := yaml.Unmarshal(data, &loaded); err != nil {
-		return Config{}, err
+		return Config{}, memoryOverrides{}, err
 	}
-	return loaded, nil
+	var raw struct {
+		Project struct {
+			Context struct {
+				Memory memoryOverrides `yaml:"memory"`
+			} `yaml:"context"`
+		} `yaml:"project"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return Config{}, memoryOverrides{}, err
+	}
+	return loaded, raw.Project.Context.Memory, nil
 }
 
 // mergeMemory copies non-zero fields from src into dst. A few fields (Enabled,

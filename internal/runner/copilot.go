@@ -206,6 +206,9 @@ func (r CopilotRunner) Complete(ctx context.Context, req CompletionRequest) (<-c
 	return withHeartbeat(ch, defaultHeartbeatInterval), nil
 }
 
+// copilotMaxPromptBytes stays safely under Linux MAX_ARG_STRLEN (128 KiB).
+const copilotMaxPromptBytes = 100 * 1024
+
 func (r CopilotRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, model string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
 	bin := r.Binary
 	if bin == "" {
@@ -217,6 +220,12 @@ func (r CopilotRunner) startStreamingProcess(ctx context.Context, prompt, system
 	fullPrompt := prompt
 	if systemPrompt != "" {
 		fullPrompt = systemPrompt + "\n\n" + prompt
+	}
+
+	// The prompt is passed as a single argv element and the Copilot CLI is not
+	// known to read it from stdin; Linux caps one argument at 128 KiB.
+	if len(fullPrompt) > copilotMaxPromptBytes {
+		return nil, nil, nil, fmt.Errorf("copilot: prompt too large (%d bytes, max %d) to pass as a command-line argument", len(fullPrompt), copilotMaxPromptBytes)
 	}
 
 	args := []string{"-p", fullPrompt, "--allow-all-tools", "--no-color"}
@@ -272,7 +281,9 @@ func streamCopilotOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buff
 
 	waitErr := cmd.Wait()
 	output := collected.String()
-	if waitErr != nil && strings.TrimSpace(output) == "" {
+	// A non-zero exit with a rate-limit stderr is a failure even if partial
+	// output was streamed first.
+	if waitErr != nil && (strings.TrimSpace(output) == "" || ClassifyRateLimit("copilot", stderr.String()) != nil) {
 		errMsg := strings.TrimSpace(stderr.String())
 		if errMsg == "" {
 			errMsg = waitErr.Error()

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Decsr/Decsr-Code/internal/tokenutil"
 )
@@ -75,9 +76,14 @@ func splitByHeadings(content string) []segment {
 			tokens:    tokenutil.EstimateTokens(body),
 		})
 	}
+	inFence := false
 	for i, ln := range lines {
 		lineNo := i + 1
-		if strings.HasPrefix(strings.TrimSpace(ln), "#") && len(buf) > 0 {
+		trimmed := strings.TrimSpace(ln)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+		}
+		if !inFence && strings.HasPrefix(trimmed, "#") && len(buf) > 0 {
 			flush(lineNo - 1)
 			start = lineNo
 		}
@@ -197,7 +203,7 @@ func tailTokens(s string, tokens int) string {
 	if want >= len(s) {
 		return s
 	}
-	cut := s[len(s)-want:]
+	cut := s[nextRuneStart(s, len(s)-want):]
 	if idx := strings.Index(cut, "\n"); idx > 0 && idx < len(cut)-1 {
 		cut = cut[idx+1:]
 	}
@@ -209,4 +215,12 @@ func max1(n int) int {
 		return 1
 	}
 	return n
+}
+
+// nextRuneStart returns the smallest index >= i that lies on a rune boundary of s.
+func nextRuneStart(s string, i int) int {
+	for i < len(s) && !utf8.RuneStart(s[i]) {
+		i++
+	}
+	return i
 }

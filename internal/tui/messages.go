@@ -63,6 +63,7 @@ type GitRefreshMsg struct{}
 type ChatTokenMsg struct {
 	Text string
 	Done bool
+	Gen  int // stream generation; messages from cancelled streams are ignored
 }
 type ChatClosedMsg struct{}
 
