@@ -1138,7 +1138,7 @@ func (m *Model) regenerateCurrentGate() {
 func (m Model) renderPhaseBar() string {
 	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
 	sepStyle := lipgloss.NewStyle().Foreground(crt.muted)
-	doneStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#73daca")).Bold(true)
+	doneStyle := lipgloss.NewStyle().Foreground(galaxyCyan).Bold(true)
 
 	phaseStyle := func(label string) lipgloss.Style {
 		if c, ok := pipelineColors[label]; ok {
@@ -1270,7 +1270,7 @@ func (m Model) renderPhaseBar() string {
 
 // renderCongratulations renders a centered congratulations banner with pipeline summary.
 func (m Model) renderCongratulations(width, height int) string {
-	successColor := lipgloss.Color("#73daca")
+	successColor := galaxyCyan
 	titleStyle := lipgloss.NewStyle().
 		Foreground(successColor).
 		Bold(true)

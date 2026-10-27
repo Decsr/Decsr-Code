@@ -229,8 +229,8 @@ func (m PickerModel) View() string {
 	if m.treeErr != "" {
 		errBox := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("203")).
-			Foreground(lipgloss.Color("203")).
+			BorderForeground(galaxyRed).
+			Foreground(galaxyRed).
 			Padding(0, 2).
 			Width(cardW).
 			Render("⚠  " + m.treeErr)

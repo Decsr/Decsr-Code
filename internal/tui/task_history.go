@@ -53,7 +53,7 @@ func (m TaskHistoryModel) Update(msg tea.Msg) (TaskHistoryModel, tea.Cmd) {
 func (m TaskHistoryModel) View() string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.primary)
 	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	doneStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#73daca")).Bold(true)
+	doneStyle := lipgloss.NewStyle().Foreground(galaxyCyan).Bold(true)
 	selStyle := lipgloss.NewStyle().Reverse(true)
 
 	var b strings.Builder

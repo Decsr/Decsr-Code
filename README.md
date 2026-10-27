@@ -185,10 +185,15 @@ A dark-grey base with starlight text and nebula, aurora and pulsar accents.
 | Secondary text | dim starlight | `#77758a` |
 | PM | nebula violet | `#9d7cff` |
 | Coder, success | aurora mint | `#6ff2b4` |
+| Coder fixer | deeper mint | `#4fcf95` |
 | QA | cosmic pink | `#ff7ac6` |
 | UX | star gold | `#ffd166` |
 | Security, warnings | pulsar red | `#ff5c7a` |
 | PR, done | comet cyan | `#5ce1e6` |
+| Logo gradient, file-tree hint | nebula purple | `#c77dff` |
+| Navigation, system monitor headers & network | nebula blue | `#7c9cff` |
+| System monitor load warnings | solar orange | `#ffa36b` |
+| Reopen-gate hint | ice | `#9ee8ff` |
 
 The previous amber CRT theme remains available in `internal/tui/styles.go`.
 

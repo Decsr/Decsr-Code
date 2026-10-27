@@ -54,21 +54,36 @@ var themeGalaxy = galaxyTheme{
 // crt is the active theme used across the TUI.
 var crt = themeGalaxy
 
+// Galaxy accent palette shared by roles, pipeline steps and widgets.
+var (
+	galaxyViolet   = lipgloss.Color("#9d7cff") // nebula violet
+	galaxyPurple   = lipgloss.Color("#c77dff") // nebula purple
+	galaxyBlue     = lipgloss.Color("#7c9cff") // nebula blue
+	galaxyMint     = lipgloss.Color("#6ff2b4") // aurora mint
+	galaxyMintDeep = lipgloss.Color("#4fcf95") // deeper aurora mint
+	galaxyPink     = lipgloss.Color("#ff7ac6") // cosmic pink
+	galaxyGold     = lipgloss.Color("#ffd166") // star gold
+	galaxyOrange   = lipgloss.Color("#ffa36b") // solar orange
+	galaxyRed      = lipgloss.Color("#ff5c7a") // pulsar red
+	galaxyCyan     = lipgloss.Color("#5ce1e6") // comet cyan
+	galaxyIce      = lipgloss.Color("#9ee8ff") // ice
+)
+
 // Role colors — each agent gets a distinct accent against the dark base.
 var roleColors = map[string]lipgloss.Color{
-	"pm":          lipgloss.Color("#9d7cff"), // nebula violet — project manager
-	"coder":       lipgloss.Color("#6ff2b4"), // aurora mint
-	"coder_fixer": lipgloss.Color("#4fcf95"), // deeper mint — fixer variant
-	"qa":          lipgloss.Color("#ff7ac6"), // cosmic pink — QA (tests + review)
-	"ux_reviewer": lipgloss.Color("#ffd166"), // star gold
-	"security":    lipgloss.Color("#ff5c7a"), // pulsar red
-	"pr":          lipgloss.Color("#5ce1e6"), // comet cyan
+	"pm":          galaxyViolet,   // nebula violet — project manager
+	"coder":       galaxyMint,     // aurora mint
+	"coder_fixer": galaxyMintDeep, // deeper mint — fixer variant
+	"qa":          galaxyPink,     // cosmic pink — QA (tests + review)
+	"ux_reviewer": galaxyGold,     // star gold
+	"security":    galaxyRed,      // pulsar red
+	"pr":          galaxyCyan,     // comet cyan
 	"system":      crt.dim,
 	// Deprecated roles — kept for legacy Pipeline.
-	"architect": lipgloss.Color("#5ce1e6"),
-	"planner":   lipgloss.Color("#9d7cff"),
-	"tester":    lipgloss.Color("#ff7ac6"),
-	"reviewer":  lipgloss.Color("#ff5c7a"),
+	"architect": galaxyCyan,
+	"planner":   galaxyViolet,
+	"tester":    galaxyPink,
+	"reviewer":  galaxyRed,
 }
 
 func roleColor(role string) lipgloss.Color {
@@ -92,8 +107,8 @@ var pipelineColors = map[string]lipgloss.Color{
 	"UX_REVIEWER":  roleColors["ux_reviewer"],
 	"SEC":          roleColors["security"],
 	"SECURITY":     roleColors["security"],
-	"FIXING":       lipgloss.Color("#ffd166"),
-	"DONE":         lipgloss.Color("#5ce1e6"),
+	"FIXING":       galaxyGold,
+	"DONE":         galaxyCyan,
 	// Legacy entries.
 	"ARCHITECT":    roleColors["architect"],
 	"ARCHITECTURE": roleColors["architect"],
@@ -109,10 +124,10 @@ var pipelineColors = map[string]lipgloss.Color{
 var (
 	styleWaiting = lipgloss.NewStyle().Foreground(crt.dim)
 	styleRunning = lipgloss.NewStyle().Foreground(crt.primary).Bold(true)
-	styleFixing  = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffd166")).Bold(true)
-	styleDone    = lipgloss.NewStyle().Foreground(lipgloss.Color("#5ce1e6")).Bold(true)
+	styleFixing  = lipgloss.NewStyle().Foreground(galaxyGold).Bold(true)
+	styleDone    = lipgloss.NewStyle().Foreground(galaxyCyan).Bold(true)
 	styleError   = lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
-	styleGate    = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff7ac6")).Bold(true)
+	styleGate    = lipgloss.NewStyle().Foreground(galaxyPink).Bold(true)
 )
 
 // Gate banner — phosphor highlight.
