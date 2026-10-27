@@ -36,6 +36,7 @@ bin
 /decsr
 
 /tmp/
+/dist/
 
 # DECSR memory cache (SQLite index; memory/*.md files are committed)
 .decsr/memory.db
