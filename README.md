@@ -22,7 +22,7 @@
   <a href="https://github.com/Decsr/Decsr-Code/releases"><img src="https://img.shields.io/github/v/release/Decsr/Decsr-Code?style=flat-square&color=9d7cff&labelColor=1b1b1f" alt="Latest Release"></a>
   <a href="https://github.com/Decsr/Decsr-Code/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Decsr/Decsr-Code/ci.yml?branch=main&label=CI&style=flat-square&labelColor=1b1b1f" alt="CI"></a>
   <a href="https://github.com/Decsr/Decsr-Code/blob/main/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/Decsr/Decsr-Code?style=flat-square&color=9d7cff&labelColor=1b1b1f" alt="Go version"></a>
-  <a href="https://goreportcard.com/report/github.com/Decsr/Decsr-Code"><img src="https://goreportcard.com/badge/github.com/Decsr/Decsr-Code?style=flat-square" alt="Go Report Card"></a>
+  <a href="https://pkg.go.dev/github.com/Decsr/Decsr-Code"><img src="https://img.shields.io/badge/go.dev-reference-9d7cff?style=flat-square&logo=go&logoColor=white&labelColor=1b1b1f" alt="Go Reference"></a>
 </p>
 
 ---
