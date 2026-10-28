@@ -7,8 +7,15 @@ import (
 )
 
 // applyProjectSetup persists per-agent overrides from a project-setup completion
-// and returns the reloaded merged config. The bool is false when reload fails.
+// and returns the reloaded merged config. The bool is false when save/reload fails.
 func applyProjectSetup(root string, msg setupDoneMsg) (config.Config, bool) {
+	cfg, err := applyProjectSetupWithError(root, msg)
+	return cfg, err == nil
+}
+
+// applyProjectSetupWithError is applyProjectSetup with a real error result so
+// the setup screen can report incremental save failures.
+func applyProjectSetupWithError(root string, msg setupDoneMsg) (config.Config, error) {
 	projectAgents := make(map[string]config.AgentConfig)
 	for role, ov := range msg.agentOverrides {
 		ac := config.AgentConfig{}
@@ -17,6 +24,9 @@ func applyProjectSetup(root string, msg setupDoneMsg) (config.Config, bool) {
 		}
 		if ov.model != "" {
 			ac.Model = ov.model
+		}
+		if ov.effort != "" {
+			ac.Effort = ov.effort
 		}
 		projectAgents[role] = ac
 	}
@@ -31,13 +41,49 @@ func applyProjectSetup(root string, msg setupDoneMsg) (config.Config, bool) {
 		projectCfg.Project.Language = msg.progLanguage
 	}
 	projectCfg.Project.Name = msg.projectName
-	_ = config.Save(root, projectCfg)
+	if err := config.Save(root, projectCfg); err != nil {
+		return config.Config{}, err
+	}
 
 	reloaded, err := config.Load(root)
 	if err != nil {
-		return config.Config{}, false
+		return config.Config{}, err
 	}
-	return reloaded, true
+	return reloaded, nil
+}
+
+// saveProjectSetup persists the current project values incrementally.
+func saveProjectSetup(root string, msg setupDoneMsg) error {
+	_, err := applyProjectSetupWithError(root, msg)
+	return err
+}
+
+// cloneAgentConfigs makes a shallow copy of the agent map so incremental global
+// saves can update provider/model/effort without mutating the caller's config.
+func cloneAgentConfigs(src map[string]config.AgentConfig) map[string]config.AgentConfig {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]config.AgentConfig, len(src))
+	for role, ac := range src {
+		dst[role] = ac
+	}
+	return dst
+}
+
+// saveGlobalSetup applies the selected provider/model/effort to every agent and
+// writes ~/.decsr/config.yaml.
+func saveGlobalSetup(baseAgents map[string]config.AgentConfig, msg setupDoneMsg) error {
+	globalAgents := make(map[string]config.AgentConfig, len(baseAgents))
+	for role, ac := range baseAgents {
+		ac.Runner = msg.provider
+		if msg.model != "" {
+			ac.Model = msg.model
+		}
+		ac.Effort = msg.effort
+		globalAgents[role] = ac
+	}
+	return config.SaveGlobal(config.Config{Agents: globalAgents})
 }
 
 // modelSetupModel is a standalone Bubble Tea model that shows only the per-agent
@@ -52,13 +98,13 @@ type modelSetupModel struct {
 }
 
 func newModelSetupModel(root string, cfg config.Config) modelSetupModel {
-	currentRunner, currentModel := detectDefaultRunnerModel(cfg.Agents)
+	currentRunner, currentModel, currentEffort := detectDefaultRunnerModel(cfg.Agents)
 	projectCfg := config.LoadProject(root)
 	projectOverrides := make(map[string]config.AgentConfig)
 	if projectCfg.Agents != nil {
 		projectOverrides = projectCfg.Agents
 	}
-	setup := NewSetupModelWithOverrides(currentRunner, currentModel,
+	setup := NewSetupModelWithOverrides(currentRunner, currentModel, currentEffort,
 		cfg.Project.Language, cfg.Project.Name, projectOverrides)
 	setup.root = root
 	return modelSetupModel{setup: setup, root: root, cfg: cfg, width: 80, height: 24}
@@ -79,6 +125,11 @@ func (m modelSetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case setupCancelledMsg:
+		return m, tea.Quit
+	case setupClosedMsg:
+		if reloaded, err := config.Load(m.root); err == nil {
+			m.cfg = reloaded
+		}
 		return m, tea.Quit
 	}
 	var cmd tea.Cmd

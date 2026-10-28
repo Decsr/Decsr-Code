@@ -130,27 +130,12 @@ func (m PickerModel) View() string {
 
 	p := homePalette
 
-	headerStyle := lipgloss.NewStyle().
-		Background(p.headerBg).
-		Foreground(p.accent).
-		Bold(true).
-		Padding(0, 2).
-		Width(m.width)
-
-	footerStyle := lipgloss.NewStyle().
-		Background(p.footerBg).
-		Foreground(p.dim).
-		Padding(0, 1).
-		Width(m.width)
-
 	dimStyle := lipgloss.NewStyle().Foreground(p.dim)
-	greenStyle := lipgloss.NewStyle().Foreground(p.green).Bold(true)
 	brightStyle := lipgloss.NewStyle().Foreground(p.bright)
-	goldStyle := lipgloss.NewStyle().Foreground(p.gold).Bold(true)
 	cyanStyle := lipgloss.NewStyle().Foreground(p.cyan)
 	dateStyle := lipgloss.NewStyle().Foreground(p.dim).Italic(true)
 
-	header := headerStyle.Render("◆  decsr  ·  select requirements")
+	header := screenHeader(m.width, "Requirements", filepath.Base(m.root))
 
 	// Build menu card content.
 	cardW := m.width - 8
@@ -166,17 +151,14 @@ func (m PickerModel) View() string {
 	}
 
 	var lines []string
-	lines = append(lines, goldStyle.Render(" ◆ Requirements Source"))
-	lines = append(lines, "")
-
 	for i, item := range m.items {
 		var icon, label string
 		switch {
 		case item.isNew:
-			icon = "✚"
+			icon = "+"
 			label = "New — open editor"
 		case item.isPicker:
-			icon = "📂"
+			icon = "▸"
 			label = "Pick file from repo…"
 		default:
 			icon = "◇"
@@ -195,7 +177,7 @@ func (m PickerModel) View() string {
 				Bold(true).
 				Width(innerW).
 				Render(fmt.Sprintf(" %s %s", icon, label))
-			lines = append(lines, greenStyle.Render("▸")+activeLine+suffix)
+			lines = append(lines, lipgloss.NewStyle().Foreground(focusBorder).Bold(true).Render("▌")+activeLine+suffix)
 			if item.isNew {
 				lines = append(lines, "  "+dimStyle.Render("  Create requirements from scratch"))
 			} else if item.isPicker {
@@ -219,16 +201,12 @@ func (m PickerModel) View() string {
 		}
 	}
 
-	card := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(p.border).
-		Padding(1, 2).
-		Width(cardW).
-		Render(strings.Join(lines, "\n"))
+	card := pixelPanel("◆ REQUIREMENTS SOURCE", p.accent, true,
+		lipgloss.NewStyle().Padding(1, 2).Width(cardW), strings.Join(lines, "\n"))
 
 	if m.treeErr != "" {
 		errBox := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+			Border(pixelBorder).
 			BorderForeground(galaxyRed).
 			Foreground(galaxyRed).
 			Padding(0, 2).
@@ -245,19 +223,7 @@ func (m PickerModel) View() string {
 	body := lipgloss.Place(m.width, vpH, lipgloss.Center, lipgloss.Center, card)
 
 	// Footer with key hints.
-	keyStyle := lipgloss.NewStyle().
-		Background(p.footerBg).
-		Foreground(p.accent).
-		Bold(true)
-	hintText := func(k, desc string) string {
-		return keyStyle.Render(k) + lipgloss.NewStyle().Background(p.footerBg).Foreground(p.dim).Render(" "+desc)
-	}
-	footer := footerStyle.Render(
-		hintText("↑↓", "navigate") + "  " +
-			hintText("Enter", "select") + "  " +
-			hintText("Esc", "menu") + "  " +
-			hintText("q", "quit"),
-	)
+	footer := hintBar(m.width, []keyHint{{"↑↓", "navigate"}, {"Enter", "select"}, {"Esc", "menu"}, {"q", "quit"}}, "")
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }

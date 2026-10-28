@@ -296,15 +296,14 @@ func (m *ChatModel) SetSize(w, h int) {
 }
 
 func (m ChatModel) View() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.primary)
 	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
 	inputStyle := lipgloss.NewStyle().Foreground(crt.bright)
 
-	sep := strings.Repeat("─", m.width)
+	sep := lipgloss.NewStyle().Foreground(crt.border).Render(strings.Repeat("─", m.width))
 
 	if m.picking {
 		return strings.Join([]string{
-			titleStyle.Render("Chat") + "  " + dimStyle.Render("attach context"),
+			screenHeader(m.width, "Chat", "attach context"),
 			sep,
 			m.picker.View(),
 		}, "\n")
@@ -315,9 +314,9 @@ func (m ChatModel) View() string {
 		title = "Chat"
 	}
 
-	hints := "Esc close  Enter send"
+	hints := []keyHint{{"Esc", "close"}, {"Enter", "send"}}
 	if m.root != "" {
-		hints += "  Ctrl+F attach .md"
+		hints = append(hints, keyHint{"Ctrl+F", "attach .md"})
 	}
 
 	var statusLine string
@@ -329,20 +328,20 @@ func (m ChatModel) View() string {
 		statusLine = inputStyle.Render("› ") + renderInputWithCursor(m.input, m.cursor)
 	}
 
-	header := titleStyle.Render(title) + "  " + dimStyle.Render(hints)
+	header := screenHeader(m.width, title, "")
 	if len(m.attached) > 0 {
 		names := make([]string, len(m.attached))
 		for i, a := range m.attached {
 			names[i] = a.rel
 		}
-		header += "\n" + dimStyle.Render("  📎 "+strings.Join(names, ", "))
+		header += "\n" + dimStyle.Render("  ▪ "+strings.Join(names, ", "))
 	}
 
 	return strings.Join([]string{
 		header,
 		sep,
 		m.vp.View(),
-		sep,
+		hintBar(m.width, hints, ""),
 		statusLine,
 	}, "\n")
 }

@@ -37,7 +37,7 @@ func (r OpenCodeRunner) Complete(ctx context.Context, req CompletionRequest) (<-
 		model = r.Model
 	}
 
-	rawBytes, err := r.runRaw(ctx, sb.String(), model)
+	rawBytes, err := r.runRaw(ctx, sb.String(), model, NormalizeEffort(req.Effort))
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func (r OpenCodeRunner) Complete(ctx context.Context, req CompletionRequest) (<-
 	return ch, nil
 }
 
-func (r OpenCodeRunner) runRaw(ctx context.Context, prompt, model string) ([]byte, error) {
+func (r OpenCodeRunner) runRaw(ctx context.Context, prompt, model, effort string) ([]byte, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "opencode"
@@ -67,8 +67,14 @@ func (r OpenCodeRunner) runRaw(ctx context.Context, prompt, model string) ([]byt
 
 	// OpenCode requires "provider/model" format.
 	// For local Ollama models (no provider prefix), add the ollama/ prefix.
-	if !strings.Contains(model, "/") {
-		model = "ollama/" + model
+	local := !strings.Contains(model, "/") || strings.HasPrefix(model, "ollama/")
+	if local {
+		if !strings.HasPrefix(model, "ollama/") {
+			model = "ollama/" + model
+		}
+	} else if effort != "" && !strings.Contains(model, "#") {
+		// Cloud models use #variant for provider-specific reasoning effort.
+		model += "#" + effort
 	}
 
 	args = append(args, "-m", model)

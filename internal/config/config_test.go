@@ -137,6 +137,53 @@ agents:
 	}
 }
 
+func TestLoad_AgentEffortOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+
+	globalDir := filepath.Join(home, GlobalDir)
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	globalContent := `
+agents:
+  coder:
+    effort: high
+  qa:
+    effort: medium
+`
+	if err := os.WriteFile(filepath.Join(globalDir, GlobalFilename), []byte(globalContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectDir := filepath.Join(dir, GlobalDir)
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectContent := `
+agents:
+  coder:
+    effort: default
+  qa:
+    effort: low
+`
+	if err := os.WriteFile(filepath.Join(projectDir, ProjectFilename), []byte(projectContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Agents["coder"].Effort != "default" {
+		t.Errorf("project default should override global high, got %q", cfg.Agents["coder"].Effort)
+	}
+	if cfg.Agents["qa"].Effort != "low" {
+		t.Errorf("expected qa effort=low, got %q", cfg.Agents["qa"].Effort)
+	}
+}
+
 func TestLoad_GlobalConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

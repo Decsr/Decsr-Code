@@ -86,7 +86,7 @@ func (m ControlModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case bus.MsgRequest:
 			if bm.To != "" && bm.To != bus.RoleSystem {
 				r, mdl := runnerModelForRole(m.agentConfigs, bm.To)
-				m.statusbar = m.statusbar.WithRunnerModel(r, mdl)
+				m.statusbar = m.statusbar.WithRunnerModel(r, mdl).WithEffort(effortForKey(m.agentConfigs, string(bm.To)))
 			}
 		}
 
@@ -261,7 +261,7 @@ func (m ControlModel) View() string {
 		warnStyle := lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
 		brightStyle := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
 		confirmBox := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+			Border(pixelBorder).
 			BorderForeground(crt.warn).
 			Padding(1, 3).
 			Render(

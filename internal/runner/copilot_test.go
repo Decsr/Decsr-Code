@@ -135,7 +135,7 @@ func TestStreamCopilotOutput_IncrementalUsage(t *testing.T) {
 }
 
 func TestCopilotStartStreamingProcess_RejectsOversizedPrompt(t *testing.T) {
-	_, _, _, err := CopilotRunner{Binary: "true"}.startStreamingProcess(context.Background(), strings.Repeat("x", 200*1024), "", "")
+	_, _, _, err := CopilotRunner{Binary: "true"}.startStreamingProcess(context.Background(), strings.Repeat("x", 200*1024), "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("expected too-large error, got %v", err)
 	}

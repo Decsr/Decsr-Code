@@ -35,8 +35,8 @@ type AgentPanelModel struct {
 
 func NewAgentPanel(role bus.AgentRole) AgentPanelModel {
 	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = styleRunning
+	s.Spinner = pixelSpinner
+	s.Style = lipgloss.NewStyle()
 	vp := viewport.New(28, 4)
 	vp.SetContent("")
 	return AgentPanelModel{
@@ -140,22 +140,15 @@ func (m AgentPanelModel) View() string {
 		contentW = 2
 	}
 
-	color := roleColor(string(m.role))
-	bSt := lipgloss.NewStyle().Foreground(color)
-
-	header := m.renderHeader(contentW)
-	hRule := strings.Repeat("─", contentW)
+	// Active panels glow in their role colour; idle ones keep the quiet border.
+	borderColor := crt.border
+	if m.state == AgentRunning || m.state == AgentFixing || m.state == AgentGate {
+		borderColor = roleColor(string(m.role))
+	}
+	bSt := lipgloss.NewStyle().Foreground(borderColor)
 
 	var sb strings.Builder
-	sb.WriteString(bSt.Render("╭"+hRule+"╮") + "\n")
-
-	// Header row.
-	vis := lipgloss.Width(header)
-	pad := contentW - vis
-	if pad < 0 {
-		pad = 0
-	}
-	sb.WriteString(bSt.Render("│") + header + strings.Repeat(" ", pad) + bSt.Render("│") + "\n")
+	sb.WriteString(m.renderTopBorder(contentW, bSt) + "\n")
 
 	// Viewport rows.
 	vpLines := strings.Split(m.vp.View(), "\n")
@@ -170,37 +163,50 @@ func (m AgentPanelModel) View() string {
 
 	// Scroll indicator.
 	scrollInfo := m.scrollIndicator()
-	vis = lipgloss.Width(scrollInfo)
-	bottomRule := hRule
+	vis := lipgloss.Width(scrollInfo)
 	if vis > 0 && vis+2 < contentW {
-		bottomRule = strings.Repeat("─", contentW-vis-1) + scrollInfo + "─"
+		sb.WriteString(bSt.Render("└"+strings.Repeat("─", contentW-vis-1)) + scrollInfo + bSt.Render("─┘"))
+	} else {
+		sb.WriteString(bSt.Render("└" + strings.Repeat("─", contentW) + "┘"))
 	}
-	sb.WriteString(bSt.Render("╰" + bottomRule + "╯"))
 	return sb.String()
 }
 
-// renderHeader returns the formatted header line with role name and status.
-func (m AgentPanelModel) renderHeader(_ int) string {
-	roleStyle := lipgloss.NewStyle().Foreground(roleColor(string(m.role))).Bold(true)
-	header := roleStyle.Render(fmt.Sprintf("[%s]", strings.ToUpper(string(m.role))))
-
-	var statusIcon string
+// statusChip returns the small coloured status badge for the panel state.
+func (m AgentPanelModel) statusChip() string {
 	switch m.state {
 	case AgentWaiting:
-		statusIcon = styleWaiting.Render("○ WAITING")
+		return lipgloss.NewStyle().Background(crt.muted).Foreground(crt.dim).Bold(true).Render(" ▫ WAITING ")
 	case AgentRunning:
-		statusIcon = m.spinner.View() + styleRunning.Render(" RUNNING")
+		return chip(m.spinner.View()+" RUNNING", roleColor(string(m.role)))
 	case AgentFixing:
-		statusIcon = m.spinner.View() + styleFixing.Render(" FIXING")
+		return chip(m.spinner.View()+" FIXING", galaxyGold)
 	case AgentDone:
-		statusIcon = styleDone.Render("✓ DONE")
+		return chip("✓ DONE", galaxyCyan)
 	case AgentError:
-		statusIcon = styleError.Render("✗ ERROR")
+		return chip("✗ ERROR", crt.warn)
 	case AgentGate:
-		statusIcon = styleGate.Render("⏸ GATE")
+		return chip("⏸ GATE", galaxyPink)
 	}
+	return ""
+}
 
-	return header + "  " + statusIcon
+// renderTopBorder draws ┌─ ■ ROLE ───── [STATUS] ─┐ with the role title in
+// its colour and the status badge on the right.
+func (m AgentPanelModel) renderTopBorder(contentW int, bSt lipgloss.Style) string {
+	roleStyle := lipgloss.NewStyle().Foreground(roleColor(string(m.role))).Bold(true)
+	left := bSt.Render("┌─ ") + roleStyle.Render("■ "+strings.ToUpper(string(m.role))) + bSt.Render(" ")
+	right := m.statusChip() + bSt.Render(" ─┐")
+	fill := contentW + 2 - lipgloss.Width(left) - lipgloss.Width(right)
+	if fill < 1 {
+		// Too narrow for the badge: keep the title and close the border.
+		fill = contentW + 2 - lipgloss.Width(left) - 1
+		if fill < 0 {
+			fill = 0
+		}
+		return left + bSt.Render(strings.Repeat("─", fill)+"┐")
+	}
+	return left + bSt.Render(strings.Repeat("─", fill)) + right
 }
 
 // scrollIndicator returns a short string showing scroll position.
@@ -253,7 +259,7 @@ func (m *AgentPanelModel) SetSize(w, h int) {
 	if contentW < 2 {
 		contentW = 2
 	}
-	contentH := h - 3 // top border + header + bottom border
+	contentH := h - 2 // top border (with title) + bottom border
 	if contentH < 1 {
 		contentH = 1
 	}

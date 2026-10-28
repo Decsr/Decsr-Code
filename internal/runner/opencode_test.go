@@ -3,8 +3,10 @@ package runner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -64,7 +66,7 @@ func writeFakeOpenCode(t *testing.T, stdout string) string {
 
 func TestOpenCodeRunRaw_AnswerTextMentioningRateLimitIsNotRateLimit(t *testing.T) {
 	bin := writeFakeOpenCode(t, `{"type":"text","part":{"text":"To handle a rate limit, back off on HTTP 429 (too many requests)."}}`+"\n")
-	out, err := OpenCodeRunner{Binary: bin}.runRaw(context.Background(), "hi", "m")
+	out, err := OpenCodeRunner{Binary: bin}.runRaw(context.Background(), "hi", "m", "")
 	if err != nil {
 		t.Fatalf("answer text must not be classified as rate limit: %v", err)
 	}
@@ -75,9 +77,54 @@ func TestOpenCodeRunRaw_AnswerTextMentioningRateLimitIsNotRateLimit(t *testing.T
 
 func TestOpenCodeRunRaw_ErrorEventIsRateLimit(t *testing.T) {
 	bin := writeFakeOpenCode(t, `{"type":"error","error":{"data":{"message":"429 too many requests"}}}`+"\n")
-	_, err := OpenCodeRunner{Binary: bin}.runRaw(context.Background(), "hi", "m")
+	_, err := OpenCodeRunner{Binary: bin}.runRaw(context.Background(), "hi", "m", "")
 	var rl *RateLimitError
 	if !errors.As(err, &rl) {
 		t.Fatalf("expected RateLimitError, got %v", err)
+	}
+}
+
+func TestOpenCodeRunRaw_AppliesEffortVariant(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "opencode")
+	argsFile := filepath.Join(dir, "args.txt")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\n", argsFile)
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := (OpenCodeRunner{Binary: bin}).runRaw(context.Background(), "hi", "prov/model", "high"); err != nil {
+		t.Fatalf("runRaw: %v", err)
+	}
+	args, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "prov/model#high") {
+		t.Fatalf("expected effort variant in args, got:\n%s", args)
+	}
+}
+
+func TestOpenCodeRunRaw_LocalModelSkipsEffortVariant(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "opencode")
+	argsFile := filepath.Join(dir, "args.txt")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\n", argsFile)
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := (OpenCodeRunner{Binary: bin}).runRaw(context.Background(), "hi", "qwen2.5-coder:3b", "high"); err != nil {
+		t.Fatalf("runRaw: %v", err)
+	}
+	args, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "ollama/qwen2.5-coder:3b") {
+		t.Fatalf("expected ollama prefix in args, got:\n%s", args)
+	}
+	if strings.Contains(string(args), "#high") {
+		t.Fatalf("local models must not get an effort variant, got:\n%s", args)
 	}
 }

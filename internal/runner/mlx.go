@@ -90,6 +90,9 @@ func (r *MLXRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan
 		Stream:    true,
 		MaxTokens: mlxMaxTokens,
 	}
+	if effort := NormalizeEffort(req.Effort); effort != "" {
+		body.ReasoningEffort = mapOpenAIReasoningEffort(effort)
+	}
 
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -286,6 +289,8 @@ type mlxChatRequest struct {
 	Messages  []mlxChatMessage `json:"messages"`
 	Stream    bool             `json:"stream"`
 	MaxTokens int              `json:"max_tokens,omitempty"`
+	// ReasoningEffort is passed through to reasoning-capable models.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type mlxChatMessage struct {

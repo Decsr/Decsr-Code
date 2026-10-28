@@ -198,13 +198,10 @@ func (m modelMemoryModel) result() config.ModelMemoryConfig {
 }
 
 func (m modelMemoryModel) View() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(homePalette.accent)
 	dimStyle := lipgloss.NewStyle().Foreground(homePalette.dim)
 	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(homePalette.green)
 
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("🧠 Model Memory"))
-	b.WriteString("\n\n")
 	b.WriteString(dimStyle.Render("Cap how much memory local models may use. Choose RAM (auto-converted\nto a per-agent context window) OR a fixed context size. ←/→ toggle mode."))
 	b.WriteString("\n\n")
 
@@ -241,8 +238,9 @@ func (m modelMemoryModel) View() string {
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(dimStyle.Render("  enter/ctrl+s save   ·   esc cancel"))
-	return lipgloss.NewStyle().Padding(1, 2).Render(b.String())
+	body := lipgloss.NewStyle().Padding(1, 2).Render(b.String())
+	return screenHeader(m.width, "Model Memory", "") + "\n" + body + "\n" +
+		hintBar(m.width, []keyHint{{"Enter", "save"}, {"Ctrl+S", "save"}, {"Esc", "cancel"}}, "")
 }
 
 // renderPreview lists the estimated context window the RAM limit yields for

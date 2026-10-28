@@ -151,6 +151,7 @@ type MemoryConfig struct {
 type AgentConfig struct {
 	Runner           string   `yaml:"runner,omitempty"`
 	Model            string   `yaml:"model,omitempty"`
+	Effort           string   `yaml:"effort,omitempty"`             // "" = unset, "default" = provider default
 	MaxContextTokens int      `yaml:"max_context_tokens,omitempty"` // 0 = no limit (for local models)
 	Skills           []string `yaml:"-"`                            // always from defaults, never persisted
 }
@@ -454,6 +455,9 @@ func merge(dst *Config, src Config) {
 			}
 			if ac.Model != "" {
 				existing.Model = ac.Model
+			}
+			if ac.Effort != "" {
+				existing.Effort = ac.Effort
 			}
 			if ac.MaxContextTokens > 0 {
 				existing.MaxContextTokens = ac.MaxContextTokens

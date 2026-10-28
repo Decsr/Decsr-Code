@@ -38,7 +38,7 @@ func ClaudeListModels() ([]string, error) {
 func (r ClaudeRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan Token, error) {
 	prompt := buildClaudePrompt(req.Messages)
 
-	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, prompt, req.SystemPrompt)
+	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, prompt, req.SystemPrompt, NormalizeEffort(req.Effort))
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func buildClaudePrompt(messages []ConvMessage) string {
 	return sb.String()
 }
 
-func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
+func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, effort string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "claude"
@@ -70,6 +70,9 @@ func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemP
 	args := []string{"--output-format", "stream-json", "--verbose", "--no-session-persistence", "--allowedTools", ""}
 	if r.Model != "" {
 		args = append(args, "--model", r.Model)
+	}
+	if effort != "" {
+		args = append(args, "--effort", mapClaudeEffort(effort))
 	}
 	if systemPrompt != "" {
 		args = append(args, "--system-prompt", systemPrompt)

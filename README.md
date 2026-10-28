@@ -102,8 +102,22 @@ You can review, revise via chat, and approve — all from the TUI.
 Three-layer config with sensible defaults:
 
 1. **Built-in defaults** — works out of the box for Go projects
-2. **Global user config** (`~/.decsr/config.yaml`) — your preferred models and runners
+2. **Global user config** (`~/.decsr/config.yaml`) — your preferred models, runners, and reasoning effort
 3. **Project config** (`.decsr/project.yaml`) — project-specific overrides (language, test commands, scoping)
+
+Each agent can set a reasoning effort next to its runner and model:
+
+```yaml
+agents:
+  coder:
+    runner: opencode
+    model: opencode/gpt-5.3-codex
+    effort: high
+```
+
+Effort levels depend on the model/provider (for example `low`, `medium`,
+`high`, `xhigh`, `max`); `effort: default` leaves the choice to the provider.
+The TUI's setup screens show only the levels the selected model supports.
 
 </details>
 

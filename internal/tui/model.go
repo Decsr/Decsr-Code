@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Decsr/Decsr-Code/internal/artifacts"
 	"github.com/Decsr/Decsr-Code/internal/bus"
@@ -272,6 +273,7 @@ func New(events <-chan bus.Message, root, wsPath string, llm runner.LLMRunner, c
 	}
 
 	runnerName, modelName := runnerModelFromConfig(cfg)
+	effortName := effortFromConfig(cfg)
 	sysmon := NewSysmon()
 	sysmon.SetProjectRoot(root)
 
@@ -279,7 +281,7 @@ func New(events <-chan bus.Message, root, wsPath string, llm runner.LLMRunner, c
 		panels:             panels,
 		activeRole:         bus.RolePM,
 		phase:              "idle",
-		statusbar:          NewStatusBar(80).WithBranch(GitBranch(root)).WithState("idle").WithRunnerModel(runnerName, modelName),
+		statusbar:          NewStatusBar(80).WithBranch(GitBranch(root)).WithState("idle").WithRunnerModel(runnerName, modelName).WithEffort(effortName),
 		sysmon:             sysmon,
 		showSysmon:         true,
 		agentConfigs:       cfg.Agents,
@@ -307,6 +309,15 @@ func runnerModelFromConfig(cfg config.Config) (string, string) {
 	return "opencode", ""
 }
 
+// effortFromConfig extracts the QA agent's configured effort for the initial
+// status bar. The status bar updates to the active role on the first bus event.
+func effortFromConfig(cfg config.Config) string {
+	if ac, ok := cfg.Agents["qa"]; ok {
+		return ac.Effort
+	}
+	return ""
+}
+
 // runnerModelForRole returns the runner and model configured for a given agent role.
 // Falls back to the global default (most common pair) when the role has no explicit config.
 func runnerModelForRole(agents map[string]config.AgentConfig, role bus.AgentRole) (string, string) {
@@ -317,7 +328,7 @@ func runnerModelForRole(agents map[string]config.AgentConfig, role bus.AgentRole
 // agent role or a sub-role such as "coder_fixer"). Falls back to the global
 // default when the key has no explicit config.
 func runnerModelForKey(agents map[string]config.AgentConfig, key string) (string, string) {
-	defaultRunner, defaultModel := detectDefaultRunnerModel(agents)
+	defaultRunner, defaultModel, _ := detectDefaultRunnerModel(agents)
 
 	ac, ok := agents[key]
 	if !ok {
@@ -333,6 +344,15 @@ func runnerModelForKey(agents map[string]config.AgentConfig, key string) (string
 		mdl = defaultModel
 	}
 	return r, mdl
+}
+
+// effortForKey returns the configured effort for a config key. Empty means the
+// provider default (the status bar then omits the suffix).
+func effortForKey(agents map[string]config.AgentConfig, key string) string {
+	if ac, ok := agents[key]; ok {
+		return ac.Effort
+	}
+	return ""
 }
 
 // configKeyForState maps a pipeline state to the agent config key whose
@@ -414,7 +434,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if role := stateToRole(s); role != "" {
 					m.activeRole = role
 					r, mdl := runnerModelForKey(m.agentConfigs, configKeyForState(s))
-					m.statusbar = m.statusbar.WithRunnerModel(r, mdl)
+					m.statusbar = m.statusbar.WithRunnerModel(r, mdl).WithEffort(effortForKey(m.agentConfigs, configKeyForState(s)))
 				}
 				for _, ps := range []string{"compacting", "negotiating", "pm", "planner", "research", "coder", "poc", "coder_fixer", "qa_tests", "qa_review", "tester", "reviewer", "ux_reviewer", "security", "done"} {
 					if s == ps {
@@ -465,7 +485,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if bm.To != "" && bm.To != bus.RoleSystem {
 				m.activeRole = bm.To
 				r, mdl := runnerModelForRole(m.agentConfigs, bm.To)
-				m.statusbar = m.statusbar.WithRunnerModel(r, mdl)
+				m.statusbar = m.statusbar.WithRunnerModel(r, mdl).WithEffort(effortForKey(m.agentConfigs, string(bm.To)))
 			}
 		case bus.MsgResponse:
 			m.gateMsg = ""
@@ -939,7 +959,7 @@ func (m Model) view() string {
 
 	// Main area: single active agent panel (or congratulations on completion).
 	// status bar may wrap to multiple lines on narrow terminals.
-	panelH := m.height - 2 - m.statusbar.Height() // phase bar (1) + status bar (N) + newline
+	panelH := m.height - 3 - m.statusbar.Height() // header (1) + phase bar (1) + status bar (N) + newline
 	if panelH < 4 {
 		panelH = 4
 	}
@@ -958,7 +978,11 @@ func (m Model) view() string {
 		agentW = m.width - sysmonW - 1 // 1 for gap
 	}
 
-	var parts []string
+	projectName := ""
+	if m.wsPath != "" {
+		projectName = filepath.Base(filepath.Dir(m.wsPath))
+	}
+	parts := []string{screenHeader(m.width, "Pipeline", projectName)}
 
 	if m.pipelineDone && !m.pipelineFailed {
 		agentView := m.renderCongratulations(agentW, panelH)
@@ -1026,7 +1050,7 @@ func (m Model) view() string {
 		warnStyle := lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
 		brightStyle := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
 		confirmBox := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+			Border(pixelBorder).
 			BorderForeground(crt.warn).
 			Padding(1, 3).
 			Render(
@@ -1045,7 +1069,7 @@ func (m Model) view() string {
 		warnStyle := lipgloss.NewStyle().Foreground(crt.primary).Bold(true)
 		brightStyle := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
 		confirmBox := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+			Border(pixelBorder).
 			BorderForeground(crt.primary).
 			Padding(1, 3).
 			Render(
@@ -1064,7 +1088,7 @@ func (m Model) view() string {
 		warnStyle := lipgloss.NewStyle().Foreground(crt.primary).Bold(true)
 		brightStyle := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
 		confirmBox := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+			Border(pixelBorder).
 			BorderForeground(crt.primary).
 			Padding(1, 3).
 			Render(
@@ -1137,15 +1161,17 @@ func (m *Model) regenerateCurrentGate() {
 //
 //	✓ architecture → ◉ plan → ○ prompts → ○ coding → …
 func (m Model) renderPhaseBar() string {
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	sepStyle := lipgloss.NewStyle().Foreground(crt.muted)
-	doneStyle := lipgloss.NewStyle().Foreground(galaxyCyan).Bold(true)
+	sepStyle := lipgloss.NewStyle().Foreground(crt.border)
+	// Pixel chips: pending = dim text, done = cyan on a raised chip, active =
+	// solid phase colour.
+	dimStyle := chipStyle{fg: crt.dim}
+	doneStyle := chipStyle{fg: galaxyCyan, bg: crt.muted}
 
-	phaseStyle := func(label string) lipgloss.Style {
+	phaseStyle := func(label string) chipStyle {
 		if c, ok := pipelineColors[label]; ok {
-			return lipgloss.NewStyle().Foreground(c).Bold(true)
+			return chipStyle{fg: crt.bg, bg: c}
 		}
-		return lipgloss.NewStyle().Foreground(crt.primary).Bold(true)
+		return chipStyle{fg: crt.bg, bg: crt.primary}
 	}
 
 	var parts []string
@@ -1251,7 +1277,7 @@ func (m Model) renderPhaseBar() string {
 		}
 	}
 
-	joined := "  " + strings.Join(parts, sepStyle.Render(" → "))
+	joined := "  " + strings.Join(parts, sepStyle.Render("▸"))
 
 	// Prefix the bar with the active pipeline type (green/brown/fix/rnd).
 	if m.pipeline != "" {
@@ -1289,7 +1315,7 @@ func (m Model) renderCongratulations(width, height int) string {
 	separatorStyle := lipgloss.NewStyle().Foreground(crt.border)
 
 	var content strings.Builder
-	content.WriteString(titleStyle.Render("🎉  Congratulations!"))
+	content.WriteString(titleStyle.Render("★  Congratulations!"))
 	content.WriteString("\n\n")
 	content.WriteString(accentStyle.Render("Pipeline completed successfully."))
 	content.WriteString("\n")
@@ -1326,7 +1352,7 @@ func (m Model) renderCongratulations(width, height int) string {
 		dimStyle.Render(" to quit"))
 
 	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(pixelBorder).
 		BorderForeground(successColor).
 		Padding(1, 4).
 		Render(content.String())
@@ -1353,7 +1379,7 @@ func (m Model) styleSummaryLine(
 		return skippedStyle.Render(line)
 	case strings.HasPrefix(trimmed, "?"):
 		return warnStyle.Render(line)
-	case strings.HasPrefix(trimmed, "📋"):
+	case strings.HasPrefix(trimmed, "\U0001F4CB"):
 		return sectionStyle.Render(line)
 	case strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(trimmed, "•"):
 		return sectionStyle.Render(line)
@@ -1574,16 +1600,8 @@ func clipPhaseBar(bar string, maxWidth int) string {
 	if lipgloss.Width(bar) <= maxWidth {
 		return bar
 	}
-	// Strip to maxWidth-1 chars (leave room for "…"), then append.
-	runes := []rune(bar)
-	for len(runes) > 0 {
-		candidate := string(runes) + "…"
-		if lipgloss.Width(candidate) <= maxWidth {
-			return candidate
-		}
-		runes = runes[:len(runes)-1]
-	}
-	return "…"
+	// ANSI-aware cut so chip colours are never left half-open.
+	return ansi.Truncate(bar, maxWidth, "…")
 }
 
 // extractStageTitle returns just the title portion of a normalised stage label

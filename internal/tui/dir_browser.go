@@ -217,8 +217,6 @@ func (m DirBrowserModel) Update(msg tea.Msg) (DirBrowserModel, tea.Cmd) {
 }
 
 func (m DirBrowserModel) View() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.primary)
-	pathStyle := lipgloss.NewStyle().Foreground(crt.dim)
 	projectStyle := lipgloss.NewStyle().Foreground(crt.success).Bold(true)
 	dirStyle := lipgloss.NewStyle().Foreground(crt.primary)
 	cursorBg := lipgloss.NewStyle().
@@ -226,9 +224,9 @@ func (m DirBrowserModel) View() string {
 		Foreground(crt.bright).
 		Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	sep := strings.Repeat("─", max(m.width, 0))
+	sep := lipgloss.NewStyle().Foreground(crt.border).Render(strings.Repeat("─", max(m.width, 0)))
 
-	header := titleStyle.Render("Open Project") + "  " + pathStyle.Render(m.cwd)
+	header := screenHeader(m.width, "Open Project", m.cwd)
 
 	var lines []string
 	lines = append(lines, header, sep)
@@ -289,14 +287,14 @@ func (m DirBrowserModel) View() string {
 	}
 	lines = append(lines, sep)
 
-	legend := "↑↓ navigate  Enter "
+	enterLabel := "open"
 	if len(m.entries) > 0 && m.cursor < len(m.entries) && m.entries[m.cursor].isProject {
-		legend += "select"
-	} else {
-		legend += "open"
+		enterLabel = "select"
 	}
-	legend += "  o force-select  . hidden  ~ home  ← back  Esc cancel"
-	lines = append(lines, dimStyle.Render(legend))
+	lines = append(lines, hintBar(m.width, []keyHint{
+		{"↑↓", "navigate"}, {"Enter", enterLabel}, {"o", "force-select"},
+		{".", "hidden"}, {"~", "home"}, {"←", "back"}, {"Esc", "cancel"},
+	}, ""))
 
 	return strings.Join(lines, "\n")
 }

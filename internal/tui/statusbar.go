@@ -7,6 +7,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/executil"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // StatusBarModel renders a single-line status bar at the bottom.
@@ -16,6 +17,7 @@ type StatusBarModel struct {
 	stageInfo     string // e.g. "Stage 2/5: Must Have — Auth"
 	runner        string
 	model         string
+	effort        string
 	width         int
 	scrollOffset  int       // marquee scroll position for stageInfo
 	codingStarted time.Time // timestamp of first coder handoff for elapsed timer
@@ -40,6 +42,11 @@ func (m StatusBarModel) WithCodingStarted(t time.Time) StatusBarModel {
 func (m StatusBarModel) WithRunnerModel(r, mdl string) StatusBarModel {
 	m.runner = r
 	m.model = mdl
+	return m
+}
+
+func (m StatusBarModel) WithEffort(effort string) StatusBarModel {
+	m.effort = effort
 	return m
 }
 
@@ -133,10 +140,10 @@ func (m StatusBarModel) viewLines() []string {
 	var hints []string
 	for _, sc := range statusBarShortcuts {
 		keyStyle := lipgloss.NewStyle().
-			Background(crt.panelBg).
+			Background(surfaceRaised).
 			Foreground(sc.color).
 			Bold(true)
-		hints = append(hints, keyStyle.Render(sc.key)+descStyle.Render(" "+sc.desc))
+		hints = append(hints, keyStyle.Render(" "+sc.key+" ")+descStyle.Render(sc.desc))
 	}
 
 	versionTag := lipgloss.NewStyle().
@@ -145,13 +152,13 @@ func (m StatusBarModel) viewLines() []string {
 		Bold(true).
 		Render("v" + Version)
 
-	rightSide := strings.Join(hints, "  ") + "  " + versionTag
+	rightSide := strings.Join(hints, " ") + "  " + versionTag
 	rightWidth := lipglossLen(rightSide)
 
 	// ── Left side: fixed prefix + scrollable stageInfo + fixed suffix ──
 	prefix := ""
 	if m.branch != "" {
-		prefix = styleStatusKey.Render(m.branch) + "  "
+		prefix = chip(m.branch, galaxyViolet) + styleStatusBar.Render(" ")
 	}
 	prefix += styleStatusBar.Render("● " + m.state)
 
@@ -161,11 +168,14 @@ func (m StatusBarModel) viewLines() []string {
 		if m.model != "" {
 			info += "/" + m.model
 		}
+		if m.effort != "" && m.effort != "default" {
+			info += " · " + m.effort
+		}
 		suffix += "  " + styleStatusKey.Render(info)
 	}
 	if !m.codingStarted.IsZero() {
 		elapsed := time.Since(m.codingStarted).Round(time.Second)
-		suffix += "  " + styleStatusKey.Render("⏱ "+formatElapsed(elapsed))
+		suffix += "  " + styleStatusKey.Render("◷ "+formatElapsed(elapsed))
 	}
 
 	prefixWidth := lipglossLen(prefix)
@@ -248,24 +258,9 @@ func (m StatusBarModel) renderScrollingStage(availableWidth int) string {
 	return styleStatusKey.Render(string(visible))
 }
 
-// lipglossLen approximates the visible width of a rendered string by stripping ANSI escapes.
-func lipglossLen(s string) int {
-	visible := 0
-	inEsc := false
-	for _, b := range []byte(s) {
-		if b == 0x1b {
-			inEsc = true
-		}
-		if inEsc {
-			if b == 'm' {
-				inEsc = false
-			}
-			continue
-		}
-		visible++
-	}
-	return visible
-}
+// lipglossLen returns the visible cell width of a rendered string (ANSI-aware,
+// wide-glyph aware).
+func lipglossLen(s string) int { return ansi.StringWidth(s) }
 
 // GitBranch returns the current git branch name for root, or "" on error.
 func GitBranch(root string) string {

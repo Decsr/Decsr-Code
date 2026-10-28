@@ -36,14 +36,6 @@ const (
 // sparkBlocks maps a 0–7 intensity level to a Unicode block character.
 var sparkBlocks = []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 
-// braille dot bit positions: each character is a 2×4 grid.
-// Left column (dots 1,2,3,7): rows 0-3 top to bottom.
-// Right column (dots 4,5,6,8): rows 0-3 top to bottom.
-var brailleLeftBits = [4]rune{0x01, 0x02, 0x04, 0x40}
-var brailleRightBits = [4]rune{0x08, 0x10, 0x20, 0x80}
-
-const brailleBase = '\u2800'
-
 // sysmonTickMsg carries a periodic snapshot of system metrics.
 type sysmonTickMsg struct {
 	cpuPercent  float64
@@ -447,7 +439,6 @@ func (m SysmonModel) View() string {
 	}
 
 	borderColor := crt.border
-	titleStyle := lipgloss.NewStyle().Foreground(galaxyCyan).Bold(true)
 	headerStyle := lipgloss.NewStyle().Foreground(galaxyBlue).Bold(true)
 	labelStyle := lipgloss.NewStyle().Foreground(crt.dim)
 	valueStyle := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
@@ -458,7 +449,7 @@ func (m SysmonModel) View() string {
 	thinSep := bSt.Render("│") + dimStyle.Render(strings.Repeat("┄", contentW+2)) + bSt.Render("│")
 
 	var lines []string
-	lines = append(lines, bSt.Render("╭"+hRule+"╮"))
+	lines = append(lines, panelTop(contentW+4, "◆ SYSTEM MONITOR", galaxyCyan, borderColor))
 
 	addLine := func(content string) {
 		vis := lipgloss.Width(content)
@@ -481,8 +472,12 @@ func (m SysmonModel) View() string {
 	}
 
 	addSection := func(title string) {
-		lines = append(lines, bSt.Render("├"+strings.Repeat("─", contentW+2)+"┤"))
-		addLine(headerStyle.Render("  " + title))
+		label := " " + title + " "
+		fill := contentW + 1 - lipgloss.Width(label)
+		if fill < 0 {
+			fill = 0
+		}
+		lines = append(lines, bSt.Render("├─")+headerStyle.Render(label)+bSt.Render(strings.Repeat("─", fill)+"┤"))
 	}
 
 	addGraphLines := func(graphStr string) {
@@ -494,7 +489,6 @@ func (m SysmonModel) View() string {
 	_ = addEmpty
 
 	// ── Title ──
-	addLine(titleStyle.Render("⚡ SYSTEM MONITOR"))
 	addLine(dimStyle.Render(fmt.Sprintf("  %s • %d cores",
 		formatHostUptime(m.hostUptime), runtime.NumCPU())))
 
@@ -652,13 +646,20 @@ func (m SysmonModel) View() string {
 		addLine("")
 	}
 
+	// Fill the allotted height with blank bordered rows so the panel's top and
+	// bottom borders line up with the agent panel beside it. Three rows remain
+	// after this point: SESSION divider, session line, closing border.
+	for pad := m.height - (len(lines) + 3); pad > 0; pad-- {
+		addLine("")
+	}
+
 	// ── Info footer ──
-	lines = append(lines, bSt.Render("├"+strings.Repeat("─", contentW+2)+"┤"))
+	lines = append(lines, bSt.Render("├─")+headerStyle.Render(" SESSION ")+bSt.Render(strings.Repeat("─", contentW+1-len(" SESSION "))+"┤"))
 	sessionLine := labelStyle.Render(" Session:    ") + valueStyle.Render(formatElapsed(time.Since(m.startTime).Round(time.Second)))
 	addLine(sessionLine)
 
 	// Bottom border.
-	lines = append(lines, bSt.Render("╰"+hRule+"╯"))
+	lines = append(lines, bSt.Render("└"+hRule+"┘"))
 
 	result := strings.Join(lines, "\n")
 
@@ -989,8 +990,8 @@ func sanitizeObservedPath(root, path string) string {
 	return path
 }
 
-// renderCoreDotted renders a single CPU core as a braille-dot history bar.
-// Format: "C0 ⣀⣤⣶⣿⣶⣤⣀ 45%"
+// renderCoreDotted renders a single CPU core as a block-sparkline history bar.
+// Format: "C0 ▁▃▅▇▅▃▁ 45%"
 func renderCoreDotted(idx int, pct float64, history []float64, colW int) string {
 	color := percentColor(pct)
 	label := fmt.Sprintf("C%d", idx)
@@ -1009,49 +1010,26 @@ func renderCoreDotted(idx int, pct float64, history []float64, colW int) string 
 	return " " + coreStyle.Render(label) + " " + dotBar + " " + pctStyle.Render(pctStr)
 }
 
-// renderBrailleDotBar renders a 1-row braille dot history bar.
-// Each character encodes 2 data points (left/right columns) × 4 dot rows.
+// renderBrailleDotBar renders a 1-row block sparkline history bar (one data
+// point per column, 8 levels via ▁..█). The name is historical.
 func renderBrailleDotBar(history []float64, width int, color lipgloss.Color) string {
-	dataPoints := width * 2
-	data := make([]float64, dataPoints)
-	if len(history) >= dataPoints {
-		copy(data, history[len(history)-dataPoints:])
+	data := make([]float64, width)
+	if len(history) >= width {
+		copy(data, history[len(history)-width:])
 	} else if len(history) > 0 {
-		offset := dataPoints - len(history)
-		copy(data[offset:], history)
-	}
-
-	chars := make([]rune, width)
-	for i := range chars {
-		chars[i] = brailleBase
-	}
-
-	for i, val := range data {
-		// Map percentage (0-100) to dot rows (0-4).
-		level := int(math.Round(val / 100.0 * 4))
-		if level > 4 {
-			level = 4
-		}
-
-		charCol := i / 2
-		if charCol >= width {
-			continue
-		}
-		isRight := i%2 == 1
-
-		for dotRow := 0; dotRow < level; dotRow++ {
-			localRow := 3 - dotRow
-			if isRight {
-				chars[charCol] |= brailleRightBits[localRow]
-			} else {
-				chars[charCol] |= brailleLeftBits[localRow]
-			}
-		}
+		copy(data[width-len(history):], history)
 	}
 
 	var sb strings.Builder
-	for _, ch := range chars {
-		sb.WriteRune(ch)
+	for _, val := range data {
+		level := int(math.Round(val / 100.0 * 7))
+		if level < 0 {
+			level = 0
+		}
+		if level > 7 {
+			level = 7
+		}
+		sb.WriteRune(sparkBlocks[level])
 	}
 	return lipgloss.NewStyle().Foreground(color).Render(sb.String())
 }
@@ -1099,20 +1077,19 @@ func renderSegmentedBar(percent float64, maxWidth int) string {
 	return sb.String()
 }
 
-// renderBrailleGraph renders a braille-dot area chart (btop-style).
-// Each character cell is 2 columns × 4 rows of dots, so `graphRows` character
-// rows give 4*graphRows vertical resolution. When fixedMax is > 0 it is used
-// as the ceiling (e.g. 100 for CPU%); otherwise the max is auto-detected.
+// renderBrailleGraph renders a block-pixel area chart (btop-style). Each
+// column is one data point; `graphRows` character rows give 8*graphRows
+// vertical resolution using ▁..█. When fixedMax is > 0 it is used as the
+// ceiling (e.g. 100 for CPU%); otherwise the max is auto-detected. The name is
+// historical.
 func renderBrailleGraph(history []float64, width, graphRows int, color lipgloss.Color, fixedMax float64) string {
-	totalDotRows := graphRows * 4
-	dataPoints := width * 2
+	totalLevels := graphRows * 8
 
-	data := make([]float64, dataPoints)
-	if len(history) >= dataPoints {
-		copy(data, history[len(history)-dataPoints:])
+	data := make([]float64, width)
+	if len(history) >= width {
+		copy(data, history[len(history)-width:])
 	} else {
-		offset := dataPoints - len(history)
-		copy(data[offset:], history)
+		copy(data[width-len(history):], history)
 	}
 
 	maxVal := fixedMax
@@ -1131,32 +1108,26 @@ func renderBrailleGraph(history []float64, width, graphRows int, color lipgloss.
 	for r := range grid {
 		grid[r] = make([]rune, width)
 		for c := range grid[r] {
-			grid[r][c] = brailleBase
+			grid[r][c] = ' '
 		}
 	}
 
-	for i, val := range data {
-		level := int(math.Round(val / maxVal * float64(totalDotRows)))
-		if level > totalDotRows {
-			level = totalDotRows
+	for col, val := range data {
+		level := int(math.Round(val / maxVal * float64(totalLevels)))
+		if level > totalLevels {
+			level = totalLevels
 		}
-
-		charCol := i / 2
-		if charCol >= width {
-			continue
+		if level < 1 {
+			level = 1 // baseline pixel keeps the graph visible when idle
 		}
-		isRight := i%2 == 1
-
-		for dotRow := 0; dotRow < level; dotRow++ {
-			charRow := graphRows - 1 - dotRow/4
-			localRow := 3 - dotRow%4
-			if charRow < 0 {
-				continue
-			}
-			if isRight {
-				grid[charRow][charCol] |= brailleRightBits[localRow]
-			} else {
-				grid[charRow][charCol] |= brailleLeftBits[localRow]
+		for r := 0; r < graphRows; r++ {
+			rem := level - r*8 // levels left for this row, counted from the bottom
+			row := graphRows - 1 - r
+			switch {
+			case rem >= 8:
+				grid[row][col] = '█'
+			case rem > 0:
+				grid[row][col] = sparkBlocks[rem-1]
 			}
 		}
 	}
@@ -1164,11 +1135,7 @@ func renderBrailleGraph(history []float64, width, graphRows int, color lipgloss.
 	style := lipgloss.NewStyle().Foreground(color)
 	var rowStrings []string
 	for _, row := range grid {
-		var sb strings.Builder
-		for _, ch := range row {
-			sb.WriteRune(ch)
-		}
-		rowStrings = append(rowStrings, style.Render(sb.String()))
+		rowStrings = append(rowStrings, style.Render(string(row)))
 	}
 	return strings.Join(rowStrings, "\n")
 }

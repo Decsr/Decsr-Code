@@ -109,6 +109,7 @@ func TestMLXRunner_SendsExpectedRequest(t *testing.T) {
 	r := &MLXRunner{Model: "test-model", BaseURL: srv.URL}
 	ch, err := r.Complete(context.Background(), CompletionRequest{
 		Messages: []ConvMessage{{Role: "user", Content: "hi"}},
+		Effort:   "high",
 	})
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
@@ -124,6 +125,9 @@ func TestMLXRunner_SendsExpectedRequest(t *testing.T) {
 	}
 	if captured.MaxTokens != mlxMaxTokens {
 		t.Errorf("max_tokens: want %d, got %d", mlxMaxTokens, captured.MaxTokens)
+	}
+	if captured.ReasoningEffort != "high" {
+		t.Errorf("reasoning_effort: want high, got %q", captured.ReasoningEffort)
 	}
 }
 

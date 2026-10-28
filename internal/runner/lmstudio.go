@@ -55,6 +55,9 @@ func (r *LMStudioRunner) Complete(ctx context.Context, req CompletionRequest) (<
 		MaxTokens:     lmStudioMaxTokens,
 		StreamOptions: &lmStudioStreamOptions{IncludeUsage: true},
 	}
+	if effort := NormalizeEffort(req.Effort); effort != "" {
+		body.ReasoningEffort = mapOpenAIReasoningEffort(effort)
+	}
 
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -288,6 +291,9 @@ type lmStudioChatRequest struct {
 	Stream        bool                   `json:"stream"`
 	MaxTokens     int                    `json:"max_tokens,omitempty"`
 	StreamOptions *lmStudioStreamOptions `json:"stream_options,omitempty"`
+	// ReasoningEffort is accepted by reasoning-capable models; servers that do
+	// not support it ignore the field or fall back to their default.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // lmStudioStreamOptions requests a final usage chunk in the SSE stream so token

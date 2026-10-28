@@ -16,7 +16,7 @@ func TestTaskHistory_RendersTasks(t *testing.T) {
 	})
 	m.SetSize(80, 24)
 	view := m.View()
-	if !strings.Contains(view, "Done Tasks") {
+	if !strings.Contains(view, "DONE TASKS") {
 		t.Errorf("expected title:\n%s", view)
 	}
 	if !strings.Contains(view, "First task") || !strings.Contains(view, "Second task") {

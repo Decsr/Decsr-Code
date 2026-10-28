@@ -39,11 +39,38 @@ type CompletionRequest struct {
 	Skills       []string
 	Messages     []ConvMessage
 	Model        string
+	// Effort overrides the agent's configured reasoning effort for this call.
+	// Empty leaves the decision to the configured EffortRunner or the provider.
+	Effort string
 }
 
 // LLMRunner is the common interface for all LLM backends.
 type LLMRunner interface {
 	Complete(ctx context.Context, req CompletionRequest) (<-chan Token, error)
+}
+
+// EffortRunner injects a per-agent default effort into requests that do not
+// already carry an explicit one. Explicit per-call effort always wins.
+type EffortRunner struct {
+	inner  LLMRunner
+	effort string
+}
+
+// NewEffortRunner wraps inner with a default effort. An empty effort returns
+// inner unchanged.
+func NewEffortRunner(inner LLMRunner, effort string) LLMRunner {
+	effort = NormalizeEffort(effort)
+	if effort == "" || inner == nil {
+		return inner
+	}
+	return &EffortRunner{inner: inner, effort: effort}
+}
+
+func (r *EffortRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan Token, error) {
+	if req.Effort == "" {
+		req.Effort = r.effort
+	}
+	return r.inner.Complete(ctx, req)
 }
 
 // ResolveSkills loads skill content and appends it to the system prompt.

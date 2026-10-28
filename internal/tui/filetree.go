@@ -142,19 +142,6 @@ func (m FileTreeModel) Update(msg tea.Msg) (FileTreeModel, tea.Cmd) {
 func (m FileTreeModel) View() string {
 	p := homePalette
 
-	headerStyle := lipgloss.NewStyle().
-		Background(p.headerBg).
-		Foreground(p.accent).
-		Bold(true).
-		Padding(0, 2).
-		Width(m.width)
-
-	footerStyle := lipgloss.NewStyle().
-		Background(p.footerBg).
-		Foreground(p.dim).
-		Padding(0, 1).
-		Width(m.width)
-
 	dimStyle := lipgloss.NewStyle().Foreground(p.dim)
 	dirStyle := lipgloss.NewStyle().Foreground(p.cyan).Bold(true)
 	mdStyle := lipgloss.NewStyle().Foreground(p.bright)
@@ -163,7 +150,6 @@ func (m FileTreeModel) View() string {
 		Background(p.activeBg).
 		Foreground(p.green).
 		Bold(true)
-	goldStyle := lipgloss.NewStyle().Foreground(p.gold).Bold(true)
 
 	// Header bar.
 	rel, _ := filepath.Rel(m.root, m.cwd)
@@ -172,7 +158,7 @@ func (m FileTreeModel) View() string {
 	} else {
 		rel = "/" + rel + "/"
 	}
-	header := headerStyle.Render("◆  decsr  ·  browse files  " + dimStyle.Render(rel))
+	header := screenHeader(m.width, "Browse Files", filepath.Base(m.root))
 
 	// Card content.
 	cardW := m.width - 8
@@ -184,9 +170,6 @@ func (m FileTreeModel) View() string {
 	}
 
 	var lines []string
-	lines = append(lines, goldStyle.Render(" ◆ "+rel))
-	lines = append(lines, "")
-
 	rows := m.visibleRows() - 4
 	if rows < 4 {
 		rows = 4
@@ -213,14 +196,14 @@ func (m FileTreeModel) View() string {
 			if e.name == ".." {
 				icon = "↩"
 			} else {
-				icon = "📁"
+				icon = "■"
 			}
 			styled = dirStyle.Render(label)
 		} else if strings.HasSuffix(e.name, ".md") {
-			icon = "📄"
+			icon = "□"
 			styled = mdStyle.Render(label)
 		} else {
-			icon = "  "
+			icon = " "
 			styled = fileStyle.Render(label)
 		}
 
@@ -256,12 +239,8 @@ func (m FileTreeModel) View() string {
 		lines = append(lines, dimStyle.Render(fmt.Sprintf("  %s  %d/%d", bar, m.cursor+1, len(m.entries))))
 	}
 
-	card := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(p.border).
-		Padding(0, 1).
-		Width(cardW).
-		Render(strings.Join(lines, "\n"))
+	card := pixelPanel("◆ "+rel, p.gold, true,
+		lipgloss.NewStyle().Padding(0, 1).Width(cardW), strings.Join(lines, "\n"))
 
 	vpH := m.height - 2
 	if vpH < 4 {
@@ -270,20 +249,7 @@ func (m FileTreeModel) View() string {
 	body := lipgloss.Place(m.width, vpH, lipgloss.Center, lipgloss.Center, card)
 
 	// Footer key hints.
-	keyStyle := lipgloss.NewStyle().
-		Background(p.footerBg).
-		Foreground(p.accent).
-		Bold(true)
-	hint := func(k, desc string) string {
-		return keyStyle.Render(k) + lipgloss.NewStyle().Background(p.footerBg).Foreground(p.dim).Render(" "+desc)
-	}
-	footer := footerStyle.Render(
-		hint("↑↓", "navigate") + "  " +
-			hint("Enter/→", "open") + "  " +
-			hint("←", "back") + "  " +
-			hint("PgUp/Dn", "page") + "  " +
-			hint("Esc", "cancel"),
-	)
+	footer := hintBar(m.width, []keyHint{{"↑↓", "navigate"}, {"Enter/→", "open"}, {"←", "back"}, {"PgUp/Dn", "page"}, {"Esc", "cancel"}}, "")
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }
