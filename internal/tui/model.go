@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -129,8 +130,9 @@ type Model struct {
 	activeRole         bus.AgentRole // agent currently shown in the main area
 	phase              string        // current pipeline phase for the phase bar
 	statusbar          StatusBarModel
-	sysmon             SysmonModel                   // system monitor panel (right side)
-	showSysmon         bool                          // toggle for sysmon visibility
+	sysmon             SysmonModel                   // token/usage collector (no longer rendered)
+	showSysmon         bool                          // legacy toggle; the cockpit owns the inspector
+	cockpit            CockpitModel                  // workflow-first run screen
 	agentConfigs       map[string]config.AgentConfig // per-agent runner/model config
 	contextPackEnabled bool                          // true when the context-first phase is active
 	events             <-chan bus.Message
@@ -195,6 +197,7 @@ type Model struct {
 // WithTaskInput sets the submitted requirements shown in the PM conversation.
 func (m Model) WithTaskInput(input string) Model {
 	m.taskInput = input
+	m.cockpit.SetTaskInput(input)
 	return m
 }
 
@@ -283,7 +286,8 @@ func New(events <-chan bus.Message, root, wsPath string, llm runner.LLMRunner, c
 		phase:              "idle",
 		statusbar:          NewStatusBar(80).WithBranch(GitBranch(root)).WithState("idle").WithRunnerModel(runnerName, modelName).WithEffort(effortName),
 		sysmon:             sysmon,
-		showSysmon:         true,
+		showSysmon:         false,
+		cockpit:            NewCockpit(cfg, root, wsPath),
 		agentConfigs:       cfg.Agents,
 		contextPackEnabled: !cfg.Project.Context.Pack.Disable,
 		events:             events,
@@ -366,7 +370,7 @@ func configKeyForState(state string) string {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{waitForBusEvent(m.events), m.sysmon.Init()}
+	cmds := []tea.Cmd{waitForBusEvent(m.events)}
 	for _, p := range m.panels {
 		cmds = append(cmds, p.Init())
 	}
@@ -387,7 +391,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// This prevents the listener chain from breaking while an overlay is open.
 	if busMsg, ok := msg.(BusMessageMsg); ok {
 		bm := busMsg.Msg
-		m.sysmon.ObserveBusMessage(bm)
+		m.cockpit.Observe(bm)
 		m.log.Debug("bus message received",
 			slog.String("type", string(bm.Type)),
 			slog.String("from", string(bm.From)),
@@ -402,13 +406,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					slog.String("artifact", s),
 					slog.String("label", gateLabel(s)),
 				)
-				// Close negotiate overlay when a gate fires (PM conversation done).
+				// Close the negotiate overlay when a gate fires (PM conversation done).
+				// Do not auto-open the artifact viewer: the cockpit inspector keeps
+				// the gate visible without hiding the workflow. Ctrl+O opens it.
 				if m.overlay == overlayNegotiate {
 					m.overlay = overlayNone
 				}
-				var reviseFn func(string, string) error
-				m.overlayArtifact = newArtifactViewer(m.wsPath, s, m.contentWidth(), m.height-2, reviseFn)
-				m.overlay = overlayArtifact
 				m.statusbar = m.statusbar.WithState("⏸ " + gateLabel(s) + " — waiting for approval")
 			}
 		case bus.MsgEvent:
@@ -433,6 +436,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Switch active panel based on pipeline state changes.
 				if role := stateToRole(s); role != "" {
 					m.activeRole = role
+					m.cockpit.SetActiveRole(role)
 					r, mdl := runnerModelForKey(m.agentConfigs, configKeyForState(s))
 					m.statusbar = m.statusbar.WithRunnerModel(r, mdl).WithEffort(effortForKey(m.agentConfigs, configKeyForState(s)))
 				}
@@ -484,6 +488,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case bus.MsgRequest:
 			if bm.To != "" && bm.To != bus.RoleSystem {
 				m.activeRole = bm.To
+				m.cockpit.SetActiveRole(bm.To)
 				r, mdl := runnerModelForRole(m.agentConfigs, bm.To)
 				m.statusbar = m.statusbar.WithRunnerModel(r, mdl).WithEffort(effortForKey(m.agentConfigs, string(bm.To)))
 			}
@@ -558,11 +563,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	}
 
-	// Ctrl+T toggles sysmon from any context (including overlays).
+	// Ctrl+T toggles the cockpit inspector from any context (including overlays).
 	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "ctrl+t" {
-		m.showSysmon = !m.showSysmon
+		m.cockpit.ToggleInspector()
 		m.layout()
-		// Resize the active overlay to fit new content width.
 		return m, m.resizeActiveOverlay()
 	}
 
@@ -686,14 +690,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "tab":
-			if m.canBrowseTree() {
-				m.treeBrowsing = true
-				m.treePreviewFocused = false
-				m.sysmon.FocusTree()
-				m.filePreview = NewFilePreview(m.root, m.contentWidth(), m.height-3)
-				m.layout()
-				m.syncTreePreview()
-			}
+			m.cockpit.CycleFocus(1)
+			return m, nil
+		case "shift+tab":
+			m.cockpit.CycleFocus(-1)
 			return m, nil
 		case "q", "Q":
 			m.confirmQuit = true
@@ -758,12 +758,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.overlay = overlayChat
 			}
 		default:
-			// Forward scroll keys to the active agent panel.
-			if p, ok := m.panels[m.activeRole]; ok {
-				updated, cmd := p.Update(msg)
-				m.panels[m.activeRole] = updated
-				cmds = append(cmds, cmd)
+			// Enter on a pending gate opens the artifact viewer; otherwise it
+			// moves cockpit focus into the selected pane.
+			if msg.String() == "enter" && m.gateArtifact != "" {
+				m.openCurrentGate()
+				return m, nil
 			}
+			// Cockpit navigation: focus, tabs, subtask tree, inspector.
+			var cmd tea.Cmd
+			m.cockpit, cmd = m.cockpit.Update(msg)
+			cmds = append(cmds, cmd)
 		}
 
 	case TaskRunnerReadyMsg:
@@ -771,6 +775,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Cancel != nil {
 			m.cancelFunc = msg.Cancel
 		}
+		m.cockpit.SetStarted(time.Now())
+		m.cockpit.SetTaskInput(m.taskInput)
+		m.cockpit.LoadPlan()
 
 	case PipelineDoneMsg:
 		// The negotiate overlay waits on the pipeline; close it so the
@@ -780,6 +787,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.pipelineDone = true
 		m.pipelineResuming = false
+		m.cockpit.SetDone(msg.Err)
 		if m.cancelled {
 			m.returnToMenu = true
 			return m, tea.Quit
@@ -951,97 +959,29 @@ func (m Model) view() string {
 	case overlayArtifact:
 		artifactView := strings.Join([]string{
 			strings.TrimRight(m.overlayArtifact.View(), "\n"),
-			m.renderPhaseBar(),
 			m.statusbar.View(),
 		}, "\n")
-		return m.withSysmon(artifactView)
+		return artifactView
 	}
 
-	// Main area: single active agent panel (or congratulations on completion).
-	// status bar may wrap to multiple lines on narrow terminals.
-	panelH := m.height - 3 - m.statusbar.Height() // header (1) + phase bar (1) + status bar (N) + newline
+	// Main area: workflow cockpit. The old single-agent panel and system
+	// monitor are gone; the cockpit owns the phase spine, subtask tree,
+	// activity stream, tokens and inspector.
+	panelH := m.height - 1 - m.statusbar.Height()
 	if panelH < 4 {
 		panelH = 4
 	}
-
-	// Determine sysmon width and agent panel width.
-	sysmonW := 0
-	agentW := m.width
-	if m.showSysmon && m.width >= 100 {
-		sysmonW = 38
-		if m.width >= 140 {
-			sysmonW = 44
-		}
-		if m.width >= 180 {
-			sysmonW = 50
-		}
-		agentW = m.width - sysmonW - 1 // 1 for gap
-	}
+	m.cockpit.SetSize(m.width, panelH)
 
 	projectName := ""
 	if m.wsPath != "" {
 		projectName = filepath.Base(filepath.Dir(m.wsPath))
 	}
-	parts := []string{screenHeader(m.width, "Pipeline", projectName)}
-
-	if m.pipelineDone && !m.pipelineFailed {
-		agentView := m.renderCongratulations(agentW, panelH)
-		if sysmonW > 0 {
-			m.sysmon.SetSize(sysmonW, panelH)
-			sysmonView := m.sysmon.View()
-			// Place congratulations in left, sysmon in right.
-			joined := lipgloss.JoinHorizontal(lipgloss.Top,
-				lipgloss.NewStyle().Width(agentW).Render(agentView),
-				" ",
-				sysmonView,
-			)
-			parts = append(parts, joined)
-		} else {
-			parts = append(parts, agentView)
-		}
-	} else {
-		var agentView string
-		if m.treeBrowsing {
-			// Replace the agent output with the selected file's preview.
-			m.filePreview.SetFocused(m.treePreviewFocused)
-			agentView = m.filePreview.View()
-		} else {
-			p := m.panels[m.activeRole]
-			p.SetSize(agentW, panelH)
-			agentView = p.View()
-		}
-
-		if sysmonW > 0 {
-			m.sysmon.SetSize(sysmonW, panelH)
-			sysmonView := m.sysmon.View()
-			joined := lipgloss.JoinHorizontal(lipgloss.Top, agentView, " ", sysmonView)
-			parts = append(parts, joined)
-		} else {
-			parts = append(parts, agentView)
-		}
+	parts := []string{
+		screenHeader(m.width, "Pipeline", projectName),
+		m.cockpit.View(),
+		m.statusbar.View(),
 	}
-
-	if m.pipelineErr != "" && !m.hidePipelineErr {
-		banner := lipgloss.NewStyle().
-			Background(crt.border).
-			Foreground(crt.warn).
-			Bold(true).
-			Padding(0, 2).
-			Width(m.width - 4).
-			Render("✗  " + m.pipelineErr)
-		parts = append(parts, banner)
-	}
-	if m.gateArtifact != "" && m.overlay == overlayNone {
-		banner := lipgloss.NewStyle().
-			Background(crt.border).
-			Foreground(crt.primary).
-			Bold(true).
-			Padding(0, 2).
-			Width(m.width - 4).
-			Render("⏸  Waiting for approval: " + gateLabel(m.gateArtifact) + "   Ctrl+A approve")
-		parts = append(parts, banner)
-	}
-	parts = append(parts, m.renderPhaseBar(), m.statusbar.View())
 
 	mainView := strings.Join(parts, "\n")
 
@@ -1136,6 +1076,7 @@ func (m *Model) approveCurrentGate(source string) {
 	m.statusbar = m.statusbar.WithState("✓ " + gateLabel(approved) + " approved")
 	m.gateMsg = ""
 	m.gateArtifact = ""
+	m.cockpit.ClearGate()
 	m.overlay = overlayNone
 }
 
@@ -1153,6 +1094,7 @@ func (m *Model) regenerateCurrentGate() {
 	m.taskRunner.Regenerate()
 	m.gateMsg = ""
 	m.gateArtifact = ""
+	m.cockpit.ClearGate()
 	m.statusbar = m.statusbar.WithState("regenerating…")
 }
 
@@ -1428,12 +1370,6 @@ func (m Model) styleDurationLine(line string, lStyle, vStyle lipgloss.Style) str
 	return indent + lStyle.Render(fmt.Sprintf("%-12s", label)) + " " + vStyle.Render(value)
 }
 
-// canBrowseTree reports whether the System Monitor tree can be navigated:
-// the monitor must be visible (it hosts the tree).
-func (m Model) canBrowseTree() bool {
-	return m.sysmonWidth() > 0
-}
-
 // syncTreePreview loads the currently selected tree entry into the file preview.
 func (m *Model) syncTreePreview() {
 	rel, isDir, ok := m.sysmon.SelectedTreeEntry()
@@ -1443,50 +1379,27 @@ func (m *Model) syncTreePreview() {
 	m.filePreview.Show(rel, isDir)
 }
 
-// withSysmon composites the sysmon panel to the right of the given view
-// when sysmon is enabled and the terminal is wide enough. The view is
-// expected to already be rendered at contentWidth().
+// withSysmon is retained as an identity helper: the system monitor is no
+// longer part of the layout. Overlays use the full terminal width.
 func (m Model) withSysmon(view string) string {
-	sysmonW := m.sysmonWidth()
-	if sysmonW == 0 {
-		return view
-	}
-	cw := m.contentWidth()
-	if cw < 20 {
-		return view
-	}
-	m.sysmon.SetSize(sysmonW, m.height)
-	sysmonView := m.sysmon.View()
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Width(cw).Render(view),
-		" ",
-		sysmonView,
-	)
+	return view
 }
 
-// sysmonWidth returns the current sysmon panel width, or 0 if hidden.
+// sysmonWidth is kept for compatibility with older code paths; the monitor is
+// not rendered in the cockpit.
 func (m Model) sysmonWidth() int {
-	if !m.showSysmon || m.width < 100 {
-		return 0
-	}
-	if m.width >= 180 {
-		return 50
-	}
-	if m.width >= 140 {
-		return 44
-	}
-	return 38
+	return 0
 }
 
-// contentWidth returns the available width for main content, subtracting
-// sysmon panel width when visible. Overlays and editors should use this
-// instead of m.width so they coexist with the monitor.
+// contentWidth returns the full terminal width. Overlays and editors use it.
 func (m Model) contentWidth() int {
-	sw := m.sysmonWidth()
-	if sw == 0 {
-		return m.width
-	}
-	return m.width - sw - 1
+	return m.width
+}
+
+// canBrowseTree is retained for compatibility; the file tree now lives in the
+// cockpit Files tab rather than the system monitor.
+func (m Model) canBrowseTree() bool {
+	return false
 }
 
 // resizeActiveOverlay sends a synthetic WindowSizeMsg to the current overlay
@@ -1514,24 +1427,13 @@ func (m *Model) resizeActiveOverlay() tea.Cmd {
 
 func (m *Model) layout() {
 	m.statusbar = m.statusbar.WithWidth(m.width)
-	panelH := m.height - 2 - m.statusbar.Height()
+	panelH := m.height - 1 - m.statusbar.Height()
 	if panelH < 4 {
 		panelH = 4
 	}
+	m.cockpit.SetSize(m.width, panelH)
 
 	agentW := m.width
-	if m.showSysmon && m.width >= 100 {
-		sysmonW := 38
-		if m.width >= 140 {
-			sysmonW = 44
-		}
-		if m.width >= 180 {
-			sysmonW = 50
-		}
-		agentW = m.width - sysmonW - 1
-		m.sysmon.SetSize(sysmonW, panelH)
-	}
-
 	for role, p := range m.panels {
 		p.SetSize(agentW, panelH)
 		m.panels[role] = p

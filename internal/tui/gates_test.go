@@ -25,9 +25,10 @@ func TestView_ShowsApprovalBannerWhenGatePending(t *testing.T) {
 	m.width = 120
 	m.height = 30
 	m.gateArtifact = "vision.md"
+	m.cockpit.SetGate("vision.md")
 
 	view := m.View()
-	if !strings.Contains(view, "Waiting for approval: vision") {
-		t.Fatalf("expected approval banner in main view, got %q", view)
+	if !strings.Contains(view, "GATE") || !strings.Contains(view, "vision") {
+		t.Fatalf("expected cockpit inspector to show the pending gate, got %q", view)
 	}
 }

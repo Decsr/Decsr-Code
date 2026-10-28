@@ -1,34 +1,139 @@
 # TUI Reference
 
-DECSR ships with a full-screen terminal user interface (TUI). This
-document explains every panel and indicator you will see, with concrete
-examples.
+DECSR ships with a full-screen terminal interface built around the **Workflow
+Cockpit**. It is designed for one question: *what is the pipeline doing, and
+what needs me now?*
 
-The screen is split into three areas:
+The run screen has three panes:
 
-1. **Agent panels** — one panel per active agent, showing live streaming output.
-2. **Status bar** — a single line at the bottom with run state, stage progress,
-   runner/model, elapsed time, and keyboard shortcuts.
-3. **System Monitor** — an optional side panel (toggle with `Ctrl+T`) showing
-   CPU, memory, network, and token usage.
+1. **Workflow** — the phase spine and the subtask tree.
+2. **Center** — the selected work item: activity, plan, agents, tokens, files,
+   tests, or raw output.
+3. **Run inspector** — gate, tokens, tests, agent state, changes, and the next
+   action.
+
+The old CPU/MEM/NET system monitor has been removed. No host metrics are shown.
 
 > **Recommended font:** DECSR cannot set its own font; it uses your terminal's.
-> [Monaspace Krypton](https://monaspace.githubnext.com) (free, OFL-licensed) is
-> a good fit: a clean, highly legible monospace face.
+> [Monaspace Krypton](https://monaspace.githubnext.com) is a good fit.
 
 ---
+
+## Workflow spine
+
+The left pane is the run's navigation:
+
+```text
+✓ Context     1m
+✓ Spec        4m
+✓ Plan        2m
+▸ Build       18m
+  ✓ T1 Add session model       coder · 4.2k
+  ✓ T2 Wire login handler      coder · 6.1k
+  ▸ T3 Add auth middleware     coder · 3.1k · dep T2
+  ○ T4 Integration tests       qa      · dep T2
+  ○ T5 Update docs             coder   · dep T1,T3
+○ Verify
+○ Review
+  QA · UX · Security
+○ Done
+```
+
+- `✓` done, `▸` active, `○` pending, `!` failed, `⏸` gate.
+- Subtasks show owner, token usage, and dependencies.
+- The active phase shows its current detail under its label.
+- `j`/`k` or `↑`/`↓` moves the selection. `Enter` moves focus to the center.
+- Long runs auto-scroll the rail to keep the selected item visible.
+
+## Center tabs
+
+| Key | Tab | Shows |
+|---|---|---|
+| `1` | Activity | Structured agent steps: read, edit, command, test, write, errors. |
+| `2` | Plan | The full subtask table: status, owner, tokens, dependencies. |
+| `3` | Agents | PM, Coder, QA, UX, and Security with state, current handoff, tokens, last action. |
+| `4` | Tokens | Total, input/output, per-agent shares, per-subtask usage, estimates. |
+| `5` | Files | Files observed from agent activity (reads, edits, writes, tests). |
+| `6` | Tests | Test-first status per subtask and the global verification state. |
+| `7` | Output | Raw agent output for the selected/active agent. |
+
+Activity is the default. Raw output is one key away rather than the main view.
+
+## Run inspector
+
+The right pane shows:
+
+- **GATE** — the pending approval, or `none`.
+- **TOKENS** — total, per-agent bars, estimate marker.
+- **TESTS** — waiting, running, pass, or fail; last test command.
+- **AGENTS** — status and current work item for each agent.
+- **CHANGES** — observed files and fix rounds.
+- **ERROR** — the failure detail when the run stops.
+- **NEXT** — the next action, e.g. “Finish T3 → global verification”.
+
+## Tokens
+
+Tokens are shown in the inspector and the Tokens tab:
+
+```text
+TOTAL 75.6k   in 62.1k   out 13.5k   ~
+Coder   33.7k  ██████████  44%
+QA      27.0k  ███████     35%
+PM      11.9k  ███         15%
+```
+
+- `↓` / `↑` are input and output tokens in the old notation; the cockpit uses
+  `in` / `out` for clarity.
+- A trailing `~` means the runner estimated the count locally.
+- `—` means usage has not been reported for that item.
+- Per-subtask counters are scoped to the subtask; agent totals include the
+  whole run.
+
+## Keyboard
+
+| Key | Action |
+|---|---|
+| `Tab` / `Shift+Tab` | Cycle focus: Workflow → Center → Inspector. |
+| `↑`/`↓` or `j`/`k` | Move in the focused pane. |
+| `1`–`7` | Switch center tab. |
+| `p` / `a` / `x` / `f` / `t` / `o` | Plan / Agents / Tokens / Files / Tests / Output. |
+| `i` or `Ctrl+T` | Toggle the inspector. |
+| `Enter` | Focus the center pane / inspect the selected item. |
+| `Ctrl+A` | Approve the current human gate. |
+| `Ctrl+O` | Reopen the pending gate artifact. |
+| `Ctrl+G` | Open the git diff view. |
+| `Ctrl+C` | Open the PM chat. |
+| `Ctrl+X` | Cancel the run. |
+| `Ctrl+P` | Pause to change the model. |
+| `Ctrl+E` | Resume the build-fix loop after a failure. |
+| `q` | Quit. |
+| `Esc` | Cancel / return; when the run is done, return to the menu. |
+
+## Gates
+
+When the pipeline needs approval, the inspector shows the artifact under
+**GATE** and the workflow rail marks the phase with `⏸`. `Enter` or `Ctrl+O`
+opens the artifact viewer; `Ctrl+A` approves; the viewer supports edit/regenerate
+where applicable.
+
+The context pack remains the first gate, followed by the task spec and the task
+plan.
+
+## Compact layout (80×24)
+
+At 80 columns the inspector collapses. The workflow rail and center stay
+visible, the footer shows a compact token/test summary, and the same keys work.
+At 60×12 or smaller the cockpit asks for a larger terminal.
 
 ## Setup screens
 
 **Global Settings** and **Project Setup** choose each agent's runner, model, and
-reasoning effort. The effort list follows the selected model: it shows only the
-levels that model/provider exposes, plus **`(provider default)`**. Selecting the
-default leaves the decision to the provider.
+reasoning effort. The effort list follows the selected model.
 
 **Enter saves the current choice**, shows a green **`✓ Saved`** indicator in the
-footer, and advances to the next section. The screen stays open so you can
-continue configuring. **Esc** closes as “Done” (already-saved choices persist);
-**Ctrl+S** saves the remaining choices and closes.
+footer, and advances to the next section. The screen stays open. **Esc** closes
+as “Done” (saved choices persist); **Ctrl+S** saves the remaining choices and
+closes.
 
 Project Setup edits per-agent overrides in three steps:
 
@@ -37,9 +142,8 @@ Project Setup edits per-agent overrides in three steps:
 3. **Effort** — the levels supported by that model, or provider default.
 
 Saving the effort step writes that agent's override and returns to the agent
-list so you can configure the next agent. Project Setup shows only project-level
-settings; global provider/model/effort are configured from **Global Settings**
-(`g`).
+list. Project Setup shows only project-level settings; global provider/model/
+effort are configured from **Global Settings** (`g`).
 
 The chosen effort is stored as `agents.<role>.effort` in
 `~/.decsr/config.yaml` or `.decsr/project.yaml` and is passed to the provider:
@@ -52,166 +156,3 @@ The chosen effort is stored as `agents.<role>.effort` in
 | OpenCode | `opencode run -m provider/model#<level>` (cloud models only) |
 | Ollama | `/api/chat` → `"think": "<level>"` |
 | LM Studio / oMLX | `/v1/chat/completions` → `"reasoning_effort": "<level>"` |
-
-OpenCode and Copilot read their effort choices from the OpenCode model cache;
-Ollama reads `thinking.values` from `/api/show`; LM Studio reads model
-capabilities. Providers without machine-readable metadata use a conservative
-static list. An effort the selected model does not offer is shown as a warning
-in the setup screen and is not applied.
-
----
-
-## Agent panels
-
-Each agent renders a panel with a header and a scrolling body of streamed
-output. The header shows the agent role and its current status:
-
-```
-┌─ ■ CODER ───────── ▘ RUNNING ─┐
-```
-
-| Indicator     | Meaning                                                        |
-|---------------|----------------------------------------------------------------|
-| `○ WAITING`   | Agent is queued and has not started yet.                       |
-| `▘ RUNNING`   | Agent is actively producing output (animated spinner).         |
-| `▘ FIXING`    | Agent is re-running to fix issues found by a quality gate.     |
-| `✓ DONE`      | Agent finished successfully.                                    |
-| `✗ ERROR`     | Agent failed (e.g. build error, runner crash, quota/rate limit).|
-| `⏸ GATE`      | Agent output is waiting for your approval before continuing.   |
-
-The body streams tokens from the model as they arrive. When a panel has more
-output than fits on screen, a scroll indicator appears; use `↑`/`↓` to scroll.
-
----
-
-## Status bar
-
-The bottom line is laid out as:
-
-```
-main  ● coder   ▸ Stage 2/5: Must Have — Auth        copilot/claude-opus-4.8 · high  ◷ 3m 12s   ↑↓ scroll  Ctrl+R req  …  v0.9.0
-```
-
-Reading left to right:
-
-| Segment                         | Example                                  | Meaning                                                                 |
-|---------------------------------|------------------------------------------|-------------------------------------------------------------------------|
-| **Git branch**                  | `main`                                   | The current branch of the project.                                      |
-| **State**                       | `● coder`, `⏸ … — waiting for approval`  | What the pipeline is doing right now (running agent, gate, done, error).|
-| **Stage info**                  | `▸ Stage 2/5: Must Have — Auth`          | Current implementation stage; scrolls as a marquee if it is too long.   |
-| **Runner / model**              | `copilot/claude-opus-4.8 · high`         | The active runner, model, and effort for the running agent.              |
-| **Elapsed timer**               | `◷ 3m 12s`                               | Time since coding started (appears once the Coder begins).              |
-| **Keyboard shortcuts**          | `↑↓ scroll  Ctrl+R req  …`               | Available actions (see below).                                          |
-| **Version**                     | `v0.9.0`                                 | DECSR version.                                               |
-
-### Keyboard shortcuts
-
-| Key        | Action                                                       |
-|------------|--------------------------------------------------------------|
-| `↑` / `↓`  | Scroll the focused panel.                                     |
-| `Ctrl+R`   | Open the requirements file.                                   |
-| `Ctrl+G`   | Open the git diff view.                                       |
-| `Ctrl+C`   | Open the PM chat / requirements conversation.                 |
-| `Ctrl+T`   | Toggle the System Monitor panel.                              |
-| `Ctrl+A`   | Approve the current human-approval gate.                      |
-| `Ctrl+O`   | Reopen the pending approval artifact after closing it.        |
-| `Ctrl+E`   | Toggle the error banner.                                      |
-| `Ctrl+X`   | Cancel the current run.                                       |
-| `q`        | Quit.                                                         |
-
-### Context pack gate
-
-When the context-first workflow is enabled, the first gate is the repository
-context pack. The artifact viewer opens automatically:
-
-| Key | Action |
-|---|---|
-| `e` | Edit the pack (add your context in section 7) |
-| `Ctrl+S` | Save edits |
-| `Ctrl+A` | Approve |
-| `r` | Regenerate (your user block is preserved) |
-| `Esc` | Close the viewer |
-| `Ctrl+O` | Reopen the gate |
-
-See [`context-pack.md`](context-pack.md) for the document format.
-
----
-
-## System Monitor (`Ctrl+T`)
-
-The System Monitor shows live host metrics and, most importantly, per-agent
-token usage. It has four sections: **CPU**, **MEM**, **NET**, and **TOKENS**.
-
-```
-⚡ SYSTEM MONITOR
-  up 4h 12m • 10 cores
-
-── CPU ──
-  34.2%   load: 2.1 1.8 1.6
-
-── MEM ──
-  61.0%   12.4 GB / 32.0 GB
-
-── NET ──
-  ▼ 1.2 MB/s   ▲ 240 KB/s
-
-── TOKENS ──
- Total: 75.6k tok
- pm          ↓11.9k ↑2.2k~
- coder       ↓33.7k ↑4.5k~
- qa          ↓27.0k ↑1.8k~
-```
-
-### NET vs. TOKENS arrows
-
-Note that the two sections use **different** glyphs:
-
-- **NET** uses solid triangles for network throughput:
-  - `▼` = **download** rate (bytes received per second).
-  - `▲` = **upload** rate (bytes sent per second).
-- **TOKENS** uses thin arrows for token counts:
-  - `↓` = **input** tokens (the prompt the agent sent *to* the model).
-  - `↑` = **output** tokens (the text the model generated *back*).
-
-### Reading the TOKENS section
-
-- **`Total: 75.6k tok`** — the sum of input + output tokens across all agents
-  for this run.
-- Each following line is one agent: its role, then `↓` input tokens and `↑`
-  output tokens.
-- A trailing **`~`** means the counts are **estimated** locally rather than
-  reported exactly by the CLI. This is normal for local models and fallback
-  runners that do not return precise usage; runners that report exact usage
-  (e.g. cloud APIs) omit the `~`.
-
-**Worked example:**
-
-```
- coder       ↓33.7k ↑4.5k~
-```
-
-> The `coder` agent consumed roughly **33,700 input tokens** (the prompts,
-> context, and code it fed to the model) and produced roughly **4,500 output
-> tokens** (the code and explanations it generated). The `~` indicates these
-> figures are estimated.
-
-```
- pm          ↓11.9k ↑2.2k
-```
-
-> The `pm` agent used **exactly 11,900 input** and **2,200 output** tokens —
-> no `~`, so these came directly from the runner's reported usage.
-
-### Number formatting
-
-Token and rate values are abbreviated for compactness:
-
-| Raw value     | Displayed |
-|---------------|-----------|
-| `950`         | `950`     |
-| `2,200`       | `2.2k`    |
-| `33,700`      | `33.7k`   |
-| `1,250,000`   | `1.3M`    |
-
-When more agents are active than fit in the section, the list auto-scrolls
-through them.
