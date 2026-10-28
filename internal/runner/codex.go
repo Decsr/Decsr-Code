@@ -112,7 +112,7 @@ func (r CodexRunner) Complete(ctx context.Context, req CompletionRequest) (<-cha
 		model = r.Model
 	}
 
-	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, userContent.String(), req.SystemPrompt, model)
+	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, userContent.String(), req.SystemPrompt, model, NormalizeEffort(req.Effort))
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (r CodexRunner) Complete(ctx context.Context, req CompletionRequest) (<-cha
 	return ch, nil
 }
 
-func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, model string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
+func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, model, effort string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "codex"
@@ -138,6 +138,9 @@ func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPr
 	args := []string{"exec", "--full-auto"}
 	if model != "" {
 		args = append(args, "--model", model)
+	}
+	if effort != "" {
+		args = append(args, "-c", `model_reasoning_effort="`+mapCodexEffort(effort)+`"`)
 	}
 	// Prompt is piped via stdin to avoid macOS ARG_MAX limits on large prompts.
 

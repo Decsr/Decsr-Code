@@ -216,7 +216,7 @@ func (m *NegotiateModel) sendToPM(visible string) {
 			names[i] = a.rel
 		}
 		payload += attachmentBlock(m.attached)
-		note := "📎 attached: " + strings.Join(names, ", ")
+		note := "▪ attached: " + strings.Join(names, ", ")
 		if strings.TrimSpace(display) == "" {
 			display = note
 		} else {
@@ -268,16 +268,15 @@ func (m *NegotiateModel) SetSize(w, h int) {
 }
 
 func (m NegotiateModel) View() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.primary)
 	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
 	inputStyle := lipgloss.NewStyle().Foreground(crt.bright)
 
-	sep := strings.Repeat("─", m.width)
+	sep := lipgloss.NewStyle().Foreground(crt.border).Render(strings.Repeat("─", m.width))
 
 	// The .md attach picker takes over the body while open.
 	if m.picking {
 		return strings.Join([]string{
-			titleStyle.Render("PM Requirements Conversation") + "  " + dimStyle.Render("attach project files"),
+			screenHeader(m.width, "PM Requirements Conversation", "attach project files"),
 			sep,
 			m.picker.View(),
 		}, "\n")
@@ -290,26 +289,26 @@ func (m NegotiateModel) View() string {
 		statusLine = inputStyle.Render("› ") + renderInputWithCursor(m.input, m.cursor)
 	}
 
-	hints := "Esc close  Enter send  Ctrl+A accept now  Ctrl+C clear"
+	hints := []keyHint{{"Esc", "close"}, {"Enter", "send"}, {"Ctrl+A", "accept now"}, {"Ctrl+C", "clear"}}
 	if m.requireInput {
-		hints = "Esc close  Enter send  Ctrl+C clear"
+		hints = []keyHint{{"Esc", "close"}, {"Enter", "send"}, {"Ctrl+C", "clear"}}
 	}
 	if m.root != "" {
-		hints += "  Ctrl+F attach .md"
+		hints = append(hints, keyHint{"Ctrl+F", "attach .md"})
 	}
 
 	lines := []string{
-		titleStyle.Render("PM Requirements Conversation") + "  " + dimStyle.Render(hints),
+		screenHeader(m.width, "PM Requirements Conversation", ""),
 		sep,
 		m.vp.View(),
-		sep,
+		hintBar(m.width, hints, ""),
 	}
 	if len(m.attached) > 0 {
 		names := make([]string, len(m.attached))
 		for i, a := range m.attached {
 			names[i] = a.rel
 		}
-		lines = append(lines, dimStyle.Render("📎 "+strings.Join(names, ", ")))
+		lines = append(lines, dimStyle.Render("▪ "+strings.Join(names, ", ")))
 	}
 	lines = append(lines, statusLine)
 

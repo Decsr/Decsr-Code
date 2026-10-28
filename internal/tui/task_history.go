@@ -51,26 +51,28 @@ func (m TaskHistoryModel) Update(msg tea.Msg) (TaskHistoryModel, tea.Cmd) {
 }
 
 func (m TaskHistoryModel) View() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.primary)
 	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
 	doneStyle := lipgloss.NewStyle().Foreground(galaxyCyan).Bold(true)
-	selStyle := lipgloss.NewStyle().Reverse(true)
+	selStyle := lipgloss.NewStyle().Background(surfaceRaised).Foreground(crt.bright).Bold(true)
 
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("Done Tasks") + "  " + dimStyle.Render("↑↓ scroll · Esc back"))
-	b.WriteString("\n" + strings.Repeat("─", m.width) + "\n")
+	b.WriteString(screenHeader(m.width, "Done Tasks", ""))
+	b.WriteString("\n\n")
 
 	if len(m.tasks) == 0 {
 		b.WriteString(dimStyle.Render("  No completed tasks yet."))
+		b.WriteString("\n\n" + hintBar(m.width, []keyHint{{"Esc", "back"}}, ""))
 		return b.String()
 	}
 
 	for i, t := range m.tasks {
 		if i == m.cursor {
-			b.WriteString(selStyle.Render("  "+t.Title+"  ("+t.ID+")") + "\n")
+			b.WriteString(lipgloss.NewStyle().Foreground(focusBorder).Bold(true).Render("▌") +
+				selStyle.Render(" "+t.Title+"  ("+t.ID+")") + "\n")
 		} else {
 			b.WriteString("  " + doneStyle.Render("✓ ") + t.Title + " " + dimStyle.Render("("+t.ID+")") + "\n")
 		}
 	}
+	b.WriteString("\n" + hintBar(m.width, []keyHint{{"↑↓", "scroll"}, {"Esc", "back"}}, ""))
 	return b.String()
 }

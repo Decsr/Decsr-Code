@@ -109,6 +109,7 @@ func TestOllamaRunner_SendsUnlimitedNumPredict(t *testing.T) {
 	r := &OllamaRunner{Model: "test", BaseURL: srv.URL}
 	ch, err := r.Complete(context.Background(), CompletionRequest{
 		Messages: []ConvMessage{{Role: "user", Content: "hi"}},
+		Effort:   "high",
 	})
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
@@ -118,6 +119,9 @@ func TestOllamaRunner_SendsUnlimitedNumPredict(t *testing.T) {
 
 	if captured.Options.NumPredict != ollamaMaxPredict {
 		t.Errorf("expected num_predict=%d, got %d", ollamaMaxPredict, captured.Options.NumPredict)
+	}
+	if captured.Think != "high" {
+		t.Errorf("expected think=high, got %v", captured.Think)
 	}
 }
 

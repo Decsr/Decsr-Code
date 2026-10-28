@@ -140,7 +140,7 @@ func TestNewHomeModel_MenuItems(t *testing.T) {
 func TestResolveOverrides_AllAgents(t *testing.T) {
 	cfg := newTestConfig()
 
-	overrides := resolveOverrides(cfg.Agents, "codex", "gpt-5.3-codex")
+	overrides := resolveOverrides(cfg.Agents, "codex", "gpt-5.3-codex", "default")
 
 	expectedRoles := []string{"pm", "coder", "qa", "ux_reviewer", "security"}
 	if len(overrides) != len(expectedRoles) {
@@ -157,18 +157,18 @@ func TestResolveOverrides_AllAgents(t *testing.T) {
 func TestResolveOverrides_PreservesExplicitValues(t *testing.T) {
 	agents := map[string]config.AgentConfig{
 		"pm":       {Runner: "codex", Model: "gpt-5.4"},
-		"coder":    {Runner: "claude", Model: "sonnet"},
-		"qa":       {Runner: "codex", Model: "gpt-5.3-codex"},
+		"coder":    {Runner: "claude", Model: "sonnet", Effort: "high"},
+		"qa":       {Runner: "codex", Model: "gpt-5.3-codex", Effort: "default"},
 		"security": {Runner: "claude", Model: "opus"},
 	}
 
-	overrides := resolveOverrides(agents, "codex", "gpt-5.3-codex")
+	overrides := resolveOverrides(agents, "codex", "gpt-5.3-codex", "default")
 
-	expected := map[string]struct{ runner, model string }{
-		"pm":       {"codex", "gpt-5.4"},
-		"coder":    {"claude", "sonnet"},
-		"qa":       {"codex", "gpt-5.3-codex"},
-		"security": {"claude", "opus"},
+	expected := map[string]struct{ runner, model, effort string }{
+		"pm":       {"codex", "gpt-5.4", ""},
+		"coder":    {"claude", "sonnet", "high"},
+		"qa":       {"codex", "gpt-5.3-codex", ""},
+		"security": {"claude", "opus", ""},
 	}
 
 	for _, ov := range overrides {
@@ -182,6 +182,9 @@ func TestResolveOverrides_PreservesExplicitValues(t *testing.T) {
 		if ov.model != exp.model {
 			t.Errorf("agent %q: expected model %q, got %q", ov.role, exp.model, ov.model)
 		}
+		if ov.effort != exp.effort {
+			t.Errorf("agent %q: expected effort %q, got %q", ov.role, exp.effort, ov.effort)
+		}
 	}
 }
 
@@ -191,7 +194,7 @@ func TestResolveOverrides_FillsDefaultsForEmpty(t *testing.T) {
 		"coder": {Runner: "claude", Model: ""},
 	}
 
-	overrides := resolveOverrides(agents, "codex", "gpt-5")
+	overrides := resolveOverrides(agents, "codex", "gpt-5", "default")
 
 	for _, ov := range overrides {
 		switch ov.role {
@@ -213,7 +216,7 @@ func TestResolveOverrides_SkipsMissingRoles(t *testing.T) {
 		"coder": {Runner: "claude", Model: "sonnet"},
 	}
 
-	overrides := resolveOverrides(agents, "codex", "gpt-5")
+	overrides := resolveOverrides(agents, "codex", "gpt-5", "default")
 
 	if len(overrides) != 2 {
 		t.Fatalf("expected 2 overrides, got %d", len(overrides))
@@ -514,7 +517,7 @@ func TestHomeModel_ViewReady(t *testing.T) {
 	if view == "" {
 		t.Error("View should return non-empty string when ready")
 	}
-	if !containsText(view, "D E C S R") {
+	if !containsText(view, "DECSR") {
 		t.Error("View should contain 'D E C S R'")
 	}
 }

@@ -48,6 +48,10 @@ func New(cfg config.AgentConfig, skillLoader *skills.Loader, promptLanguage stri
 		base = &SkillRunner{inner: base, loader: skillLoader}
 	}
 
+	// Apply the per-agent default reasoning effort. Requests that carry an
+	// explicit Effort (e.g. a PM-selected sub-task override) win.
+	base = NewEffortRunner(base, cfg.Effort)
+
 	// Wrap with token budget enforcement when configured. For cloud runners
 	// this caps cost; for local runners it trims the prompt to the bounded
 	// context window so an over-long prompt is not silently truncated (or

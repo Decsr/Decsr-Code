@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Per-agent reasoning effort: `agents.<role>.effort` in global/project config,
+  with a model-aware effort picker in Global Settings and Project Setup.
+- Setup screens now save each choice on Enter, show a `✓ Saved` indicator, and
+  stay open for the next setting. Esc closes as “Done”; Ctrl+S saves and closes.
+  Project Setup no longer shows the global provider/model/effort cards.
+- Runner plumbing for effort: Claude `--effort`, Codex
+  `model_reasoning_effort`, Copilot `--effort`, OpenCode `#variant`, Ollama
+  `think`, and LM Studio/oMLX `reasoning_effort`.
+- Effort discovery where the provider exposes metadata: OpenCode/Copilot model
+  cache, Ollama `/api/show` thinking values, and LM Studio model capabilities.
+- Effort is shown in the status bar next to the active runner/model.
+
+### Changed
+- TUI chrome refresh: shared pixel header, keycap, chip and panel helpers;
+  square borders, a quadrant-block spinner, and emoji-free home/setup screens.
+
 ## [0.1.1] - 2026-10-27
 
 ### Changed

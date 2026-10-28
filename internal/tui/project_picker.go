@@ -176,24 +176,20 @@ func (m ProjectPickerModel) View() string {
 	}
 
 	p := homePalette
-	titleStyle := lipgloss.NewStyle().Foreground(p.accent).Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(p.dim)
 	activeStyle := lipgloss.NewStyle().Foreground(p.green).Bold(true)
 	warnStyle := lipgloss.NewStyle().Foreground(p.red).Bold(true)
 	browseStyle := lipgloss.NewStyle().Foreground(p.cyan)
 
 	var lines []string
-	lines = append(lines, "")
-	lines = append(lines, titleStyle.Render("  ◈ SELECT PROJECT"))
-	lines = append(lines, "")
 
 	// --- Current directory (hidden when cwd is the home directory) ---
 	if m.showCurrentDir() {
-		currentLabel := "📂 Use current directory"
+		currentLabel := "◆ Use current directory"
 		currentPath := dimStyle.Render("     " + m.currentDir)
 		kind, _ := m.itemAt(m.cursor)
 		if kind == "current" {
-			lines = append(lines, activeStyle.Render("  ▸ "+currentLabel))
+			lines = append(lines, activeStyle.Render("  ▌ "+currentLabel))
 			lines = append(lines, "  "+currentPath)
 		} else {
 			lines = append(lines, "    "+currentLabel)
@@ -203,10 +199,10 @@ func (m ProjectPickerModel) View() string {
 	}
 
 	// --- Open project… ---
-	openLabel := "📂 Open project…"
+	openLabel := "▸ Open project…"
 	kindBrowse, _ := m.itemAt(m.cursor)
 	if kindBrowse == "browse" {
-		lines = append(lines, activeStyle.Render("  ▸ "+openLabel))
+		lines = append(lines, activeStyle.Render("  ▌ "+openLabel))
 		lines = append(lines, "  "+dimStyle.Render("     Browse filesystem for a project directory"))
 	} else {
 		lines = append(lines, "    "+browseStyle.Render(openLabel))
@@ -216,7 +212,7 @@ func (m ProjectPickerModel) View() string {
 
 	// --- Items 2+: Recent projects ---
 	if len(m.projects) > 0 {
-		lines = append(lines, dimStyle.Render("  ── RECENT PROJECTS ──"))
+		lines = append(lines, dimStyle.Render("  RECENT PROJECTS"))
 		lines = append(lines, "")
 		for i, proj := range m.projects {
 			exists := dirExists(proj.Path)
@@ -228,7 +224,7 @@ func (m ProjectPickerModel) View() string {
 				continue
 			}
 
-			label := fmt.Sprintf("📁 %s", proj.Name)
+			label := fmt.Sprintf("■ %s", proj.Name)
 			detail := dimStyle.Render("     " + proj.Path)
 			if !exists {
 				label = fmt.Sprintf("⊘ %s", proj.Name)
@@ -237,7 +233,7 @@ func (m ProjectPickerModel) View() string {
 
 			kind, recentIdx := m.itemAt(m.cursor)
 			if kind == "recent" && recentIdx == i {
-				lines = append(lines, activeStyle.Render("  ▸ "+label))
+				lines = append(lines, activeStyle.Render("  ▌ "+label))
 			} else {
 				lines = append(lines, "    "+label)
 			}
@@ -250,15 +246,21 @@ func (m ProjectPickerModel) View() string {
 		lines = append(lines, dimStyle.Render("  No recent projects"))
 	}
 
-	lines = append(lines, "")
-	sep := dimStyle.Render(strings.Repeat("─", max(m.width-4, 0)))
-	lines = append(lines, sep)
+	panelW := m.width - 4
+	if panelW < 40 {
+		panelW = 40
+	}
+	panel := pixelPanel("◆ SELECT PROJECT", p.accent, true,
+		lipgloss.NewStyle().Padding(0, 1).Width(panelW), strings.Join(lines, "\n"))
 
-	hints := dimStyle.Render("  ↑↓ navigate  Enter select  d remove  Esc back")
-	lines = append(lines, hints)
-
-	content := strings.Join(lines, "\n")
-	return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, content)
+	header := screenHeader(m.width, "Select Project", "")
+	footer := hintBar(m.width, []keyHint{{"↑↓", "navigate"}, {"Enter", "select"}, {"d", "remove"}, {"Esc", "back"}}, "")
+	bodyH := m.height - 2
+	if bodyH < 4 {
+		bodyH = 4
+	}
+	body := lipgloss.Place(m.width, bodyH, lipgloss.Center, lipgloss.Top, panel)
+	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }
 
 func dirExists(path string) bool {

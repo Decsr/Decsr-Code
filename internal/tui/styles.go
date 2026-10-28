@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -68,6 +71,22 @@ var (
 	galaxyCyan     = lipgloss.Color("#5ce1e6") // comet cyan
 	galaxyIce      = lipgloss.Color("#9ee8ff") // ice
 )
+
+// Derived surface shades (galaxy theme).
+var (
+	surfaceRaised = lipgloss.Color("#34343f") // raised surface: keycaps, selected rows
+	focusBorder   = lipgloss.Color("#7a5fd9") // focused-panel border (deep nebula violet)
+)
+
+// pixelBorder is the shared square-cornered panel border (┌┐└┘─│).
+var pixelBorder = lipgloss.NormalBorder()
+
+// pixelSpinner is a quadrant-block spinner (the braille spinner.Dot frames are
+// missing from Monaspace Krypton).
+var pixelSpinner = spinner.Spinner{
+	Frames: []string{"▘", "▝", "▗", "▖"},
+	FPS:    time.Second / 8,
+}
 
 // Role colors — each agent gets a distinct accent against the dark base.
 var roleColors = map[string]lipgloss.Color{
@@ -187,4 +206,126 @@ func paintBackground(view string, width, height int) string {
 		b.WriteString(reset)
 	}
 	return b.String()
+}
+
+// ── Shared pixel chrome helpers ──────────────────────────────────────────────
+
+// lerpColor linearly blends two "#rrggbb" colours (t in 0..1).
+func lerpColor(a, b lipgloss.Color, t float64) lipgloss.Color {
+	parse := func(c lipgloss.Color) (int, int, int) {
+		var r, g, bl int
+		_, _ = fmt.Sscanf(string(c), "#%02x%02x%02x", &r, &g, &bl)
+		return r, g, bl
+	}
+	ar, ag, ab := parse(a)
+	br, bg, bb := parse(b)
+	mix := func(x, y int) int { return x + int(float64(y-x)*t+0.5) }
+	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", mix(ar, br), mix(ag, bg), mix(ab, bb)))
+}
+
+// screenHeader renders the slim header bar shared by every screen:
+// pixel mark + DECSR + screen name on the left, project name on the right.
+func screenHeader(width int, screen, project string) string {
+	bar := lipgloss.NewStyle().Background(crt.panelBg)
+	left := bar.Foreground(galaxyViolet).Bold(true).Render(" ◆ ") +
+		bar.Foreground(crt.bright).Bold(true).Render("DECSR") +
+		bar.Foreground(crt.border).Render("  ▌ ") +
+		bar.Foreground(galaxyViolet).Bold(true).Render(strings.ToUpper(screen))
+	right := ""
+	if project != "" {
+		right = bar.Foreground(crt.dim).Render(project + " ")
+	}
+	gap := width - ansi.StringWidth(left) - ansi.StringWidth(right)
+	if gap < 1 {
+		gap = 1
+		right = ""
+	}
+	out := left + bar.Render(strings.Repeat(" ", gap)) + right
+	if width > 0 && ansi.StringWidth(out) > width {
+		out = ansi.Truncate(out, width, "")
+	}
+	return out
+}
+
+// keycap renders a key on a slightly raised background.
+func keycap(k string) string {
+	return lipgloss.NewStyle().Background(surfaceRaised).Foreground(crt.bright).Bold(true).Render(" " + k + " ")
+}
+
+// keyHint is one footer entry: a keycap plus a dim label.
+type keyHint struct{ key, label string }
+
+// hintBar renders footer key hints (keycap + dim label) on the panel bar,
+// padded to width, with an optional right-aligned segment (already styled).
+func hintBar(width int, hints []keyHint, right string) string {
+	bar := lipgloss.NewStyle().Background(crt.panelBg)
+	dim := bar.Foreground(crt.dim)
+	var parts []string
+	for _, h := range hints {
+		parts = append(parts, keycap(h.key)+dim.Render(" "+h.label))
+	}
+	left := bar.Render(" ") + strings.Join(parts, bar.Render("  "))
+	if right != "" {
+		right += bar.Render(" ")
+	}
+	gap := width - ansi.StringWidth(left) - ansi.StringWidth(right)
+	if gap < 1 {
+		gap = 1
+	}
+	out := left + bar.Render(strings.Repeat(" ", gap)) + right
+	if width > 0 && ansi.StringWidth(out) > width {
+		out = ansi.Truncate(out, width, "")
+	}
+	return out
+}
+
+// chip renders a small coloured pixel chip: dark text on an accent block.
+func chip(label string, color lipgloss.Color) string {
+	return lipgloss.NewStyle().Background(color).Foreground(crt.bg).Bold(true).Render(" " + label + " ")
+}
+
+// panelTop builds the top border line of a pixel panel with the title embedded:
+// ┌─ ◆ TITLE ────────┐ (w is the full panel width including corners).
+func panelTop(w int, title string, titleColor, borderColor lipgloss.Color) string {
+	bs := lipgloss.NewStyle().Foreground(borderColor)
+	if w < 2 {
+		return ""
+	}
+	if title == "" || w < 8 {
+		return bs.Render("┌" + strings.Repeat("─", w-2) + "┐")
+	}
+	t := ansi.Truncate(title, w-6, "…")
+	label := " " + t + " "
+	fill := w - 3 - ansi.StringWidth(label)
+	if fill < 0 {
+		fill = 0
+	}
+	return bs.Render("┌─") +
+		lipgloss.NewStyle().Foreground(titleColor).Bold(true).Render(label) +
+		bs.Render(strings.Repeat("─", fill)+"┐")
+}
+
+// pixelPanel renders body inside a square-cornered border (padding/width taken
+// from st) with the title embedded in the top edge. A focused panel uses the
+// violet focus border; otherwise crt.border.
+func pixelPanel(title string, titleColor lipgloss.Color, focused bool, st lipgloss.Style, body string) string {
+	bc := crt.border
+	if focused {
+		bc = focusBorder
+	}
+	out := st.Border(pixelBorder, false, true, true, true).BorderForeground(bc).Render(body)
+	return panelTop(lipgloss.Width(out), title, titleColor, bc) + "\n" + out
+}
+
+// chipStyle renders text as a one-cell-padded bold chip; an empty bg draws
+// plain padded text (used for pending phases).
+type chipStyle struct{ fg, bg lipgloss.Color }
+
+// Render implements the same call shape as lipgloss.Style for chip users.
+func (c chipStyle) Render(s string) string {
+	st := lipgloss.NewStyle().Foreground(c.fg).Bold(true)
+	if c.bg != "" {
+		st = st.Background(c.bg)
+	}
+	return st.Render(" " + s + " ")
 }

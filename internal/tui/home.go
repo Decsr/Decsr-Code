@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/decsr"
@@ -57,7 +58,7 @@ var homePalette = struct {
 	cyan:     galaxyCyan, // comet cyan
 	red:      galaxyRed,  // pulsar red
 	border:   crt.border, // galaxy border
-	activeBg: crt.muted,
+	activeBg: surfaceRaised,
 	headerBg: crt.panelBg,
 	footerBg: crt.panelBg,
 }
@@ -82,6 +83,7 @@ type HomeModel struct {
 	// Cached project info — computed once in NewHomeModel, stable across renders.
 	cachedRunner    string
 	cachedModel     string
+	cachedEffort    string
 	cachedProject   string
 	cachedLanguage  string
 	cachedBranch    string
@@ -102,7 +104,7 @@ func NewHomeModel(cfg config.Config, root string) HomeModel {
 	history := LoadHistory(wsPath)
 
 	// Resolve project info ONCE — no map-iteration randomness on every render.
-	runnerName, modelName := detectDefaultRunnerModel(cfg.Agents)
+	runnerName, modelName, effortName := detectDefaultRunnerModel(cfg.Agents)
 	if runnerName == "" {
 		runnerName = "(not set)"
 	}
@@ -123,22 +125,22 @@ func NewHomeModel(cfg config.Config, root string) HomeModel {
 
 	language := resolveLanguageFromRoot(root, cfg)
 	gitBranch := GitBranch(root)
-	overrides := resolveOverrides(cfg.Agents, runnerName, modelName)
+	overrides := resolveOverrides(cfg.Agents, runnerName, modelName, effortName)
 
 	items := []homeMenuItem{
 		{icon: "▶", label: "New Task", desc: "Start a PM chat to define a task — attach existing .md with Ctrl+F", action: homeActionNewTask, key: "Enter"},
-		{icon: "📂", label: "Open Project", desc: "Switch to another project directory", action: homeActionOpenProject, key: "o"},
-		{icon: "🌐", label: "Global Settings", desc: "Default provider & model (~/.decsr/config.yaml)", action: homeActionGlobalSettings, key: "g"},
-		{icon: "🧠", label: "Model Memory", desc: "Cap local-model RAM or context size (auto RAM→context per agent)", action: homeActionModelMemory, key: "m"},
-		{icon: "⚙", label: "Project Setup", desc: "Per-agent runner & model overrides", action: homeActionSetup, key: "s"},
+		{icon: "■", label: "Open Project", desc: "Switch to another project directory", action: homeActionOpenProject, key: "o"},
+		{icon: "◆", label: "Global Settings", desc: "Default provider, model & effort (~/.decsr/config.yaml)", action: homeActionGlobalSettings, key: "g"},
+		{icon: "◈", label: "Model Memory", desc: "Cap local-model RAM or context size (auto RAM→context per agent)", action: homeActionModelMemory, key: "m"},
+		{icon: "◇", label: "Project Setup", desc: "Per-agent runner, model & effort overrides", action: homeActionSetup, key: "s"},
 		{icon: "✦", label: "Reset Artifacts", desc: "Remove generated plans & reports — keeps code, config, and project memory", action: homeActionClean, key: "c"},
-		{icon: "⏻", label: "Quit", desc: "Exit DECSR", action: homeActionQuit, key: "q"},
+		{icon: "×", label: "Quit", desc: "Exit DECSR", action: homeActionQuit, key: "q"},
 	}
 
 	// Show completed-task history when there is any.
 	if done := decsr.DoneTasks(context.Background(), root); len(done) > 0 {
 		historyItem := homeMenuItem{
-			icon:   "🗸",
+			icon:   "✓",
 			label:  "Done Tasks",
 			desc:   fmt.Sprintf("Review %d completed task(s)", len(done)),
 			action: homeActionDoneTasks,
@@ -182,6 +184,7 @@ func NewHomeModel(cfg config.Config, root string) HomeModel {
 		projectValid:    isValidProjectRoot(root),
 		cachedRunner:    runnerName,
 		cachedModel:     modelName,
+		cachedEffort:    effortName,
 		cachedProject:   projectName,
 		cachedLanguage:  language,
 		cachedBranch:    gitBranch,
@@ -306,26 +309,8 @@ func (m HomeModel) selectAction(action homeAction) tea.Cmd {
 // ── View ─────────────────────────────────────────────────────────────────────
 
 func (m HomeModel) View() string {
-	p := homePalette
-
-	headerStyle := lipgloss.NewStyle().
-		Background(p.headerBg).
-		Foreground(p.accent).
-		Bold(true).
-		Padding(0, 2).
-		Width(m.width)
-
-	footerStyle := lipgloss.NewStyle().
-		Background(p.footerBg).
-		Foreground(p.dim).
-		Padding(0, 1).
-		Width(m.width)
-
-	header := headerStyle.Render(
-		"◈  D E C S R  v" + Version,
-	)
-
-	footer := m.renderFooter(footerStyle)
+	header := screenHeader(m.width, "Home", m.cachedProjectLabel())
+	footer := m.renderFooter()
 
 	if !m.ready {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "", footer)
@@ -336,6 +321,15 @@ func (m HomeModel) View() string {
 		m.viewport.View(),
 		footer,
 	)
+}
+
+// cachedProjectLabel is the project name shown at the right of the header
+// (empty when no valid project is selected).
+func (m HomeModel) cachedProjectLabel() string {
+	if !m.projectValid {
+		return ""
+	}
+	return m.cachedProject
 }
 
 // ── Viewport management ──────────────────────────────────────────────────────
@@ -419,7 +413,7 @@ func (m HomeModel) renderContent() string {
 	if m.confirmQuit {
 		warnStyle := lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
 		confirmBox := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+			Border(pixelBorder).
 			BorderForeground(crt.warn).
 			Padding(1, 3).
 			Render(
@@ -477,9 +471,8 @@ var blockGlyphs = map[rune][]string{
 	' ': {"....", "....", "....", "....", "...."},
 }
 
-// renderBlockText renders text as chunky pixel-art using Unicode half-block characters.
-// 5 pixel rows → 3 display rows via ▀▄█ compositing.
-func renderBlockText(text string) []string {
+// blockPixelRows lays text out as 5 rows of '#'/'.' pixels.
+func blockPixelRows(text string) []string {
 	pixelRows := make([]string, 5)
 	for i, ch := range text {
 		glyph := blockGlyphs[ch]
@@ -495,29 +488,65 @@ func renderBlockText(text string) []string {
 			pixelRows[r] += glyph[r]
 		}
 	}
+	return pixelRows
+}
 
-	pairs := [][2]int{{0, 1}, {2, 3}, {4, -1}}
-	result := make([]string, len(pairs))
-	for i, pair := range pairs {
+// blockPairs groups the 5 pixel rows into 3 display rows (top, bottom or -1).
+var blockPairs = [][2]int{{0, 1}, {2, 3}, {4, -1}}
+
+// renderBlockText renders text as chunky pixel-art using Unicode half-block characters.
+// 5 pixel rows → 3 display rows via ▀▄█ compositing.
+func renderBlockText(text string) []string {
+	return renderBlockTextColored(text, nil)
+}
+
+// renderBlockTextColored is renderBlockText with a per-pixel-row colour
+// (len 5). With half-blocks, a cell holding two pixels of different rows uses
+// foreground = top colour and background = bottom colour, giving a smooth
+// vertical gradient at pixel resolution. A nil rowColors renders uncoloured.
+func renderBlockTextColored(text string, rowColors []lipgloss.Color) []string {
+	pixelRows := blockPixelRows(text)
+	result := make([]string, len(blockPairs))
+	for i, pair := range blockPairs {
 		top := pixelRows[pair[0]]
-		bot := ""
+		bot := strings.Repeat(".", len(top))
 		if pair[1] >= 0 {
 			bot = pixelRows[pair[1]]
-		} else {
-			bot = strings.Repeat(".", len(top))
 		}
 		var sb strings.Builder
 		for j := 0; j < len(top); j++ {
 			t, b := top[j] == '#', bot[j] == '#'
+			var ch string
+			var st lipgloss.Style
 			switch {
 			case t && b:
-				sb.WriteRune('█')
+				ch = "█"
+				if rowColors != nil {
+					if rowColors[pair[0]] == rowColors[pair[1]] {
+						st = lipgloss.NewStyle().Foreground(rowColors[pair[0]])
+					} else {
+						ch = "▀"
+						st = lipgloss.NewStyle().Foreground(rowColors[pair[0]]).Background(rowColors[pair[1]])
+					}
+				}
 			case t:
-				sb.WriteRune('▀')
+				ch = "▀"
+				if rowColors != nil {
+					st = lipgloss.NewStyle().Foreground(rowColors[pair[0]])
+				}
 			case b:
-				sb.WriteRune('▄')
+				ch = "▄"
+				if rowColors != nil {
+					st = lipgloss.NewStyle().Foreground(rowColors[pair[1]])
+				}
 			default:
 				sb.WriteRune(' ')
+				continue
+			}
+			if rowColors != nil {
+				sb.WriteString(st.Render(ch))
+			} else {
+				sb.WriteString(ch)
 			}
 		}
 		result[i] = sb.String()
@@ -568,18 +597,21 @@ func (m HomeModel) renderLogo(maxW int) string {
 		)
 	}
 
-	blockLines := renderBlockText("DECSR")
-
-	// Nebula gradient, one colour per display row.
-	nebula := []lipgloss.Style{
-		lipgloss.NewStyle().Foreground(galaxyViolet).Bold(true),
-		lipgloss.NewStyle().Foreground(galaxyPurple).Bold(true),
-		lipgloss.NewStyle().Foreground(galaxyPink),
+	// Nebula gradient (violet → purple → pink), one colour per pixel row.
+	rowColors := make([]lipgloss.Color, 5)
+	for r := range rowColors {
+		t := float64(r) / 4
+		if t < 0.5 {
+			rowColors[r] = lerpColor(galaxyViolet, galaxyPurple, t*2)
+		} else {
+			rowColors[r] = lerpColor(galaxyPurple, galaxyPink, (t-0.5)*2)
+		}
 	}
+	blockLines := renderBlockTextColored("DECSR", rowColors)
 
 	lines := []string{renderStars(logoStarsTop)}
 	for i, bl := range blockLines {
-		lines = append(lines, renderStars(logoStarsLeft[i])+nebula[i].Render(bl)+renderStars(logoStarsRight[i]))
+		lines = append(lines, renderStars(logoStarsLeft[i])+bl+renderStars(logoStarsRight[i]))
 	}
 	lines = append(lines, renderStars(logoStarsBottom))
 	lines = append(lines, tagStyle.Render("       AI-powered multi-agent coding pipeline"))
@@ -589,24 +621,35 @@ func (m HomeModel) renderLogo(maxW int) string {
 
 // ── Pipeline visualisation ───────────────────────────────────────────────────
 
-func (m HomeModel) renderPipeline(maxW int) string {
-	agents := []string{"TASK", "PM", "CODE", "TEST", "REVIEW", "UX", "SEC", "QA"}
+// pipelineStages mirrors the real stage order of the task runner
+// (context → negotiate → decompose → tests → code → build/fix → review → done).
+var pipelineStages = []struct {
+	long, short string
+	color       lipgloss.Color
+}{
+	{"CONTEXT", "CTX", galaxyCyan},
+	{"NEGOTIATE", "NEG", galaxyViolet},
+	{"DECOMPOSE", "DEC", galaxyPurple},
+	{"TESTS", "TEST", galaxyPink},
+	{"CODE", "CODE", galaxyMint},
+	{"BUILD/FIX", "FIX", galaxyGold},
+	{"REVIEW", "REV", galaxyOrange},
+	{"DONE", "DONE", galaxyIce},
+}
 
-	arrow := lipgloss.NewStyle().Foreground(crt.dim).Render(" → ")
+func (m HomeModel) renderPipeline(maxW int) string {
+	arrow := lipgloss.NewStyle().Foreground(crt.dim).Render("▸")
 
 	var parts []string
-	for _, label := range agents {
-		color := crt.primary
-		if c, ok := pipelineColors[label]; ok {
-			color = c
+	for _, st := range pipelineStages {
+		label := st.long
+		if maxW < 90 {
+			label = st.short
 		}
-		style := lipgloss.NewStyle().Foreground(color).Bold(true)
-		parts = append(parts, style.Render(label))
+		parts = append(parts, chip(label, st.color))
 	}
 
-	pipeline := strings.Join(parts, arrow)
-
-	return lipgloss.PlaceHorizontal(maxW, lipgloss.Center, pipeline)
+	return lipgloss.PlaceHorizontal(maxW, lipgloss.Center, strings.Join(parts, arrow))
 }
 
 // ── Project Info Card ────────────────────────────────────────────────────────
@@ -615,78 +658,98 @@ func (m HomeModel) renderInfoCard(contentWidth int) string {
 	p := homePalette
 	dimStyle := lipgloss.NewStyle().Foreground(p.dim)
 	valueStyle := lipgloss.NewStyle().Foreground(p.bright)
-	labelStyle := lipgloss.NewStyle().Foreground(p.dim).Width(12)
-	titleStyle := lipgloss.NewStyle().Foreground(p.accent).Bold(true)
+	labelStyle := lipgloss.NewStyle().Foreground(p.dim).Width(10)
 
 	cardW := contentWidth/2 - 2
 	if contentWidth < 90 {
 		cardW = contentWidth - 4
 	}
-
-	var lines []string
-	lines = append(lines, titleStyle.Render(" ◈ PROJECT"))
-	lines = append(lines, "")
+	card := lipgloss.NewStyle().Padding(0, 1).Width(cardW)
 
 	if !m.projectValid {
+		var lines []string
 		warnStyle := lipgloss.NewStyle().Foreground(p.gold)
-		lines = append(lines, warnStyle.Render("  ⚠ No project selected"))
+		lines = append(lines, warnStyle.Render("⚠ No project selected"))
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("  Press ")+
+		lines = append(lines, dimStyle.Render("Press ")+
 			lipgloss.NewStyle().Foreground(p.accent).Bold(true).Render("o")+
 			dimStyle.Render(" to open a project directory"))
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("  Current directory is not a"))
-		lines = append(lines, dimStyle.Render("  recognized project root."))
-
-		return lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(p.gold).
-			Padding(0, 1).
-			Width(cardW).
-			Render(strings.Join(lines, "\n"))
+		lines = append(lines, dimStyle.Render("Current directory is not a"))
+		lines = append(lines, dimStyle.Render("recognized project root."))
+		return pixelPanel("◆ PROJECT", p.gold, false, card, strings.Join(lines, "\n"))
 	}
 
-	row := func(label, value string, style lipgloss.Style) {
-		lines = append(lines, fmt.Sprintf("  %s %s", labelStyle.Render(label), style.Render(value)))
+	var lines []string
+	row := func(label, value string) {
+		lines = append(lines, fmt.Sprintf("%s %s", labelStyle.Render(label), value))
 	}
+	inherits := dimStyle.Render("inherits global")
+	const unset = "(not set)"
 
-	row("NAME", m.cachedProject, valueStyle)
+	row("NAME", valueStyle.Render(m.cachedProject))
 	if m.cachedLanguage != "" {
-		row("LANG", m.cachedLanguage, valueStyle)
+		row("LANG", valueStyle.Render(m.cachedLanguage))
 	}
 	if m.cachedBranch != "" {
-		row("BRANCH", " "+m.cachedBranch, valueStyle)
+		row("BRANCH", valueStyle.Render(m.cachedBranch))
 	}
-	row("RUNNER", m.cachedRunner+dimStyle.Render(" (global)"), valueStyle)
-	row("MODEL", m.cachedModel+dimStyle.Render(" (global)"), valueStyle)
+	switch {
+	case m.cachedRunner == unset && m.cachedModel == unset:
+		row("DEFAULT", inherits)
+	default:
+		if m.cachedRunner == unset {
+			row("RUNNER", inherits)
+		} else {
+			row("RUNNER", valueStyle.Render(m.cachedRunner)+dimStyle.Render(" (global)"))
+		}
+		if m.cachedModel == unset {
+			row("MODEL", inherits)
+		} else {
+			row("MODEL", valueStyle.Render(m.cachedModel)+dimStyle.Render(" (global)"))
+		}
+		if m.cachedEffort != "" && m.cachedEffort != "default" {
+			row("EFFORT", valueStyle.Render(m.cachedEffort)+dimStyle.Render(" (global)"))
+		}
+	}
 
 	if len(m.cachedOverrides) > 0 {
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("  AGENTS:"))
+		lines = append(lines, dimStyle.Render("AGENTS"))
 		for _, ov := range m.cachedOverrides {
-			info := valueStyle.Render(ov.runner + " / " + ov.model)
-			agentStyle := lipgloss.NewStyle().Foreground(roleColor(ov.role))
-			lines = append(lines, fmt.Sprintf("   %s %s",
-				agentStyle.Render(fmt.Sprintf("%-12s", strings.ToUpper(ov.role))),
+			var info string
+			switch {
+			case ov.runner == unset && ov.model == unset:
+				info = inherits
+			default:
+				r, mdl := valueStyle.Render(ov.runner), valueStyle.Render(ov.model)
+				if ov.runner == unset {
+					r = inherits
+				}
+				if ov.model == unset {
+					mdl = inherits
+				}
+				info = r + dimStyle.Render(" / ") + mdl
+				if ov.effort != "" && ov.effort != "default" {
+					info += dimStyle.Render(" · ") + valueStyle.Render(ov.effort)
+				}
+			}
+			rc := lipgloss.NewStyle().Foreground(roleColor(ov.role))
+			lines = append(lines, fmt.Sprintf("%s %s %s",
+				rc.Render("■"),
+				rc.Render(fmt.Sprintf("%-12s", strings.ToUpper(ov.role))),
 				info,
 			))
 		}
 	}
 
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(p.border).
-		Padding(0, 1).
-		Width(cardW).
-		Render(strings.Join(lines, "\n"))
+	return pixelPanel("◆ PROJECT", p.accent, false, card, strings.Join(lines, "\n"))
 }
 
 // ── Menu ─────────────────────────────────────────────────────────────────────
 
 func (m HomeModel) renderMenu(contentWidth int) string {
 	p := homePalette
-	dimStyle := lipgloss.NewStyle().Foreground(p.dim)
-	titleStyle := lipgloss.NewStyle().Foreground(p.accent).Bold(true)
 
 	// Each menu item gets its own accent color, keyed by action so dynamic
 	// items (Resume, Done Tasks) don't shift colors onto the wrong rows or onto
@@ -718,15 +781,12 @@ func (m HomeModel) renderMenu(contentWidth int) string {
 	if contentWidth < 90 {
 		cardW = contentWidth - 4
 	}
-	innerW := cardW - 6
-	if innerW < 20 {
-		innerW = 20
+	rowW := cardW - 2 // inside horizontal padding
+	if rowW < 24 {
+		rowW = 24
 	}
 
 	var lines []string
-	lines = append(lines, titleStyle.Render(" ◈ ACTIONS"))
-	lines = append(lines, "")
-
 	for i, item := range m.items {
 		disabled := !m.projectValid && requiresProject(item.action)
 
@@ -734,42 +794,48 @@ func (m HomeModel) renderMenu(contentWidth int) string {
 		if disabled {
 			itemColor = p.dim
 		}
-
-		key := dimStyle.Render("[" + item.key + "]")
-
 		desc := item.desc
 		if disabled {
 			desc = "Open a project first (o)"
 		}
 
-		if i == m.cursor {
-			label := fmt.Sprintf(" %s %s", item.icon, strings.ToUpper(item.label))
-			activeLine := lipgloss.NewStyle().
-				Background(p.activeBg).
-				Foreground(itemColor).
-				Bold(true).
-				Width(innerW).
-				Render(label)
-			activeMarker := lipgloss.NewStyle().Foreground(itemColor).Bold(true)
-			lines = append(lines, activeMarker.Render("▸")+activeLine+" "+key)
-			lines = append(lines, "  "+dimStyle.Render("  "+desc))
-		} else {
-			inactiveStyle := lipgloss.NewStyle().Foreground(itemColor)
-			label := fmt.Sprintf("  %s %s", item.icon, strings.ToUpper(item.label))
-			lines = append(lines, inactiveStyle.Render(label)+"  "+key)
-			lines = append(lines, "  "+dimStyle.Render("  "+desc))
+		selected := i == m.cursor
+		bg := lipgloss.NewStyle()
+		bar := " "
+		capStyle := lipgloss.NewStyle().Background(crt.muted).Foreground(p.dim)
+		if selected {
+			bg = bg.Background(p.activeBg)
+			bar = lipgloss.NewStyle().Foreground(focusBorder).Bold(true).Render("▌")
+			capStyle = lipgloss.NewStyle().Background(focusBorder).Foreground(p.bright).Bold(true)
 		}
+		keycapStr := capStyle.Render(" " + item.key + " ")
+
+		labelStyle := bg.Foreground(itemColor)
+		if selected {
+			labelStyle = labelStyle.Bold(true)
+		}
+		left := labelStyle.Render(" " + item.icon + " " + strings.ToUpper(item.label))
+		gap := rowW - 1 - ansi.StringWidth(left) - ansi.StringWidth(keycapStr) - 1
+		if gap < 1 {
+			gap = 1
+		}
+		line1 := bar + left + bg.Render(strings.Repeat(" ", gap)) + keycapStr + bg.Render(" ")
+
+		descText := ansi.Truncate("   "+desc, rowW-1, "…")
+		descPad := rowW - 1 - ansi.StringWidth(descText)
+		if descPad < 0 {
+			descPad = 0
+		}
+		line2 := bar + bg.Foreground(p.dim).Render(descText) + bg.Render(strings.Repeat(" ", descPad))
+
+		lines = append(lines, line1, line2)
 		if i < len(m.items)-1 {
 			lines = append(lines, "")
 		}
 	}
 
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(p.border).
-		Padding(0, 1).
-		Width(cardW).
-		Render(strings.Join(lines, "\n"))
+	card := lipgloss.NewStyle().Padding(0, 1).Width(cardW)
+	return pixelPanel("◆ ACTIONS", p.accent, true, card, strings.Join(lines, "\n"))
 }
 
 // ── Recent Projects ──────────────────────────────────────────────────────────
@@ -795,7 +861,7 @@ func (m HomeModel) renderHistory() string {
 	}
 
 	var lines []string
-	lines = append(lines, titleStyle.Render("  ◈ RECENT PROJECTS")+"  "+dimStyle.Render("(o to switch)"))
+	lines = append(lines, titleStyle.Render("  ◆ RECENT PROJECTS")+"  "+dimStyle.Render("(o to switch)"))
 
 	maxShow := 5
 	if len(filtered) < maxShow {
@@ -840,58 +906,30 @@ func (m HomeModel) shortenProjectPath(path string) string {
 
 // ── Footer ───────────────────────────────────────────────────────────────────
 
-func (m HomeModel) renderFooter(style lipgloss.Style) string {
+func (m HomeModel) renderFooter() string {
 	p := homePalette
-	keyStyle := lipgloss.NewStyle().
-		Background(p.footerBg).
-		Foreground(p.accent).
-		Bold(true)
-
-	hint := func(k, desc string) string {
-		return keyStyle.Render(k) + lipgloss.NewStyle().Background(p.footerBg).Foreground(p.dim).Render(" "+desc)
-	}
-
-	hints := []string{hint("↑↓", "navigate")}
+	hints := []keyHint{{"↑↓", "navigate"}}
 	if m.width < 80 {
-		hints = append(hints, hint("←→", "scroll"))
+		hints = append(hints, keyHint{"←→", "scroll"})
 	}
 	hints = append(hints,
-		hint("Enter", "select"),
-		hint("r", "pipeline"),
-		hint("o", "project"),
-		hint("g", "global"),
-		hint("s", "setup"),
-		hint("c", "reset"),
-		hint("q", "quit"),
+		keyHint{"Enter", "select"},
+		keyHint{"r", "pipeline"},
+		keyHint{"o", "project"},
+		keyHint{"g", "global"},
+		keyHint{"s", "setup"},
+		keyHint{"c", "reset"},
+		keyHint{"q", "quit"},
 	)
-	left := strings.Join(hints, "  ")
 
-	scrollInfo := ""
+	bar := lipgloss.NewStyle().Background(p.footerBg)
+	right := ""
 	if m.ready && m.viewport.TotalLineCount() > m.viewport.Height {
 		pct := m.viewport.ScrollPercent() * 100
-		scrollInfo = lipgloss.NewStyle().
-			Background(p.footerBg).
-			Foreground(p.dim).
-			Render(fmt.Sprintf("%.0f%%", pct))
+		right = bar.Foreground(p.dim).Render(fmt.Sprintf("%.0f%%", pct)) + bar.Render("  ")
 	}
-
-	versionTag := lipgloss.NewStyle().
-		Background(p.footerBg).
-		Foreground(p.gold).
-		Bold(true).
-		Render("v" + Version)
-
-	right := versionTag
-	if scrollInfo != "" {
-		right = scrollInfo + "  " + versionTag
-	}
-
-	gap := m.width - lipglossLen(left) - lipglossLen(right) - 2
-	if gap < 0 {
-		gap = 0
-	}
-
-	return style.Render(left + strings.Repeat(" ", gap) + right)
+	right += bar.Foreground(p.gold).Bold(true).Render("v" + Version)
+	return hintBar(m.width, hints, right)
 }
 
 // ── Data resolution helpers ──────────────────────────────────────────────────
@@ -900,6 +938,7 @@ type agentOverride struct {
 	role   string
 	runner string
 	model  string
+	effort string
 }
 
 // resolveLanguageFromRoot detects project language from config or filesystem markers.
@@ -929,8 +968,9 @@ func resolveLanguageFromRoot(root string, cfg config.Config) string {
 	return ""
 }
 
-// resolveOverrides returns all agents with their effective runner/model.
-func resolveOverrides(agents map[string]config.AgentConfig, defaultRunner, defaultModel string) []agentOverride {
+// resolveOverrides returns all agents with their effective runner/model and
+// any effort that differs from the global default.
+func resolveOverrides(agents map[string]config.AgentConfig, defaultRunner, defaultModel, defaultEffort string) []agentOverride {
 	var overrides []agentOverride
 	roles := []string{"pm", "coder", "coder_fixer", "qa", "ux_reviewer", "security"}
 	for _, role := range roles {
@@ -943,7 +983,11 @@ func resolveOverrides(agents map[string]config.AgentConfig, defaultRunner, defau
 			if mdl == "" {
 				mdl = defaultModel
 			}
-			overrides = append(overrides, agentOverride{role: role, runner: r, model: mdl})
+			effort := ac.Effort
+			if effort == "default" || effort == defaultEffort {
+				effort = ""
+			}
+			overrides = append(overrides, agentOverride{role: role, runner: r, model: mdl, effort: effort})
 		}
 	}
 	return overrides

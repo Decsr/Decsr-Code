@@ -18,20 +18,63 @@ The screen is split into three areas:
 
 ---
 
+## Setup screens
+
+**Global Settings** and **Project Setup** choose each agent's runner, model, and
+reasoning effort. The effort list follows the selected model: it shows only the
+levels that model/provider exposes, plus **`(provider default)`**. Selecting the
+default leaves the decision to the provider.
+
+**Enter saves the current choice**, shows a green **`✓ Saved`** indicator in the
+footer, and advances to the next section. The screen stays open so you can
+continue configuring. **Esc** closes as “Done” (already-saved choices persist);
+**Ctrl+S** saves the remaining choices and closes.
+
+Project Setup edits per-agent overrides in three steps:
+
+1. **Runner** — OpenCode, Claude, Ollama, oMLX, Codex, Copilot, or LM Studio.
+2. **Model** — the provider's model list.
+3. **Effort** — the levels supported by that model, or provider default.
+
+Saving the effort step writes that agent's override and returns to the agent
+list so you can configure the next agent. Project Setup shows only project-level
+settings; global provider/model/effort are configured from **Global Settings**
+(`g`).
+
+The chosen effort is stored as `agents.<role>.effort` in
+`~/.decsr/config.yaml` or `.decsr/project.yaml` and is passed to the provider:
+
+| Provider | Effort path |
+|---|---|
+| Claude | `claude --effort <level>` |
+| Codex | `codex exec -c model_reasoning_effort="<level>"` |
+| Copilot | `copilot --effort <level>` |
+| OpenCode | `opencode run -m provider/model#<level>` (cloud models only) |
+| Ollama | `/api/chat` → `"think": "<level>"` |
+| LM Studio / oMLX | `/v1/chat/completions` → `"reasoning_effort": "<level>"` |
+
+OpenCode and Copilot read their effort choices from the OpenCode model cache;
+Ollama reads `thinking.values` from `/api/show`; LM Studio reads model
+capabilities. Providers without machine-readable metadata use a conservative
+static list. An effort the selected model does not offer is shown as a warning
+in the setup screen and is not applied.
+
+---
+
 ## Agent panels
 
 Each agent renders a panel with a header and a scrolling body of streamed
 output. The header shows the agent role and its current status:
 
 ```
-[CODER]  ⠹ RUNNING
+┌─ ■ CODER ───────── ▘ RUNNING ─┐
 ```
 
 | Indicator     | Meaning                                                        |
 |---------------|----------------------------------------------------------------|
 | `○ WAITING`   | Agent is queued and has not started yet.                       |
-| `⠋ RUNNING`   | Agent is actively producing output (animated spinner).         |
-| `⠋ FIXING`    | Agent is re-running to fix issues found by a quality gate.     |
+| `▘ RUNNING`   | Agent is actively producing output (animated spinner).         |
+| `▘ FIXING`    | Agent is re-running to fix issues found by a quality gate.     |
 | `✓ DONE`      | Agent finished successfully.                                    |
 | `✗ ERROR`     | Agent failed (e.g. build error, runner crash, quota/rate limit).|
 | `⏸ GATE`      | Agent output is waiting for your approval before continuing.   |
@@ -46,7 +89,7 @@ output than fits on screen, a scroll indicator appears; use `↑`/`↓` to scrol
 The bottom line is laid out as:
 
 ```
-main  ● coder   ▸ Stage 2/5: Must Have — Auth        copilot/claude-opus-4.8  ⏱ 3m 12s   ↑↓ scroll  Ctrl+R req  …  v0.9.0
+main  ● coder   ▸ Stage 2/5: Must Have — Auth        copilot/claude-opus-4.8 · high  ◷ 3m 12s   ↑↓ scroll  Ctrl+R req  …  v0.9.0
 ```
 
 Reading left to right:
@@ -56,8 +99,8 @@ Reading left to right:
 | **Git branch**                  | `main`                                   | The current branch of the project.                                      |
 | **State**                       | `● coder`, `⏸ … — waiting for approval`  | What the pipeline is doing right now (running agent, gate, done, error).|
 | **Stage info**                  | `▸ Stage 2/5: Must Have — Auth`          | Current implementation stage; scrolls as a marquee if it is too long.   |
-| **Runner / model**              | `copilot/claude-opus-4.8`                | The active runner and model for the running agent.                      |
-| **Elapsed timer**               | `⏱ 3m 12s`                               | Time since coding started (appears once the Coder begins).              |
+| **Runner / model**              | `copilot/claude-opus-4.8 · high`         | The active runner, model, and effort for the running agent.              |
+| **Elapsed timer**               | `◷ 3m 12s`                               | Time since coding started (appears once the Coder begins).              |
 | **Keyboard shortcuts**          | `↑↓ scroll  Ctrl+R req  …`               | Available actions (see below).                                          |
 | **Version**                     | `v0.9.0`                                 | DECSR version.                                               |
 

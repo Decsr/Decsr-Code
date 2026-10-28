@@ -165,14 +165,14 @@ func (m startupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.home.syncViewport()
 				return m, m.home.Init()
 			case homeActionSetup:
-				currentRunner, currentModel := detectDefaultRunnerModel(m.cfg.Agents)
+				currentRunner, currentModel, currentEffort := detectDefaultRunnerModel(m.cfg.Agents)
 				// Load project-level overrides from project config file.
 				projectCfg := config.LoadProject(m.root)
 				projectOverrides := make(map[string]config.AgentConfig)
 				if projectCfg.Agents != nil {
 					projectOverrides = projectCfg.Agents
 				}
-				setup := NewSetupModelWithOverrides(currentRunner, currentModel, m.cfg.Project.Language, m.cfg.Project.Name, projectOverrides)
+				setup := NewSetupModelWithOverrides(currentRunner, currentModel, currentEffort, m.cfg.Project.Language, m.cfg.Project.Name, projectOverrides)
 				setup.root = m.root
 				setup.width, setup.height = m.width, m.height
 				setup.syncViewport()
@@ -180,8 +180,8 @@ func (m startupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.phase = startupPhaseSetup
 				return m, m.setup.Init()
 			case homeActionGlobalSettings:
-				currentRunner, currentModel := detectDefaultRunnerModel(m.cfg.Agents)
-				setup := NewSetupModel(currentRunner, currentModel, m.cfg.Agents)
+				currentRunner, currentModel, currentEffort := detectDefaultRunnerModel(m.cfg.Agents)
+				setup := NewSetupModel(currentRunner, currentModel, currentEffort, m.cfg.Agents)
 				setup.globalOnly = true
 				setup.width, setup.height = m.width, m.height
 				setup.syncViewport()
@@ -204,13 +204,14 @@ func (m startupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg := msg.(type) {
 		case setupDoneMsg:
 			if m.setup.globalOnly {
-				// Global Settings: save provider+model for all agents.
+				// Global Settings: save provider, model, and effort for all agents.
 				globalAgents := make(map[string]config.AgentConfig)
 				for role, ac := range m.cfg.Agents {
 					ac.Runner = msg.provider
 					if msg.model != "" {
 						ac.Model = msg.model
 					}
+					ac.Effort = msg.effort
 					globalAgents[role] = ac
 				}
 				_ = config.SaveGlobal(config.Config{
@@ -233,6 +234,9 @@ func (m startupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							if ov.Model != "" {
 								ac.Model = ov.Model
 							}
+							if ov.Effort != "" {
+								ac.Effort = ov.Effort
+							}
 							m.cfg.Agents[role] = ac
 						}
 					}
@@ -251,6 +255,17 @@ func (m startupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.phase = startupPhaseHome
 			return m, m.home.Init()
 		case setupCancelledMsg:
+			m.phase = startupPhaseHome
+			return m, m.home.Init()
+		case setupClosedMsg:
+			// Incremental saves already wrote to disk; reload so the home
+			// screen reflects them.
+			if reloaded, err := config.Load(m.root); err == nil {
+				m.cfg = reloaded
+			}
+			m.home = NewHomeModel(m.cfg, m.root)
+			m.home.width, m.home.height = m.width, m.height
+			m.home.syncViewport()
 			m.phase = startupPhaseHome
 			return m, m.home.Init()
 		}
@@ -580,45 +595,53 @@ func detectGoModulePath(root string) string {
 }
 
 func (m startupModel) viewModulePath() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.primary)
+	return renderModulePathScreen(m.width, m.height, m.root, m.moduleGuess, m.moduleInput.View(), "back")
+}
+
+// renderModulePathScreen draws the Go module path prompt in the shared
+// header / panel / footer chrome. escLabel is the Esc hint ("back"/"cancel").
+func renderModulePathScreen(width, height int, root, guess, inputView, escLabel string) string {
 	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
 	exampleStyle := lipgloss.NewStyle().Foreground(crt.primary)
 	hintStyle := lipgloss.NewStyle().Foreground(crt.success)
-	sep := strings.Repeat("─", m.width)
 
-	projectName := filepath.Base(m.root)
+	projectName := filepath.Base(root)
 
 	lines := []string{
-		titleStyle.Render("Go Module Path"),
-		sep,
+		"No go.mod found. A module path is required for Go projects.",
+		"It will be used for imports between packages and to run go mod init.",
 		"",
-		"  No go.mod found. A module path is required for Go projects.",
-		"  It will be used for imports between packages and to run go mod init.",
+		dimStyle.Render("Format: <host>/<owner>/<repo>"),
 		"",
-		dimStyle.Render("  Format: <host>/<owner>/<repo>"),
-		"",
-		exampleStyle.Render("  Examples:"),
-		exampleStyle.Render("    github.com/yourname/" + projectName),
-		exampleStyle.Render("    gitlab.com/team/" + projectName),
-		exampleStyle.Render("    " + projectName + "  (for local-only projects)"),
+		exampleStyle.Render("Examples"),
+		dimStyle.Render("  ▪ ") + exampleStyle.Render("github.com/yourname/"+projectName),
+		dimStyle.Render("  ▪ ") + exampleStyle.Render("gitlab.com/team/"+projectName),
+		dimStyle.Render("  ▪ ") + exampleStyle.Render(projectName) + dimStyle.Render("  (for local-only projects)"),
 	}
 
-	if m.moduleGuess != "" {
+	if guess != "" {
 		lines = append(lines,
 			"",
-			hintStyle.Render("  ✓ Detected from git remote: "+m.moduleGuess),
+			hintStyle.Render("✓ Detected from git remote: "+guess),
 		)
 	}
 
-	lines = append(lines,
-		"",
-		"  "+m.moduleInput.View(),
-		"",
-		sep,
-		dimStyle.Render("Enter confirm   Esc back"),
-	)
+	lines = append(lines, "", inputView)
 
-	return strings.Join(lines, "\n")
+	panelW := width - 4
+	if panelW < 40 {
+		panelW = 40
+	}
+	panel := pixelPanel("◆ GO MODULE PATH", galaxyViolet, true,
+		lipgloss.NewStyle().Padding(1, 2).Width(panelW), strings.Join(lines, "\n"))
+
+	header := screenHeader(width, "Go Module Path", projectName)
+	footer := hintBar(width, []keyHint{{"Enter", "confirm"}, {"Esc", escLabel}}, "")
+	body := "\n " + strings.ReplaceAll(panel, "\n", "\n ")
+	if pad := height - 2 - strings.Count(body, "\n"); pad > 0 {
+		body += strings.Repeat("\n", pad)
+	}
+	return header + body + "\n" + footer
 }
 
 // cleanWorkspace removes all files in the workspace directory except preserved ones.
@@ -665,35 +688,40 @@ func NeedsModulePath(root string, cfg config.Config) bool {
 	return err != nil
 }
 
-// detectDefaultRunnerModel finds the most common runner+model pair across all
-// agents. After a save, all non-overridden agents share the same pair, so the
-// majority vote reliably recovers the "default" that was chosen in Setup.
-// Tie-breaking is deterministic (alphabetical by runner, then model).
-func detectDefaultRunnerModel(agents map[string]config.AgentConfig) (string, string) {
-	type pair struct{ runner, model string }
+// detectDefaultRunnerModel finds the most common runner+model+effort triple
+// across all agents. After a save, all non-overridden agents share the same
+// triple, so the majority vote reliably recovers the "default" that was chosen
+// in Setup. Tie-breaking is deterministic (alphabetical by runner, then model,
+// then effort).
+func detectDefaultRunnerModel(agents map[string]config.AgentConfig) (string, string, string) {
+	type pair struct{ runner, model, effort string }
 	counts := make(map[pair]int)
 	for _, ac := range agents {
-		counts[pair{ac.Runner, ac.Model}]++
+		counts[pair{ac.Runner, ac.Model, normalizeSetupEffort(ac.Effort)}]++
 	}
 
 	var bestPair pair
 	bestCount := 0
 	for p, c := range counts {
-		if c > bestCount || (c == bestCount && pairLess(p.runner, p.model, bestPair.runner, bestPair.model)) {
+		if c > bestCount || (c == bestCount && pairLess(p.runner, p.model, p.effort, bestPair.runner, bestPair.model, bestPair.effort)) {
 			bestCount = c
 			bestPair = p
 		}
 	}
 
-	return bestPair.runner, bestPair.model
+	return bestPair.runner, bestPair.model, bestPair.effort
 }
 
-// pairLess provides stable ordering for tie-breaking: alphabetical by runner, then model.
-func pairLess(r1, m1, r2, m2 string) bool {
+// pairLess provides stable ordering for tie-breaking: alphabetical by runner,
+// then model, then effort.
+func pairLess(r1, m1, e1, r2, m2, e2 string) bool {
 	if r1 != r2 {
 		return r1 < r2
 	}
-	return m1 < m2
+	if m1 != m2 {
+		return m1 < m2
+	}
+	return e1 < e2
 }
 
 // StartupResult holds the outcome of the startup flow.
@@ -801,45 +829,7 @@ func (m modulePathModel) View() string {
 }
 
 func (m modulePathModel) view() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.primary)
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	exampleStyle := lipgloss.NewStyle().Foreground(crt.primary)
-	hintStyle := lipgloss.NewStyle().Foreground(crt.success)
-	sep := strings.Repeat("─", m.width)
-
-	projectName := filepath.Base(m.root)
-
-	lines := []string{
-		titleStyle.Render("Go Module Path"),
-		sep,
-		"",
-		"  No go.mod found. A module path is required for Go projects.",
-		"  It will be used for imports between packages and to run go mod init.",
-		"",
-		dimStyle.Render("  Format: <host>/<owner>/<repo>"),
-		"",
-		exampleStyle.Render("  Examples:"),
-		exampleStyle.Render("    github.com/yourname/" + projectName),
-		exampleStyle.Render("    gitlab.com/team/" + projectName),
-		exampleStyle.Render("    " + projectName + "  (for local-only projects)"),
-	}
-
-	if m.moduleGuess != "" {
-		lines = append(lines,
-			"",
-			hintStyle.Render("  ✓ Detected from git remote: "+m.moduleGuess),
-		)
-	}
-
-	lines = append(lines,
-		"",
-		"  "+m.moduleInput.View(),
-		"",
-		sep,
-		dimStyle.Render("Enter confirm   Esc cancel"),
-	)
-
-	return strings.Join(lines, "\n")
+	return renderModulePathScreen(m.width, m.height, m.root, m.moduleGuess, m.moduleInput.View(), "cancel")
 }
 
 // RunModulePathPrompt shows just the module path input screen and returns

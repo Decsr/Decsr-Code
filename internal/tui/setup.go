@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -79,6 +80,7 @@ type setupSection int
 const (
 	sectionProvider setupSection = iota
 	sectionModel
+	sectionEffort
 	sectionProgLang
 	sectionAgentSetup
 	sectionProjectName
@@ -89,6 +91,7 @@ const (
 type agentSetupOverride struct {
 	runner string
 	model  string
+	effort string
 }
 
 // ── messages ──────────────────────────────────────────────────────────────────
@@ -96,12 +99,27 @@ type agentSetupOverride struct {
 type setupDoneMsg struct {
 	provider       string
 	model          string
+	effort         string
 	progLanguage   string
 	projectName    string
 	agentOverrides map[string]agentSetupOverride
 }
 
 type setupCancelledMsg struct{}
+
+// setupClosedMsg closes the setup screen as "Done" after incremental saves.
+// The parent reloads config from disk; it does not re-save the screen state.
+type setupClosedMsg struct{}
+
+// saveStatusClearMsg clears a transient "✓ Saved" message if it is still current.
+type saveStatusClearMsg struct{ id int }
+
+// pendingSave is a save waiting for a model reachability check.
+type pendingSave struct {
+	msg   setupDoneMsg
+	next  setupSection
+	close bool
+}
 
 type modelsListMsg struct {
 	models []string
@@ -141,6 +159,13 @@ type lmstudioModelsListMsg struct {
 // pingResultMsg carries the result of an async model reachability test.
 type pingResultMsg struct {
 	err error
+}
+
+// effortOptionsMsg carries the model-specific effort levels for a provider/model.
+type effortOptionsMsg struct {
+	provider string
+	model    string
+	options  []string
 }
 
 // providerAvailabilityMsg carries the result of an async provider
@@ -183,6 +208,14 @@ type SetupModel struct {
 	progLanguages []string
 	progLangIdx   int
 
+	// Global model effort selection.
+	effort            string
+	effortIdx         int
+	effortOptions     []string
+	effortLoading     bool
+	effortFor         string // provider/model whose options are loaded
+	effortUnsupported string // configured value not offered by this model
+
 	// Project display name (project setup only).
 	projectNameInput textinput.Model
 
@@ -191,9 +224,25 @@ type SetupModel struct {
 	agentOverrides map[string]agentSetupOverride
 	agentCursor    int
 	agentEditing   bool
-	agentEditStep  int          // 0 = pick runner, 1 = pick model
+	agentEditStep  int          // 0 = runner, 1 = model, 2 = effort
 	agentEditProv  providerKind // provider being edited for current agent
 	agentEditIdx   int          // model index within the editing provider
+
+	agentEditEffort            string
+	agentEditEffortIdx         int
+	agentEditEffortUnsupported string
+	agentEffortOptions         []string
+	agentEffortFor             string
+	agentEffortLoading         bool
+
+	// baseAgents is the pre-setup agent map used to write global settings.
+	baseAgents map[string]config.AgentConfig
+
+	// Incremental save feedback.
+	saving       bool
+	saveStatus   string
+	saveStatusOK bool
+	saveStatusID int
 
 	globalOnly bool   // when true, hide agent overrides section
 	root       string // project root for prompt export
@@ -211,9 +260,9 @@ type SetupModel struct {
 	providerAvailability map[providerKind]error
 
 	// Model validation state.
-	pingTesting bool          // true while ping is in progress
-	pingErr     error         // non-nil after a failed ping
-	pendingSave *setupDoneMsg // save payload waiting for ping result
+	pingTesting bool         // true while ping is in progress
+	pingErr     error        // non-nil after a failed ping
+	pendingSave *pendingSave // save waiting for ping result
 
 	width  int
 	height int
@@ -221,9 +270,9 @@ type SetupModel struct {
 
 var setupAgentRoles = []string{"pm", "coder", "coder_fixer", "qa", "ux_reviewer", "security"}
 
-func NewSetupModel(currentRunner, currentModel string, agentCfgs map[string]config.AgentConfig) SetupModel {
+func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs map[string]config.AgentConfig) SetupModel {
 	sp := spinner.New()
-	sp.Spinner = spinner.Dot
+	sp.Spinner = pixelSpinner
 	sp.Style = lipgloss.NewStyle().Foreground(homePalette.accent)
 
 	nameInput := textinput.New()
@@ -251,6 +300,8 @@ func NewSetupModel(currentRunner, currentModel string, agentCfgs map[string]conf
 		projectNameInput:      nameInput,
 		agentRoles:            setupAgentRoles,
 		agentOverrides:        make(map[string]agentSetupOverride),
+		baseAgents:            cloneAgentConfigs(agentCfgs),
+		effort:                normalizeSetupEffort(currentEffort),
 		spinner:               sp,
 		width:                 80,
 		height:                24,
@@ -272,8 +323,9 @@ func NewSetupModel(currentRunner, currentModel string, agentCfgs map[string]conf
 		if ac, ok := agentCfgs[role]; ok {
 			r := ac.Runner
 			mdl := ac.Model
-			if r != currentRunner || mdl != currentModel {
-				m.agentOverrides[role] = agentSetupOverride{runner: r, model: mdl}
+			eff := ac.Effort
+			if r != currentRunner || mdl != currentModel || eff != "" {
+				m.agentOverrides[role] = agentSetupOverride{runner: r, model: mdl, effort: eff}
 			}
 		}
 	}
@@ -285,8 +337,8 @@ func NewSetupModel(currentRunner, currentModel string, agentCfgs map[string]conf
 // NewSetupModelWithOverrides creates a setup model pre-populated with explicit
 // project-level overrides (from project.yaml), instead of detecting them from
 // merged config.
-func NewSetupModelWithOverrides(currentRunner, currentModel, currentProgLang, currentProjectName string, projectAgents map[string]config.AgentConfig) SetupModel {
-	m := NewSetupModel(currentRunner, currentModel, nil)
+func NewSetupModelWithOverrides(currentRunner, currentModel, currentEffort, currentProgLang, currentProjectName string, projectAgents map[string]config.AgentConfig) SetupModel {
+	m := NewSetupModel(currentRunner, currentModel, currentEffort, nil)
 	m.projectNameInput.SetValue(currentProjectName)
 	m.projectNameInput.CursorEnd()
 	// Pre-select programming language.
@@ -306,7 +358,10 @@ func NewSetupModelWithOverrides(currentRunner, currentModel, currentProgLang, cu
 		if ac.Model != "" {
 			ov.model = ac.Model
 		}
-		if ov.runner != "" || ov.model != "" {
+		if ac.Effort != "" {
+			ov.effort = ac.Effort
+		}
+		if ov.runner != "" || ov.model != "" || ov.effort != "" {
 			m.agentOverrides[role] = ov
 		}
 	}
@@ -365,6 +420,120 @@ func (m SetupModel) modelsForProvider(p providerKind) []string {
 	}
 }
 
+// ── effort choices ───────────────────────────────────────────────────────────
+
+const setupEffortDefault = "default"
+
+// normalizeSetupEffort keeps the explicit "default" sentinel and normalizes
+// provider values to lower case.
+func normalizeSetupEffort(effort string) string {
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if effort == "" {
+		return setupEffortDefault
+	}
+	return effort
+}
+
+// effortChoices returns the provider-default option followed by the model's
+// supported levels.
+func effortChoices(options []string) []string {
+	out := []string{setupEffortDefault}
+	for _, opt := range options {
+		if opt != setupEffortDefault {
+			out = append(out, opt)
+		}
+	}
+	return out
+}
+
+// effortLabels renders the default sentinel as a human-readable option.
+func effortLabels(choices []string) []string {
+	out := make([]string, len(choices))
+	for i, choice := range choices {
+		if choice == setupEffortDefault {
+			out[i] = "(provider default)"
+			continue
+		}
+		out[i] = choice
+	}
+	return out
+}
+
+// effortChoiceIndex returns the index of value in choices. found is false when
+// the configured value is not offered by the model.
+func effortChoiceIndex(choices []string, value string) (idx int, found bool) {
+	value = normalizeSetupEffort(value)
+	for i, choice := range choices {
+		if choice == value {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func effortKey(provider, model string) string {
+	return provider + "/" + model
+}
+
+// startEffortLoad fetches effort options for the global model selection.
+func (m *SetupModel) startEffortLoad() tea.Cmd {
+	provider, model := m.selectedProviderModel()
+	if model == "" {
+		return nil
+	}
+	key := effortKey(provider, model)
+	if m.effortFor == key && !m.effortLoading {
+		return nil
+	}
+	m.effortLoading = true
+	m.effortFor = key
+	m.effortOptions = nil
+	m.effortUnsupported = ""
+	return fetchEffortOptions(provider, model)
+}
+
+// startAgentEffortLoad fetches effort options for the model currently being
+// edited in the per-agent panel.
+func (m *SetupModel) startAgentEffortLoad() tea.Cmd {
+	provider := providerToString(m.agentEditProv)
+	models := m.modelsForProvider(m.agentEditProv)
+	if m.agentEditIdx >= len(models) {
+		return nil
+	}
+	model := models[m.agentEditIdx]
+	key := effortKey(provider, model)
+	if m.agentEffortFor == key && !m.agentEffortLoading {
+		return nil
+	}
+	m.agentEffortLoading = true
+	m.agentEffortFor = key
+	m.agentEffortOptions = nil
+	m.agentEditEffortUnsupported = ""
+	return fetchEffortOptions(provider, model)
+}
+
+func fetchEffortOptions(provider, model string) tea.Cmd {
+	return func() tea.Msg {
+		return effortOptionsMsg{
+			provider: provider,
+			model:    model,
+			options:  runner.EffortOptions(provider, model),
+		}
+	}
+}
+
+// selectedEffort returns the global effort value to persist.
+func (m SetupModel) selectedEffort() string {
+	if m.effortLoading || m.effortFor == "" {
+		return normalizeSetupEffort(m.effort)
+	}
+	choices := effortChoices(m.effortOptions)
+	if m.effortIdx >= 0 && m.effortIdx < len(choices) {
+		return choices[m.effortIdx]
+	}
+	return normalizeSetupEffort(m.effort)
+}
+
 func (m SetupModel) Init() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, fetchOpenCodeModels(), fetchOllamaModels(), fetchMLXModels(), fetchCodexModels(), fetchClaudeModels(), fetchCopilotModels(), fetchLMStudioModels(), checkProviderAvailability())
 }
@@ -381,7 +550,7 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 		m.syncViewport()
 
 	case spinner.TickMsg:
-		if m.isLoadingModels() || m.pingTesting {
+		if m.isLoadingModels() || m.pingTesting || m.effortLoading || m.agentEffortLoading {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
@@ -390,17 +559,75 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 			m.viewport.SetContent(m.renderContent())
 		}
 
+	case effortOptionsMsg:
+		key := effortKey(msg.provider, msg.model)
+		if key == m.effortFor {
+			m.effortLoading = false
+			m.effortOptions = msg.options
+			choices := effortChoices(m.effortOptions)
+			idx, found := effortChoiceIndex(choices, m.effort)
+			m.effortIdx = idx
+			m.effortUnsupported = ""
+			if !found {
+				m.effortUnsupported = m.effort
+				m.effort = setupEffortDefault
+			}
+		}
+		if key == m.agentEffortFor {
+			m.agentEffortLoading = false
+			m.agentEffortOptions = msg.options
+			choices := effortChoices(m.agentEffortOptions)
+			idx, found := effortChoiceIndex(choices, m.agentEditEffort)
+			m.agentEditEffortIdx = idx
+			m.agentEditEffortUnsupported = ""
+			if !found {
+				m.agentEditEffortUnsupported = m.agentEditEffort
+				m.agentEditEffort = setupEffortDefault
+			}
+		}
+		if m.ready {
+			m.viewport.SetContent(m.renderContent())
+			m.ensureSectionVisible()
+		}
+
 	case pingResultMsg:
 		m.pingTesting = false
+		m.saving = false
 		if msg.err != nil {
 			m.pingErr = msg.err
+			m.pendingSave = nil
+			m.setSaveStatus("✗ "+msg.err.Error(), false)
 			if m.ready {
 				m.viewport.SetContent(m.renderContent())
 			}
-		} else if m.pendingSave != nil {
-			saved := *m.pendingSave
+			return m, nil
+		}
+		if m.pendingSave != nil {
+			pending := *m.pendingSave
 			m.pendingSave = nil
-			return m, func() tea.Msg { return saved }
+			if pending.close {
+				return m, func() tea.Msg { return pending.msg }
+			}
+			if err := m.savePayload(pending.msg); err != nil {
+				m.setSaveStatus("✗ "+err.Error(), false)
+				if m.ready {
+					m.viewport.SetContent(m.renderContent())
+				}
+				return m, nil
+			}
+			m.setSaveStatus("✓ Saved", true)
+			m.section = pending.next
+			m.ensureSectionVisible()
+			return m, m.clearSaveStatusLater()
+		}
+
+	case saveStatusClearMsg:
+		if msg.id == m.saveStatusID {
+			m.saveStatus = ""
+			m.saveStatusOK = true
+		}
+		if m.ready {
+			m.viewport.SetContent(m.renderContent())
 		}
 
 	case modelsListMsg:
@@ -552,19 +779,26 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 }
 
 func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+s":
+	if msg.String() == "ctrl+s" {
 		return m.startValidation()
+	}
+	if m.saving {
+		return m, nil
+	}
+	switch msg.String() {
 	case "esc":
 		if m.agentEditing {
-			if m.agentEditStep == 1 {
-				m.agentEditStep = 0
+			if m.agentEditStep > 0 {
+				m.agentEditStep--
+				if m.agentEditStep == 1 {
+					m.agentEditEffortUnsupported = ""
+				}
 				return m, nil
 			}
 			m.agentEditing = false
 			return m, nil
 		}
-		return m, func() tea.Msg { return setupCancelledMsg{} }
+		return m, func() tea.Msg { return setupClosedMsg{} }
 	case "[":
 		if m.scrollX > 0 {
 			m.scrollX -= horizontalScrollStep
@@ -583,6 +817,8 @@ func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		return m.handleProviderKeys(msg)
 	case sectionModel:
 		return m.handleModelKeys(msg)
+	case sectionEffort:
+		return m.handleEffortKeys(msg)
 	case sectionProgLang:
 		return m.handleProgLangKeys(msg)
 	case sectionAgentSetup:
@@ -617,15 +853,11 @@ func (m SetupModel) handleProjectNameKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) 
 		m.ensureSectionVisible()
 		return m, nil
 	case "shift+tab", "up":
-		m.section = sectionModel
-		models := m.activeModels()
-		if m.modelIdx >= len(models) {
-			m.modelIdx = max(0, len(models)-1)
-		}
+		m.section = sectionProgLang
 		m.ensureSectionVisible()
 		return m, nil
 	case "enter":
-		return m.startValidation()
+		return m.commitProjectSelection(sectionAgentSetup)
 	}
 	var cmd tea.Cmd
 	m.projectNameInput, cmd = m.projectNameInput.Update(msg)
@@ -634,6 +866,7 @@ func (m SetupModel) handleProjectNameKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) 
 
 func (m SetupModel) handleProviderKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 	prev := m.provider
+	var cmd tea.Cmd
 	switch msg.String() {
 	case "left", "h":
 		m.provider = m.nextAvailableProvider(m.provider, -1)
@@ -647,19 +880,21 @@ func (m SetupModel) handleProviderKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			m.section = sectionProgLang
 			m.progLangIdx = len(m.progLanguages) - 1
 		} else {
-			m.section = sectionModel
-			models := m.activeModels()
-			if m.modelIdx >= len(models) {
-				m.modelIdx = max(0, len(models)-1)
-			}
+			m.section = sectionEffort
+			cmd = m.startEffortLoad()
 		}
 		m.ensureSectionVisible()
 	}
 	if m.provider != prev {
 		m.modelIdx = 0
 		m.pingErr = nil
+		m.effort = setupEffortDefault
+		m.effortIdx = 0
+		m.effortOptions = nil
+		m.effortFor = ""
+		m.effortUnsupported = ""
 	}
-	return m, nil
+	return m, cmd
 }
 
 func (m SetupModel) handleModelKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
@@ -670,6 +905,7 @@ func (m SetupModel) handleModelKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		if m.modelIdx > 0 {
 			m.modelIdx--
 			m.pingErr = nil
+			m.resetEffortForNewModel()
 		} else {
 			m.section = sectionProvider
 			m.ensureSectionVisible()
@@ -678,7 +914,73 @@ func (m SetupModel) handleModelKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		if m.modelIdx < len(models)-1 {
 			m.modelIdx++
 			m.pingErr = nil
+			m.resetEffortForNewModel()
 		}
+	case "tab":
+		m.section = sectionEffort
+		cmd := m.startEffortLoad()
+		m.ensureSectionVisible()
+		return m, cmd
+	case "shift+tab":
+		m.section = sectionProvider
+		m.ensureSectionVisible()
+	case "enter":
+		// Move to the effort picker instead of saving immediately, so choosing
+		// a model always presents its effort options.
+		m.section = sectionEffort
+		cmd := m.startEffortLoad()
+		m.ensureSectionVisible()
+		return m, cmd
+	}
+	return m, nil
+}
+
+// resetEffortForNewModel clears a global effort that may not be supported by
+// the newly selected model. The user can pick a new level in the effort section.
+func (m *SetupModel) resetEffortForNewModel() {
+	m.effort = setupEffortDefault
+	m.effortIdx = 0
+	m.effortOptions = nil
+	m.effortFor = ""
+	m.effortUnsupported = ""
+}
+
+func (m SetupModel) handleEffortKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
+	var cmd tea.Cmd
+	provider, model := m.selectedProviderModel()
+	if model != "" && m.effortFor != effortKey(provider, model) {
+		cmd = m.startEffortLoad()
+	}
+	choices := effortChoices(m.effortOptions)
+	switch msg.String() {
+	case "up", "k":
+		if m.effortLoading {
+			return m, cmd
+		}
+		if m.effortIdx > 0 {
+			m.effortIdx--
+			m.effortUnsupported = ""
+		}
+	case "down", "j":
+		if m.effortLoading {
+			return m, cmd
+		}
+		if m.effortIdx < len(choices)-1 {
+			m.effortIdx++
+			m.effortUnsupported = ""
+		}
+	case "enter":
+		if m.effortLoading {
+			return m, cmd
+		}
+		if m.effortIdx < 0 || m.effortIdx >= len(choices) {
+			m.effortIdx = 0
+		}
+		m.effort = choices[m.effortIdx]
+		if m.globalOnly {
+			return m.commitGlobalSelection(sectionProvider)
+		}
+		return m.commitProjectSelection(sectionProjectName)
 	case "tab":
 		if !m.globalOnly {
 			m.section = sectionProjectName
@@ -687,12 +989,10 @@ func (m SetupModel) handleModelKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		}
 		m.ensureSectionVisible()
 	case "shift+tab":
-		m.section = sectionProvider
+		m.section = sectionModel
 		m.ensureSectionVisible()
-	case "enter":
-		return m.startValidation()
 	}
-	return m, nil
+	return m, cmd
 }
 
 func (m SetupModel) handleProgLangKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
@@ -710,14 +1010,14 @@ func (m SetupModel) handleProgLangKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			m.progLangIdx++
 		}
 	case "tab":
-		m.section = sectionProvider
+		m.section = sectionProjectName
 		m.ensureSectionVisible()
 	case "shift+tab":
 		m.section = sectionAgentSetup
 		m.agentCursor = len(m.agentRoles) - 1
 		m.ensureSectionVisible()
 	case "enter":
-		return m.startValidation()
+		return m.commitProjectSelection(sectionProjectName)
 	}
 	return m, nil
 }
@@ -743,8 +1043,17 @@ func (m SetupModel) handleAgentSetupKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		m.agentEditing = true
 		m.agentEditStep = 0
 		role := m.agentRoles[m.agentCursor]
+		m.agentEditEffort = setupEffortDefault
+		m.agentEditEffortIdx = 0
+		m.agentEditEffortUnsupported = ""
+		m.agentEffortFor = ""
+		m.agentEffortOptions = nil
+		m.agentEffortLoading = false
 		if ov, ok := m.agentOverrides[role]; ok {
 			m.agentEditProv = providerFromString(ov.runner)
+			if ov.effort != "" {
+				m.agentEditEffort = normalizeSetupEffort(ov.effort)
+			}
 		} else {
 			m.agentEditProv = m.provider
 		}
@@ -753,6 +1062,7 @@ func (m SetupModel) handleAgentSetupKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 	case "backspace", "delete":
 		role := m.agentRoles[m.agentCursor]
 		delete(m.agentOverrides, role)
+		return m.commitProjectSelection(sectionAgentSetup)
 	case "p":
 		m.exportAgentPrompts()
 	case "d":
@@ -794,41 +1104,89 @@ func (m SetupModel) handleAgentEditKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		return m, nil
 	}
 
-	// Step 1: pick model.
-	models := m.modelsForProvider(m.agentEditProv)
+	if m.agentEditStep == 1 {
+		// Step 1: pick model.
+		models := m.modelsForProvider(m.agentEditProv)
+		switch msg.String() {
+		case "up", "k":
+			if m.agentEditIdx > 0 {
+				m.agentEditIdx--
+			}
+		case "down", "j":
+			if m.agentEditIdx < len(models)-1 {
+				m.agentEditIdx++
+			}
+		case "enter":
+			// Move to effort. Keep the existing effort only when the model did
+			// not change; otherwise start from the global effort.
+			modelStr := ""
+			if m.agentEditIdx < len(models) {
+				modelStr = models[m.agentEditIdx]
+			}
+			role := m.agentRoles[m.agentCursor]
+			effort := normalizeSetupEffort(m.effort)
+			if ov, ok := m.agentOverrides[role]; ok {
+				if ov.model == modelStr && providerFromString(ov.runner) == m.agentEditProv && ov.effort != "" {
+					effort = normalizeSetupEffort(ov.effort)
+				}
+			}
+			m.agentEditEffort = effort
+			m.agentEditEffortIdx = 0
+			m.agentEditEffortUnsupported = ""
+			m.agentEditStep = 2
+			cmd := m.startAgentEffortLoad()
+			m.ensureSectionVisible()
+			return m, cmd
+		case "backspace", "delete":
+			role := m.agentRoles[m.agentCursor]
+			delete(m.agentOverrides, role)
+			m.agentEditing = false
+			return m.commitProjectSelection(sectionAgentSetup)
+		}
+		return m, nil
+	}
+
+	// Step 2: pick effort.
+	choices := effortChoices(m.agentEffortOptions)
 	switch msg.String() {
 	case "up", "k":
-		if m.agentEditIdx > 0 {
-			m.agentEditIdx--
+		if !m.agentEffortLoading && m.agentEditEffortIdx > 0 {
+			m.agentEditEffortIdx--
+			m.agentEditEffortUnsupported = ""
 		}
 	case "down", "j":
-		if m.agentEditIdx < len(models)-1 {
-			m.agentEditIdx++
+		if !m.agentEffortLoading && m.agentEditEffortIdx < len(choices)-1 {
+			m.agentEditEffortIdx++
+			m.agentEditEffortUnsupported = ""
 		}
 	case "enter":
+		if m.agentEffortLoading {
+			return m, nil
+		}
 		role := m.agentRoles[m.agentCursor]
 		runnerStr := providerToString(m.agentEditProv)
 		modelStr := ""
-		if m.agentEditIdx < len(models) {
+		if models := m.modelsForProvider(m.agentEditProv); m.agentEditIdx < len(models) {
 			modelStr = models[m.agentEditIdx]
 		}
-		m.agentOverrides[role] = agentSetupOverride{runner: runnerStr, model: modelStr}
+		effortStr := setupEffortDefault
+		if m.agentEditEffortIdx >= 0 && m.agentEditEffortIdx < len(choices) {
+			effortStr = choices[m.agentEditEffortIdx]
+		}
+		m.agentOverrides[role] = agentSetupOverride{runner: runnerStr, model: modelStr, effort: effortStr}
 		m.agentEditing = false
+		return m.commitProjectSelection(sectionAgentSetup)
 	case "backspace", "delete":
 		role := m.agentRoles[m.agentCursor]
 		delete(m.agentOverrides, role)
 		m.agentEditing = false
+		return m.commitProjectSelection(sectionAgentSetup)
 	}
 	return m, nil
 }
 
-// startValidation initiates a ping test for the selected provider/model.
-// On success the pending save will be emitted automatically via pingResultMsg.
-func (m SetupModel) startValidation() (SetupModel, tea.Cmd) {
-	if m.pingTesting {
-		return m, nil
-	}
-
+// currentPayload snapshots the setup values for a save.
+func (m SetupModel) currentPayload() setupDoneMsg {
 	provider, model := m.selectedProviderModel()
 
 	overrides := make(map[string]agentSetupOverride)
@@ -840,18 +1198,84 @@ func (m SetupModel) startValidation() (SetupModel, tea.Cmd) {
 		progLang = m.progLanguages[m.progLangIdx]
 	}
 
-	pending := setupDoneMsg{
+	return setupDoneMsg{
 		provider:       provider,
 		model:          model,
+		effort:         m.selectedEffort(),
 		progLanguage:   progLang,
 		projectName:    strings.TrimSpace(m.projectNameInput.Value()),
 		agentOverrides: overrides,
 	}
-	m.pingTesting = true
-	m.pingErr = nil
-	m.pendingSave = &pending
+}
 
-	return m, tea.Batch(m.spinner.Tick, pingModel(provider, model))
+// setSaveStatus records the footer feedback and invalidates older clear timers.
+func (m *SetupModel) setSaveStatus(text string, ok bool) {
+	m.saveStatus = text
+	m.saveStatusOK = ok
+	m.saveStatusID++
+}
+
+// clearSaveStatusLater hides a success message after a short delay.
+func (m SetupModel) clearSaveStatusLater() tea.Cmd {
+	id := m.saveStatusID
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		return saveStatusClearMsg{id: id}
+	})
+}
+
+// savePayload writes the current values to the active config target.
+func (m SetupModel) savePayload(payload setupDoneMsg) error {
+	if m.globalOnly {
+		return saveGlobalSetup(m.baseAgents, payload)
+	}
+	return saveProjectSetup(m.root, payload)
+}
+
+// commitProjectSelection saves the current project values and advances.
+func (m SetupModel) commitProjectSelection(next setupSection) (SetupModel, tea.Cmd) {
+	if m.pingTesting || m.saving {
+		return m, nil
+	}
+	if err := m.savePayload(m.currentPayload()); err != nil {
+		m.setSaveStatus("✗ "+err.Error(), false)
+		return m, nil
+	}
+	m.setSaveStatus("✓ Saved", true)
+	m.section = next
+	m.ensureSectionVisible()
+	return m, m.clearSaveStatusLater()
+}
+
+// commitGlobalSelection pings the selected model, then saves global values and
+// advances. A failed ping leaves the screen on the effort section with an error.
+func (m SetupModel) commitGlobalSelection(next setupSection) (SetupModel, tea.Cmd) {
+	if m.pingTesting || m.saving {
+		return m, nil
+	}
+	payload := m.currentPayload()
+	m.pingTesting = true
+	m.saving = true
+	m.pingErr = nil
+	m.setSaveStatus("Saving…", true)
+	m.pendingSave = &pendingSave{msg: payload, next: next}
+	return m, tea.Batch(m.spinner.Tick, pingModel(payload.provider, payload.model))
+}
+
+// startValidation saves all current values and closes the setup screen. Used by
+// Ctrl+S; Enter uses the incremental commit helpers above.
+func (m SetupModel) startValidation() (SetupModel, tea.Cmd) {
+	if m.pingTesting || m.saving {
+		return m, nil
+	}
+
+	payload := m.currentPayload()
+	m.pingTesting = true
+	m.saving = true
+	m.pingErr = nil
+	m.setSaveStatus("Saving…", true)
+	m.pendingSave = &pendingSave{msg: payload, close: true}
+
+	return m, tea.Batch(m.spinner.Tick, pingModel(payload.provider, payload.model))
 }
 
 // selectedProviderModel returns the currently selected provider string and model name.
@@ -893,26 +1317,11 @@ func (m *SetupModel) syncViewport() {
 // ── View ──────────────────────────────────────────────────────────────────────
 
 func (m SetupModel) View() string {
-	p := homePalette
-
-	headerStyle := lipgloss.NewStyle().
-		Background(p.headerBg).
-		Foreground(p.accent).
-		Bold(true).
-		Padding(0, 2).
-		Width(m.width)
-
-	footerStyle := lipgloss.NewStyle().
-		Background(p.footerBg).
-		Foreground(p.dim).
-		Padding(0, 1).
-		Width(m.width)
-
-	header := headerStyle.Render("⚙  Global Settings")
+	header := screenHeader(m.width, "Global Settings", "")
 	if !m.globalOnly {
-		header = headerStyle.Render("⚙  Project Setup")
+		header = screenHeader(m.width, "Project Setup", "")
 	}
-	footer := m.renderFooter(footerStyle)
+	footer := m.renderFooter()
 
 	if !m.ready {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "", footer)
@@ -945,6 +1354,7 @@ func (m SetupModel) renderContent() string {
 
 	providerCard := m.renderProviderCard(contentWidth, labelStyle, focusLabelStyle, activeItemStyle, inactiveItemStyle)
 	modelCard := m.renderModelCard(contentWidth, labelStyle, focusLabelStyle, activeItemStyle, inactiveItemStyle, dimStyle)
+	effortCard := m.renderEffortCard(contentWidth, activeItemStyle, inactiveItemStyle, dimStyle)
 
 	globalHeader := sectionHeaderStyle.Render("  ◆ Global Defaults") + dimStyle.Render("  — saved to ~/.decsr/config.yaml")
 
@@ -962,11 +1372,8 @@ func (m SetupModel) renderContent() string {
 			agentCard,
 			sep,
 			progLangCard,
-			sep,
-			globalHeader,
-			providerCard,
-			sep,
-			modelCard,
+			"",
+			dimStyle.Render("  Global provider, model & effort are configured in Global Settings (g)."),
 		}
 	} else {
 		parts = []string{
@@ -975,6 +1382,8 @@ func (m SetupModel) renderContent() string {
 			providerCard,
 			sep,
 			modelCard,
+			sep,
+			effortCard,
 		}
 	}
 
@@ -1037,34 +1446,12 @@ func (m SetupModel) renderProviderCard(contentWidth int, label, focusLabel, acti
 	}
 	providerLine := "  " + strings.Join(providerTabs, "  ")
 
-	providerLabel := label.Render(" Default Provider")
-	if m.section == sectionProvider {
-		providerLabel = focusLabel.Render(" ◆ Default Provider")
-	}
-
-	var lines []string
-	lines = append(lines, providerLabel)
-	lines = append(lines, "")
-	lines = append(lines, providerLine)
-
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(p.border).
-		Padding(0, 1).
-		Width(contentWidth - 2).
-		Render(strings.Join(lines, "\n"))
+	return setupCard("Default Provider", m.section == sectionProvider, contentWidth, []string{providerLine})
 }
 
 func (m SetupModel) renderModelCard(contentWidth int, label, focusLabel, active, inactive, dim lipgloss.Style) string {
-	p := homePalette
 
 	var modelLines []string
-	modelLabel := label.Render(" Default Model")
-	if m.section == sectionModel {
-		modelLabel = focusLabel.Render(" ◆ Default Model")
-	}
-	modelLines = append(modelLines, modelLabel)
-	modelLines = append(modelLines, "")
 
 	switch m.provider {
 	case providerOpenCode:
@@ -1104,57 +1491,74 @@ func (m SetupModel) renderModelCard(contentWidth int, label, focusLabel, active,
 		modelLines = append(modelLines, dim.Render("  Change selection or press Enter to retry"))
 	}
 
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(p.border).
-		Padding(0, 1).
-		Width(contentWidth - 2).
-		Render(strings.Join(modelLines, "\n"))
+	return setupCard("Default Model", m.section == sectionModel, contentWidth, modelLines)
+}
+
+func (m SetupModel) renderEffortCard(contentWidth int, active, inactive, dim lipgloss.Style) string {
+	provider, model := m.selectedProviderModel()
+
+	var lines []string
+	lines = append(lines, dim.Render(fmt.Sprintf("  Reasoning effort for %s / %s:", provider, model)))
+	lines = append(lines, "")
+
+	loaded := m.effortFor != "" && !m.effortLoading
+	switch {
+	case m.effortLoading:
+		lines = append(lines, dim.Render("  "+m.spinner.View()+" loading effort levels…"))
+	case m.effortFor == "":
+		lines = append(lines, dim.Render("  Press Tab or Enter here to load this model's effort levels."))
+		if m.effort != "" && m.effort != setupEffortDefault {
+			lines = append(lines, dim.Render("  Current: "+m.effort))
+		}
+	case len(m.effortOptions) == 0:
+		lines = append(lines, dim.Render("  This model exposes no effort control — provider default is used."))
+	}
+
+	if loaded {
+		choices := effortChoices(m.effortOptions)
+		cursor := m.effortIdx
+		if cursor < 0 {
+			cursor = 0
+		}
+		if cursor >= len(choices) {
+			cursor = len(choices) - 1
+		}
+		lines = append(lines, renderWindowedList(effortLabels(choices), cursor, m.section == sectionEffort, active, inactive, dim)...)
+	}
+
+	if m.effortUnsupported != "" {
+		warnStyle := lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
+		lines = append(lines, "")
+		lines = append(lines, warnStyle.Render(fmt.Sprintf("  ⚠ %q is not offered by this model — choose a level or keep the default", m.effortUnsupported)))
+	}
+
+	lines = append(lines, "")
+	lines = append(lines, dim.Render("  ↑↓ navigate  Enter save  Tab next"))
+
+	return setupCard("Effort", m.section == sectionEffort, contentWidth, lines)
 }
 
 func (m SetupModel) renderProjectNameCard(contentWidth int, label, focusLabel, dim lipgloss.Style) string {
-	p := homePalette
 	isFocused := m.section == sectionProjectName
 
 	var lines []string
-	nameLabel := label.Render(" Project Name")
-	if isFocused {
-		nameLabel = focusLabel.Render(" ◆ Project Name")
-	}
-	lines = append(lines, nameLabel)
 	lines = append(lines, dim.Render("  Display name for this project:"))
 	lines = append(lines, "")
 	lines = append(lines, "  "+m.projectNameInput.View())
 
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(p.border).
-		Padding(0, 1).
-		Width(contentWidth - 2).
-		Render(strings.Join(lines, "\n"))
+	return setupCard("Project Name", isFocused, contentWidth, lines)
 }
 
 func (m SetupModel) renderProgLangCard(contentWidth int, label, focusLabel, active, inactive, dim lipgloss.Style) string {
-	p := homePalette
 	isFocused := m.section == sectionProgLang
 
 	var lines []string
-	plLabel := label.Render(" Programming Language")
-	if isFocused {
-		plLabel = focusLabel.Render(" ◆ Programming Language")
-	}
-	lines = append(lines, plLabel)
 	lines = append(lines, dim.Render("  Primary language for generated code (overrides auto-detection):"))
 	lines = append(lines, "")
 
 	lines = append(lines, renderWindowedList(m.progLanguages, m.progLangIdx, isFocused, active, inactive, dim)...)
 
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(p.border).
-		Padding(0, 1).
-		Width(contentWidth - 2).
-		Render(strings.Join(lines, "\n"))
+	return setupCard("Programming Language", isFocused, contentWidth, lines)
 }
 
 func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active, inactive, dim lipgloss.Style) string {
@@ -1163,12 +1567,7 @@ func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active,
 	cyanStyle := lipgloss.NewStyle().Foreground(p.cyan)
 
 	var agentLines []string
-	agentLabel := label.Render(" Agent Overrides")
-	if m.section == sectionAgentSetup {
-		agentLabel = focusLabel.Render(" ◆ Agent Overrides")
-	}
-	agentLines = append(agentLines, agentLabel)
-	agentLines = append(agentLines, dim.Render("  Override runner & model per agent (this project only):"))
+	agentLines = append(agentLines, dim.Render("  Override runner, model & effort per agent (this project only):"))
 	agentLines = append(agentLines, "")
 
 	for i, role := range m.agentRoles {
@@ -1178,17 +1577,23 @@ func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active,
 		display := dim.Render("(default)")
 		if ov, ok := m.agentOverrides[role]; ok {
 			runnerPart := cyanStyle.Render(ov.runner)
+			if ov.runner == "" {
+				runnerPart = dim.Render("(global)")
+			}
 			modelPart := inactive.Render(ov.model)
 			if ov.model == "" {
 				modelPart = dim.Render("(auto)")
 			}
 			display = runnerPart + dim.Render(" / ") + modelPart
+			if ov.effort != "" && ov.effort != setupEffortDefault {
+				display += dim.Render(" · ") + goldStyle.Render(ov.effort)
+			}
 		}
 
 		// Show indicator if custom prompt exists.
 		promptTag := ""
 		if m.hasCustomPrompt(role) {
-			promptTag = goldStyle.Render(" ✎")
+			promptTag = goldStyle.Render(" ✦")
 		}
 
 		isActive := m.section == sectionAgentSetup && i == m.agentCursor && !m.agentEditing
@@ -1212,7 +1617,8 @@ func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active,
 		agentLines = append(agentLines, "")
 		role := m.agentRoles[m.agentCursor]
 
-		if m.agentEditStep == 0 {
+		switch m.agentEditStep {
+		case 0:
 			agentLines = append(agentLines, goldStyle.Render("  Select runner for "+role+":"))
 			agentLines = append(agentLines, "")
 
@@ -1239,7 +1645,7 @@ func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active,
 			agentLines = append(agentLines, "  "+strings.Join(tabs, "  "))
 			agentLines = append(agentLines, "")
 			agentLines = append(agentLines, dim.Render("  ←→ runner  Enter confirm  Esc cancel"))
-		} else {
+		case 1:
 			provLabel := providerLabels[m.agentEditProv]
 			agentLines = append(agentLines, goldStyle.Render(fmt.Sprintf("  Select model for %s (%s):", role, provLabel)))
 
@@ -1251,15 +1657,44 @@ func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active,
 			}
 			agentLines = append(agentLines, "")
 			agentLines = append(agentLines, dim.Render("  ↑↓ navigate  Enter select  Bksp reset  Esc back"))
+		case 2:
+			provLabel := providerLabels[m.agentEditProv]
+			agentLines = append(agentLines, goldStyle.Render(fmt.Sprintf("  Select effort for %s (%s):", role, provLabel)))
+			if m.agentEffortLoading {
+				agentLines = append(agentLines, dim.Render("  "+m.spinner.View()+" loading effort levels…"))
+			} else {
+				choices := effortChoices(m.agentEffortOptions)
+				cursor := m.agentEditEffortIdx
+				if cursor < 0 {
+					cursor = 0
+				}
+				if cursor >= len(choices) {
+					cursor = len(choices) - 1
+				}
+				agentLines = append(agentLines, renderWindowedList(effortLabels(choices), cursor, true, active, inactive, dim)...)
+				if m.agentEditEffortUnsupported != "" {
+					warnStyle := lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
+					agentLines = append(agentLines, "")
+					agentLines = append(agentLines, warnStyle.Render(fmt.Sprintf("  ⚠ %q is not offered by this model — choose a level or keep the default", m.agentEditEffortUnsupported)))
+				}
+			}
+			agentLines = append(agentLines, "")
+			agentLines = append(agentLines, dim.Render("  ↑↓ navigate  Enter save  Bksp reset  Esc back"))
 		}
 	}
 
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(p.border).
-		Padding(0, 1).
-		Width(contentWidth - 2).
-		Render(strings.Join(agentLines, "\n"))
+	return setupCard("Agent Overrides", m.section == sectionAgentSetup, contentWidth, agentLines)
+}
+
+// setupCard wraps card lines in a pixel panel titled in its top border. The
+// focused card gets the violet focus border.
+func setupCard(title string, focused bool, contentWidth int, lines []string) string {
+	tc := crt.primary
+	if focused {
+		tc = galaxyViolet
+	}
+	return pixelPanel("◆ "+strings.ToUpper(title), tc, focused,
+		lipgloss.NewStyle().Padding(0, 1).Width(contentWidth-2), strings.Join(lines, "\n"))
 }
 
 // ── Model list renderers ─────────────────────────────────────────────────────
@@ -1400,84 +1835,103 @@ func (m SetupModel) viewLMStudioModels(active, inactive, dim lipgloss.Style) []s
 
 // ── Footer ───────────────────────────────────────────────────────────────────
 
-func (m SetupModel) renderFooter(style lipgloss.Style) string {
-	p := homePalette
-	keyStyle := lipgloss.NewStyle().
-		Background(p.footerBg).
-		Foreground(p.accent).
-		Bold(true)
+func (m SetupModel) renderFooter() string {
+	hint := func(k, desc string) keyHint { return keyHint{k, desc} }
 
-	hint := func(k, desc string) string {
-		return keyStyle.Render(k) + lipgloss.NewStyle().Background(p.footerBg).Foreground(p.dim).Render(" "+desc)
-	}
-
-	var hints []string
+	var hints []keyHint
 	switch {
 	case m.agentEditing && m.agentEditStep == 0:
-		hints = []string{
+		hints = []keyHint{
 			hint("←→", "runner"),
 			hint("Enter", "confirm"),
 			hint("Esc", "cancel"),
 		}
 	case m.agentEditing && m.agentEditStep == 1:
-		hints = []string{
+		hints = []keyHint{
 			hint("↑↓", "navigate"),
 			hint("Enter", "select"),
 			hint("Bksp", "reset"),
 			hint("Esc", "back"),
 		}
+	case m.agentEditing && m.agentEditStep == 2:
+		hints = []keyHint{
+			hint("↑↓", "effort"),
+			hint("Enter", "save"),
+			hint("Bksp", "reset"),
+			hint("Esc", "back"),
+		}
 	case m.section == sectionProvider:
-		hints = []string{
+		hints = []keyHint{
 			hint("←→", "provider"),
 			hint("Tab/↓", "models"),
 			hint("[]", "scroll"),
-			hint("Ctrl+S", "save"),
-			hint("Esc", "back"),
+			hint("Ctrl+S", "save & close"),
+			hint("Esc", "done"),
 		}
 	case m.section == sectionModel:
-		hints = []string{
+		hints = []keyHint{
 			hint("↑↓", "navigate"),
+			hint("Enter", "effort"),
+			hint("Tab", "next"),
+			hint("Ctrl+S", "save & close"),
+			hint("Esc", "done"),
+		}
+	case m.section == sectionEffort:
+		hints = []keyHint{
+			hint("↑↓", "effort"),
 			hint("Enter", "save"),
 			hint("Tab", "next"),
-			hint("Ctrl+S", "save"),
-			hint("Esc", "back"),
+			hint("Ctrl+S", "save & close"),
+			hint("Esc", "done"),
+		}
+	case m.section == sectionProgLang:
+		hints = []keyHint{
+			hint("↑↓", "language"),
+			hint("Enter", "save"),
+			hint("Tab", "project"),
+			hint("Ctrl+S", "save & close"),
+			hint("Esc", "done"),
 		}
 	case m.section == sectionAgentSetup:
-		hints = []string{
+		hints = []keyHint{
 			hint("↑↓", "navigate"),
 			hint("Enter", "configure"),
 			hint("p", "export prompt"),
 			hint("d", "delete prompt"),
 			hint("Bksp", "reset"),
-			hint("Tab", "provider"),
-			hint("Ctrl+S", "save"),
+			hint("Tab", "language"),
+			hint("Ctrl+S", "save & close"),
+			hint("Esc", "done"),
 		}
 	case m.section == sectionProjectName:
-		hints = []string{
+		hints = []keyHint{
 			hint("type", "edit name"),
+			hint("Enter", "save"),
 			hint("Tab", "agents"),
-			hint("Ctrl+S", "save"),
-			hint("Esc", "back"),
+			hint("Ctrl+S", "save & close"),
+			hint("Esc", "done"),
 		}
 	}
 
-	left := strings.Join(hints, "  ")
-
-	scrollInfo := ""
+	right := ""
+	if m.saveStatus != "" {
+		style := lipgloss.NewStyle().Background(crt.panelBg).Foreground(galaxyMint).Bold(true)
+		if !m.saveStatusOK {
+			style = style.Foreground(galaxyRed)
+		} else if strings.HasPrefix(m.saveStatus, "Saving") {
+			style = style.Foreground(galaxyGold)
+		}
+		right = style.Render(m.saveStatus) + "  "
+	}
 	if m.ready && m.viewport.TotalLineCount() > m.viewport.Height {
 		pct := m.viewport.ScrollPercent() * 100
-		scrollInfo = lipgloss.NewStyle().
-			Background(p.footerBg).
-			Foreground(p.dim).
+		right += lipgloss.NewStyle().
+			Background(crt.panelBg).
+			Foreground(crt.dim).
 			Render(fmt.Sprintf("%.0f%%", pct))
 	}
 
-	gap := m.width - lipglossLen(left) - lipglossLen(scrollInfo) - 2
-	if gap < 0 {
-		gap = 0
-	}
-
-	return style.Render(left + strings.Repeat(" ", gap) + scrollInfo)
+	return hintBar(m.width, hints, right)
 }
 
 func fetchOpenCodeModels() tea.Cmd {
@@ -1584,11 +2038,14 @@ func (m *SetupModel) ensureSectionVisible() {
 			break
 		}
 		if m.agentEditing {
-			// Anchor on the editing panel marker so the runner/model picker
-			// stays in view instead of scrolling past the top of the card.
+			// Anchor on the editing panel marker so the runner/model/effort
+			// picker stays in view instead of scrolling past the card.
 			marker := "Select runner for"
-			if m.agentEditStep == 1 {
+			switch m.agentEditStep {
+			case 1:
 				marker = "Select model for"
+			case 2:
+				marker = "Select effort for"
 			}
 			targetLine = findLineContaining(lines, marker)
 			if targetLine < 0 {
@@ -1601,6 +2058,14 @@ func (m *SetupModel) ensureSectionVisible() {
 		}
 	case sectionProgLang:
 		targetLine = findLineContaining(lines, "Programming Language")
+	case sectionEffort:
+		targetLine = findLineContaining(lines, "Reasoning effort")
+		if targetLine < 0 {
+			targetLine = findLineContaining(lines, "EFFORT")
+		}
+		if targetLine < 0 {
+			targetLine = findLineContaining(lines, "Default Model")
+		}
 	case sectionProjectName:
 		targetLine = findLineContaining(lines, "Project Name")
 		if targetLine < 0 {

@@ -165,6 +165,7 @@ func TestLMStudioRunner_SendsExpectedRequest(t *testing.T) {
 	ch, err := r.Complete(context.Background(), CompletionRequest{
 		SystemPrompt: "be brief",
 		Messages:     []ConvMessage{{Role: "user", Content: "hi"}},
+		Effort:       "high",
 	})
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
@@ -187,6 +188,9 @@ func TestLMStudioRunner_SendsExpectedRequest(t *testing.T) {
 	}
 	if len(captured.Messages) != 2 || captured.Messages[0].Role != "system" || captured.Messages[1].Content != "hi" {
 		t.Errorf("unexpected messages: %+v", captured.Messages)
+	}
+	if captured.ReasoningEffort != "high" {
+		t.Errorf("reasoning_effort: want high, got %q", captured.ReasoningEffort)
 	}
 }
 

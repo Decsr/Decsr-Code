@@ -230,10 +230,10 @@ func (m mdPicker) View() string {
 	brightStyle := lipgloss.NewStyle().Foreground(crt.bright)
 
 	var sb strings.Builder
-	sb.WriteString(titleStyle.Render("Attach .md context"))
+	sb.WriteString(titleStyle.Render("◆ Attach .md context"))
 	sb.WriteString("  " + dimStyle.Render("Space toggle  Enter confirm  Ctrl+O type path  Esc cancel"))
 	sb.WriteString("\n")
-	sb.WriteString(strings.Repeat("─", m.width))
+	sb.WriteString(lipgloss.NewStyle().Foreground(crt.border).Render(strings.Repeat("─", m.width)))
 	sb.WriteString("\n")
 
 	// Manual path entry line.

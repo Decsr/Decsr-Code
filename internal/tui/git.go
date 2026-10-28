@@ -240,7 +240,7 @@ func (m GitPanelModel) View() string {
 	unstagedStyle := lipgloss.NewStyle().Foreground(crt.primary)
 	errorStyle := lipgloss.NewStyle().Foreground(crt.warn)
 	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(pixelBorder).
 		BorderForeground(crt.border)
 
 	fileW := m.width / 3

@@ -50,6 +50,7 @@ func (r *OllamaRunner) Complete(ctx context.Context, req CompletionRequest) (<-c
 	}
 
 	messages := r.buildMessages(req)
+	effort := NormalizeEffort(req.Effort)
 	body := ollamaChatRequest{
 		Model:    model,
 		Messages: messages,
@@ -58,6 +59,9 @@ func (r *OllamaRunner) Complete(ctx context.Context, req CompletionRequest) (<-c
 			NumPredict: ollamaMaxPredict,
 			NumCtx:     r.NumCtx,
 		},
+	}
+	if effort != "" {
+		body.Think = ollamaThinkValue(effort)
 	}
 
 	payload, err := json.Marshal(body)
@@ -258,6 +262,9 @@ type ollamaChatRequest struct {
 	Messages []ollamaChatMessage `json:"messages"`
 	Stream   bool                `json:"stream"`
 	Options  ollamaOptions       `json:"options,omitempty"`
+	// Think controls thinking on models that support it: true/false, or a
+	// model-defined level such as "low", "medium", "high".
+	Think any `json:"think,omitempty"`
 }
 
 // ollamaOptions overrides Ollama's per-model generation defaults. We set

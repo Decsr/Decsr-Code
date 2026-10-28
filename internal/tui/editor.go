@@ -86,18 +86,16 @@ func (m *EditorModel) SetSize(w, h int) {
 }
 
 func (m EditorModel) View() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.primary)
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
 	warnStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.warn)
 
-	title := titleStyle.Render("Requirements Editor")
-	sep := strings.Repeat("─", m.width)
+	title := screenHeader(m.width, "Requirements Editor", "")
+	sep := lipgloss.NewStyle().Foreground(crt.border).Render(strings.Repeat("─", m.width))
 
 	var bottom string
 	if m.confirmExit {
 		bottom = warnStyle.Render("Unsaved changes — S save & start   D discard   Esc back to editing")
 	} else {
-		bottom = dimStyle.Render("Ctrl+S save & start   Esc back")
+		bottom = hintBar(m.width, []keyHint{{"Ctrl+S", "save & start"}, {"Esc", "back"}}, "")
 	}
 
 	return strings.Join([]string{title, sep, m.ta.View(), sep, bottom}, "\n")
