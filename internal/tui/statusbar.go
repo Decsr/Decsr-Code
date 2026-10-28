@@ -105,18 +105,15 @@ type statusBarShortcut struct {
 
 // statusBarShortcuts defines the shortcut hints with per-action accent colors.
 var statusBarShortcuts = []statusBarShortcut{
-	{"↑↓", "scroll", galaxyBlue},       // nebula blue — navigation
-	{"Ctrl+R", "req", galaxyMint},      // aurora mint — requirements
-	{"Ctrl+G", "git", galaxyCyan},      // comet cyan — git
-	{"Ctrl+C", "chat", galaxyCyan},     // comet cyan — chat
-	{"Ctrl+T", "sysmon", galaxyOrange}, // solar orange — system monitor
-	{"Tab", "files", galaxyPurple},     // nebula purple — browse tree
-	{"Ctrl+A", "approve", galaxyMint},  // aurora mint — approve
-	{"Ctrl+O", "gate", galaxyIce},      // ice — reopen gate
-	{"Ctrl+P", "pause", galaxyGold},    // star gold — pause to change model
-	{"Ctrl+E", "error", galaxyRed},     // pulsar red — toggle error banner
-	{"Ctrl+X", "cancel", galaxyRed},    // pulsar red — cancel
-	{"q", "quit", crt.dim},             // dim — quit
+	{"↑↓", "move", galaxyBlue},          // nebula blue — navigation
+	{"Tab", "focus", galaxyViolet},      // nebula violet — pane focus
+	{"1-7", "views", galaxyCyan},        // comet cyan — cockpit tabs
+	{"Ctrl+A", "approve", galaxyMint},   // aurora mint — approve
+	{"Ctrl+C", "chat", galaxyCyan},      // comet cyan — chat
+	{"Ctrl+G", "git", galaxyCyan},       // comet cyan — git
+	{"Ctrl+T", "inspect", galaxyOrange}, // solar orange — inspector
+	{"Ctrl+X", "cancel", galaxyRed},     // pulsar red — cancel
+	{"q", "quit", crt.dim},              // dim — quit
 }
 
 func (m StatusBarModel) View() string {

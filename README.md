@@ -60,11 +60,18 @@ Manual back-and-forth with AI coding assistants is slow, error-prone, and hard t
 
 ### Interactive TUI
 
-Full-featured terminal user interface with agent panels, live token streaming, artifact viewer, chat-based revision, and project picker.
+Full-featured terminal user interface built around a **Workflow Cockpit**: a phase
+spine with the subtask tree, an Activity-first work pane, and a run inspector for
+gates, tokens, tests, agents, and changes. Live token streaming, artifact viewer,
+chat-based revision, and project picker are included.
 
-A built-in **System Monitor** (toggle with `Ctrl+T`) shows live CPU, memory, network, and per-agent token usage. Token lines use `↓` for input (prompt) tokens, `↑` for output (generated) tokens, and a trailing `~` when the count is estimated — e.g. `coder ↓33.7k ↑4.5k~`.
+The cockpit removes host CPU/memory/network metrics. It focuses on how the work is
+decomposed, which agent owns each subtask, what they are doing, and where the
+tokens went. Tokens are shown per agent and per subtask; a trailing `~` marks an
+estimated count.
 
-See [`doc/tui.md`](doc/tui.md) for a full reference of every panel, status indicator, keyboard shortcut, and token notation, with examples.
+See [`doc/tui.md`](doc/tui.md) for the full reference of panes, tabs, status
+indicators, keyboard shortcuts, and token notation.
 
 ### Configurable LLM Backends
 
@@ -308,7 +315,7 @@ The swatches below are the TUI's real colours; the artwork elsewhere in this REA
   <img src="doc/assets/palette.svg" alt="Galaxy × Pixel palette" width="100%">
 </p>
 
-**Role legend:** PM nebula violet `#9d7cff` · Coder / success aurora mint `#6ff2b4` · Coder fixer deeper mint `#4fcf95` · QA cosmic pink `#ff7ac6` · UX star gold `#ffd166` · Security / warnings pulsar red `#ff5c7a` · PR / done comet cyan `#5ce1e6`. Also: logo gradient and file-tree hint use nebula purple `#c77dff`; navigation and system monitor headers & network use nebula blue `#7c9cff`; system monitor load warnings use solar orange `#ffa36b`; the reopen-gate hint uses ice `#9ee8ff`.
+**Role legend:** PM nebula violet `#9d7cff` · Coder / success aurora mint `#6ff2b4` · Coder fixer deeper mint `#4fcf95` · QA cosmic pink `#ff7ac6` · UX star gold `#ffd166` · Security / warnings pulsar red `#ff5c7a` · PR / done comet cyan `#5ce1e6`. Also: logo gradient and file-tree hint use nebula purple `#c77dff`; navigation and cockpit inspector headers use nebula blue `#7c9cff`; inspector warnings use solar orange `#ffa36b`; the reopen-gate hint uses ice `#9ee8ff`.
 
 The previous amber CRT theme remains available in `internal/tui/styles.go`.
 

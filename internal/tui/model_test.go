@@ -37,35 +37,25 @@ func TestModel_PMConversationSeedsTaskInput(t *testing.T) {
 	}
 }
 
-func TestModel_TabEntersTreeBrowsingAndEscExits(t *testing.T) {
+func TestModel_TabCyclesCockpitFocus(t *testing.T) {
 	root := setupTreeRoot(t)
 	m := New(nil, root, filepath.Join(root, ".decsr"), nil, config.Config{})
-	m.width, m.height = 160, 40 // wide enough for sysmon
+	m.width, m.height = 160, 40
 	m.layout()
-	m.sysmon.SetProjectRoot(root)
 
-	if !m.canBrowseTree() {
-		t.Fatal("expected tree browsing to be available at width 160")
+	if m.cockpit.focus != cockpitFocusWorkflow {
+		t.Fatalf("expected workflow focus, got %v", m.cockpit.focus)
 	}
 
-	// Tab enters browsing.
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	got := updated.(Model)
-	if !got.treeBrowsing || !got.sysmon.TreeFocused() {
-		t.Fatalf("Tab should enter tree browsing: browsing=%v focused=%v", got.treeBrowsing, got.sysmon.TreeFocused())
+	if got.cockpit.focus != cockpitFocusCenter {
+		t.Fatalf("Tab should focus the center pane, got %v", got.cockpit.focus)
 	}
 
-	// Arrow keys move the selection without leaving browse mode.
-	got, _ = mustUpdate(t, got, tea.KeyMsg{Type: tea.KeyDown})
-	if !got.treeBrowsing {
-		t.Fatal("down arrow should stay in browse mode")
-	}
-
-	// Esc exits browsing.
-	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	got = updated.(Model)
-	if got.treeBrowsing || got.sysmon.TreeFocused() {
-		t.Fatalf("Esc should exit tree browsing: browsing=%v focused=%v", got.treeBrowsing, got.sysmon.TreeFocused())
+	got, _ = mustUpdate(t, got, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if got.cockpit.focus != cockpitFocusWorkflow {
+		t.Fatalf("Shift+Tab should return to the workflow pane, got %v", got.cockpit.focus)
 	}
 }
 

@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- TUI run screen rebuilt as a workflow cockpit: workflow spine with subtask
+  tree, Activity-first center tabs (Plan, Agents, Tokens, Files, Tests,
+  Output), and a run inspector for gates, tokens, tests, agents, changes and
+  next action. The CPU/MEM/NET system monitor is removed.
+- Tokens are tracked per agent and per subtask; the workflow rail shows
+  dependencies, owners and subtask progress.
+
 ## [0.2.0] - 2026-10-28
 
 ### Added
