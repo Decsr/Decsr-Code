@@ -66,8 +66,22 @@ type cockpitAgent struct {
 	model    string
 	effort   string
 	tokens   int
+	calls    int
 	duration time.Duration
 }
+
+// cockpitSession is one model call, kept in a capped log.
+type cockpitSession struct {
+	seq       int
+	at        time.Time
+	role      bus.AgentRole
+	phase     string
+	subtask   string
+	in, out   int
+	estimated bool
+}
+
+const maxCockpitSessions = 500
 
 type cockpitActivity struct {
 	at      time.Time
@@ -100,7 +114,6 @@ type CockpitModel struct {
 
 	taskTitle string
 	pipeline  string
-	state     string
 	phase     string
 
 	startedAt time.Time
@@ -117,6 +130,8 @@ type CockpitModel struct {
 
 	usage      map[bus.AgentRole]bus.AgentUsage
 	totalUsage bus.AgentUsage
+	sessions   []cockpitSession
+	callSeq    int // running 1-based call counter, never reset
 
 	tab      int
 	focus    cockpitFocus
@@ -167,7 +182,6 @@ func NewCockpit(cfg config.Config, root, wsPath string) CockpitModel {
 		tab:        0,
 		focus:      cockpitFocusWorkflow,
 		inspector:  true,
-		state:      "idle",
 	}
 	for _, p := range []struct{ id, label string }{
 		{"context", "Context"},
@@ -237,6 +251,15 @@ func (c *CockpitModel) SetError(err error) {
 func (c *CockpitModel) SetDone(err error) {
 	c.SetError(err)
 	c.gate = ""
+	for _, a := range c.agents {
+		if a != nil && (a.status == AgentRunning || a.status == AgentFixing) {
+			if err != nil {
+				a.status = AgentError
+			} else {
+				a.status = AgentDone
+			}
+		}
+	}
 	if err == nil {
 		c.done = true
 		c.setPhase("done", "run complete")
@@ -466,6 +489,19 @@ func (c *CockpitModel) Observe(msg bus.Message) {
 			}
 			if a := c.agents[msg.From]; a != nil {
 				a.tokens += total
+				a.calls++
+			}
+			sub := ""
+			if c.phase == "build" && c.currentSub >= 0 && c.currentSub < len(c.subtasks) {
+				sub = c.subtasks[c.currentSub].key
+			}
+			c.callSeq++
+			c.sessions = append(c.sessions, cockpitSession{
+				seq: c.callSeq, at: time.Now(), role: msg.From, phase: c.phase, subtask: sub,
+				in: u.InputTokens, out: u.OutputTokens, estimated: u.Estimated,
+			})
+			if len(c.sessions) > maxCockpitSessions {
+				c.sessions = append([]cockpitSession(nil), c.sessions[len(c.sessions)-maxCockpitSessions:]...)
 			}
 			if c.currentSub >= 0 && c.phase == "build" && (msg.From == bus.RoleCoder || msg.From == bus.RoleQA) {
 				c.subtasks[c.currentSub].tokens += total
@@ -653,7 +689,6 @@ func (c *CockpitModel) observeEvent(from, to bus.AgentRole, s string) {
 	}
 	for _, st := range []string{"idle", "compacting", "negotiating", "research", "planning", "coder", "poc", "qa_tests", "qa_review", "ux_reviewer", "security", "coder_fixer", "done", "gate", "rate_limited"} {
 		if s == st {
-			c.state = st
 			c.applyStatePhase(st)
 		}
 	}
@@ -810,7 +845,6 @@ func (c *CockpitModel) observeSubTask(s string) {
 	c.currentSub = idx
 	c.selSub = idx
 	c.selected = idx
-	c.state = "coder"
 	c.activeRole = bus.RoleCoder
 	if c.tab == 1 {
 		c.tab = 0 // leave the Plan gate view once implementation starts
@@ -961,8 +995,8 @@ func (c *CockpitModel) View() string {
 			Foreground(crt.warn).
 			Render(fmt.Sprintf("Terminal too small: %dx%d (minimum 60x12)", c.width, c.height))
 	}
-	header := c.renderTaskHeader()
-	bodyH := c.height - 2
+	header := c.renderTaskHeader() + "\n" + c.renderAgentStrip(c.width)
+	bodyH := c.height - 3
 	if bodyH < 5 {
 		bodyH = 5
 	}
@@ -993,57 +1027,48 @@ func (c *CockpitModel) View() string {
 	return strings.Join([]string{header, body, footer}, "\n")
 }
 
+// stateLabel is the text tag after the phase strip: FAILED, GATE or DONE.
+func (c *CockpitModel) stateLabel() string {
+	st := lipgloss.NewStyle().Bold(true)
+	switch {
+	case c.failed:
+		return st.Foreground(galaxyRed).Render("FAILED")
+	case c.gate != "":
+		return st.Foreground(galaxyGold).Render("GATE")
+	case c.done:
+		return st.Foreground(galaxyCyan).Render("DONE")
+	}
+	return ""
+}
+
 func (c *CockpitModel) renderTaskHeader() string {
 	title := c.taskTitle
 	if title == "" {
 		title = "New task"
 	}
-	left := lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render("TASK  ") +
-		lipgloss.NewStyle().Foreground(crt.bright).Render(truncateOneLine(title, max(10, c.width-56)))
-	meta := ""
+	right := c.phaseStrip()
+	if state := c.stateLabel(); state != "" {
+		right += " " + state
+	}
 	if c.pipeline != "" {
-		meta += " " + chip(strings.ToUpper(c.pipeline), galaxyCyan)
+		right = lipgloss.NewStyle().Foreground(galaxyCyan).Bold(true).Render(strings.ToUpper(c.pipeline)) + " " + right
 	}
-	state := c.state
-	if c.phase != "" {
-		state = c.phase
-	}
-	if c.failed {
-		state = "error"
-	} else if c.gate != "" {
-		state = "gate"
-	} else if c.done {
-		state = "done"
-	}
-	if state != "" {
-		meta += " " + chip(strings.ToUpper(state), stateColor(state))
-	}
-	elapsed := ""
 	if e := c.elapsed(); e > 0 {
-		elapsed = "  " + formatElapsed(e.Round(time.Second))
+		right += "  " + lipgloss.NewStyle().Foreground(crt.dim).Render(formatElapsed(e.Round(time.Second)))
 	}
-	line := left + meta + elapsed
-	if ansi.StringWidth(line) > c.width {
-		line = ansi.Truncate(line, c.width, "…")
+	total := c.totalUsage.InputTokens + c.totalUsage.OutputTokens
+	right += "  " + lipgloss.NewStyle().Foreground(crt.primary).Render(formatTokensCompact(total)+strings.TrimSpace(estimatedMark(c.totalUsage.Estimated))+" tok")
+	rightW := ansi.StringWidth(right)
+	if rightW >= c.width {
+		return ansi.Truncate(right, c.width, "")
 	}
-	return line
-}
-
-func stateColor(state string) lipgloss.Color {
-	switch state {
-	case "done":
-		return galaxyMint
-	case "error", "rate_limited":
-		return galaxyRed
-	case "gate":
-		return galaxyGold
-	case "build", "coder":
-		return galaxyMint
-	case "review":
-		return galaxyPink
-	default:
-		return galaxyBlue
+	titleW := c.width - rightW - 1
+	left := lipgloss.NewStyle().Foreground(crt.bright).Bold(true).Render(truncateOneLine(title, titleW))
+	pad := c.width - ansi.StringWidth(left) - rightW
+	if pad < 1 {
+		pad = 1
 	}
+	return left + strings.Repeat(" ", pad) + right
 }
 
 func (c *CockpitModel) renderLeft(w, h int) string {
@@ -1072,7 +1097,7 @@ func (c *CockpitModel) renderLeft(w, h int) string {
 		}
 		lines = append(lines, line)
 	}
-	return cockpitPane("WORKFLOW", w, h, lines, c.focus == cockpitFocusWorkflow, galaxyViolet)
+	return cockpitPane("WORKFLOW", w, h, lines, c.focus == cockpitFocusWorkflow, galaxyAzure)
 }
 
 type cockpitLeftRow struct {
@@ -1093,7 +1118,7 @@ func (c *CockpitModel) leftRows() []cockpitLeftRow {
 			style = lipgloss.NewStyle().Foreground(galaxyCyan)
 		case "active":
 			glyph = "▸"
-			style = lipgloss.NewStyle().Foreground(galaxyViolet).Bold(true)
+			style = lipgloss.NewStyle().Foreground(galaxyAzure).Bold(true)
 		}
 		dur := ""
 		phaseDur := p.duration
@@ -1180,7 +1205,7 @@ func statusGlyph(status string) (string, lipgloss.Style) {
 func (c *CockpitModel) renderCenter(w, h int) string {
 	header := c.centerHeader(w)
 	tabs := c.renderTabs(w)
-	content := c.centerLines(w, h-4)
+	content := c.centerLines(w-2, h-4)
 	body := append([]string{header, tabs}, content...)
 	return cockpitPane(cockpitTabs[c.tab], w, h, body, c.focus == cockpitFocusCenter, galaxyMint)
 }
@@ -1201,17 +1226,24 @@ func (c *CockpitModel) centerHeader(w int) string {
 }
 
 func (c *CockpitModel) renderTabs(w int) string {
-	var parts []string
 	short := []string{"Act", "Plan", "Agt", "Tok", "Files", "Test", "Out"}
-	for i := range cockpitTabs {
-		label := fmt.Sprintf("%d %s", i+1, short[i])
-		if i == c.tab {
-			parts = append(parts, lipgloss.NewStyle().Background(galaxyMint).Foreground(crt.bg).Bold(true).Render(label))
-		} else {
-			parts = append(parts, lipgloss.NewStyle().Foreground(crt.dim).Render(label))
+	line := ""
+	// Try the spaced labels first, then drop the space inside each label.
+	for _, format := range []string{"%d %s", "%d%s"} {
+		parts := make([]string, 0, len(cockpitTabs))
+		for i := range cockpitTabs {
+			label := fmt.Sprintf(format, i+1, short[i])
+			if i == c.tab {
+				parts = append(parts, lipgloss.NewStyle().Background(galaxyMint).Foreground(crt.bg).Bold(true).Render(label))
+			} else {
+				parts = append(parts, lipgloss.NewStyle().Foreground(crt.dim).Render(label))
+			}
+		}
+		line = strings.Join(parts, " ")
+		if ansi.StringWidth(line) <= w-2 {
+			break
 		}
 	}
-	line := strings.Join(parts, " ")
 	if ansi.StringWidth(line) > w-2 {
 		line = ansi.Truncate(line, w-2, "…")
 	}
@@ -1313,9 +1345,13 @@ func (c *CockpitModel) planLines(w, h int) []string {
 }
 
 func (c *CockpitModel) agentLines(w, h int) []string {
-	lines := []string{
-		lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render(fmt.Sprintf("%-9s %-9s %-28s %7s  %s", "ROLE", "STATE", "CURRENT HANDOFF", "TOKENS", "LAST")),
+	dim := lipgloss.NewStyle().Foreground(crt.dim)
+	wide := w >= 90
+	head := fmt.Sprintf("%-9s %-9s %7s", "ROLE", "STATE", "TOKENS")
+	if wide {
+		head = fmt.Sprintf("%-9s %-9s %-28s %7s  %s", "ROLE", "STATE", "CURRENT HANDOFF", "TOKENS", "LAST")
 	}
+	lines := []string{dim.Bold(true).Render(head)}
 	for _, role := range agentOrder {
 		a := c.agents[role]
 		if a == nil {
@@ -1330,52 +1366,63 @@ func (c *CockpitModel) agentLines(w, h int) []string {
 		if last == "" {
 			last = "—"
 		}
-		line := fmt.Sprintf("%s %-8s %-8s %-28s %7s  %s",
-			style.Render(g), roleLabel(role), agentStatusLabel(a.status),
-			ansi.Truncate(current, 28, "…"), formatTokensCompact(a.tokens), ansi.Truncate(last, max(6, w-58), "…"))
-		lines = append(lines, line)
+		if wide {
+			lines = append(lines, fmt.Sprintf("%s %-8s %-8s %-28s %7s  %s",
+				style.Render(g), roleLabel(role), agentStatusLabel(a.status),
+				ansi.Truncate(current, 28, "…"), formatTokensCompact(a.tokens), ansi.Truncate(last, max(6, w-58), "…")))
+		} else {
+			lines = append(lines, fmt.Sprintf("%s %-8s %-8s %7s",
+				style.Render(g), roleLabel(role), agentStatusLabel(a.status), formatTokensCompact(a.tokens)))
+			lines = append(lines, "  "+dim.Render(ansi.Truncate(current, w-4, "")))
+		}
 		meta := a.model
 		if a.effort != "" && a.effort != "default" {
 			meta += " · " + a.effort
 		}
 		if meta != "" {
-			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(crt.dim).Render(truncateOneLine(meta, w-6)))
+			lines = append(lines, "  "+dim.Render(truncateOneLine(meta, w-6)))
+		}
+		lines = append(lines, "  "+dim.Render(c.agentCallStats(role, a)))
+		if vals := c.agentCallValues(role); len(vals) > 0 {
+			lines = append(lines, "  "+sparkline(vals, min(len(vals), w-4), roleColor(string(role))))
 		}
 	}
 	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Render("  HANDOFFS  PM → Coder → QA → UX + Security → PM"))
-	lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Render("  Waiting is not failure; the inspector shows the next gate."))
+	for _, l := range wrapText("HANDOFFS  PM → Coder → QA → UX + Security → PM", w-4) {
+		lines = append(lines, "  "+dim.Render(l))
+	}
+	for _, l := range wrapText("Waiting is not failure; the inspector shows the next gate.", w-4) {
+		lines = append(lines, "  "+dim.Render(l))
+	}
 	return windowLines(lines, h, c.centerScroll)
 }
 
-func (c *CockpitModel) tokenLines(w, h int) []string {
-	total := c.totalUsage.InputTokens + c.totalUsage.OutputTokens
-	lines := []string{
-		lipgloss.NewStyle().Foreground(crt.bright).Bold(true).Render(fmt.Sprintf("TOTAL %s   in %s   out %s   %s",
-			formatTokensCompact(total), formatTokensCompact(c.totalUsage.InputTokens), formatTokensCompact(c.totalUsage.OutputTokens), estimatedMark(c.totalUsage.Estimated))),
-		"",
-	}
-	for _, role := range agentOrder {
-		a := c.agents[role]
-		if a == nil {
-			continue
+// agentCallValues returns in+out for each recorded call of role, oldest first.
+func (c *CockpitModel) agentCallValues(role bus.AgentRole) []int {
+	var vals []int
+	for _, s := range c.sessions {
+		if s.role == role {
+			vals = append(vals, s.in+s.out)
 		}
-		share := 0
-		if total > 0 {
-			share = a.tokens * 100 / total
-		}
-		lines = append(lines, fmt.Sprintf("%-9s %7s  %s %3d%%",
-			roleLabel(role), formatTokensCompact(a.tokens), tokenBarColor(share, 20, roleColor(string(role))), share))
 	}
-	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Render("SUBTASK USAGE"))
-	for i := range c.subtasks {
-		st := &c.subtasks[i]
-		lines = append(lines, fmt.Sprintf("  %-3s %6s  %s", st.key, formatTokensCompact(st.tokens), st.title))
+	return vals
+}
+
+// agentCallStats is "calls N · last call X · avg Y" for one agent.
+func (c *CockpitModel) agentCallStats(role bus.AgentRole, a *cockpitAgent) string {
+	last, avg := "—", "—"
+	if vals := c.agentCallValues(role); len(vals) > 0 {
+		last = formatTokensCompact(vals[len(vals)-1])
+	} else if a.calls > 0 {
+		last = "older"
 	}
-	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Render("Estimates are marked ~; unreported usage is shown as —."))
-	return windowLines(lines, h, c.centerScroll)
+	if a.calls > 0 {
+		avg = formatTokensCompact(a.tokens / a.calls)
+	}
+	if last == "older" {
+		return fmt.Sprintf("calls %d · last call older · avg %s", a.calls, avg)
+	}
+	return fmt.Sprintf("calls %d · last call %s · avg %s", a.calls, last, avg)
 }
 
 func (c *CockpitModel) fileLines(w, h int) []string {
@@ -1451,9 +1498,32 @@ func (c *CockpitModel) renderInspector(w, h int) string {
 		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(crt.dim).Render("none"))
 	}
 	lines = append(lines, "")
+	if c.failed && c.errMsg != "" {
+		lines = append(lines, lipgloss.NewStyle().Foreground(galaxyRed).Bold(true).Render("ERROR"))
+		for _, l := range wrapText(c.errMsg, w-4) {
+			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(galaxyRed).Render(l))
+		}
+		lines = append(lines, "")
+		lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render("NEXT"))
+		for _, l := range wrapText(c.nextAction(), w-4) {
+			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(crt.bright).Render(l))
+		}
+		lines = append(lines, "")
+	}
 	lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render("TOKENS"))
 	total := c.totalUsage.InputTokens + c.totalUsage.OutputTokens
 	lines = append(lines, fmt.Sprintf("  %s total  %s %s", formatTokensCompact(total), estimatedMark(c.totalUsage.Estimated), ""))
+	iw := w - 4
+	if share := c.tokenShare(iw); len(share) > 0 {
+		lines = append(lines, "  "+share[0])
+	}
+	if n := len(c.sessions); n > 0 {
+		vals := make([]int, 0, iw)
+		for _, s := range c.sessions[max(0, n-iw):] {
+			vals = append(vals, s.in+s.out)
+		}
+		lines = append(lines, "  "+sparkline(vals, iw, galaxyAzure))
+	}
 	for _, role := range agentOrder {
 		a := c.agents[role]
 		if a == nil {
@@ -1463,7 +1533,10 @@ func (c *CockpitModel) renderInspector(w, h int) string {
 		if total > 0 {
 			share = a.tokens * 100 / total
 		}
-		lines = append(lines, fmt.Sprintf("  %-5s %6s %s", roleLabel(role), formatTokensCompact(a.tokens), tokenBarColor(share, 8, roleColor(string(role)))))
+		if a.tokens > 0 && share*8/100 == 0 {
+			share = 13 // at least one filled cell of 8
+		}
+		lines = append(lines, fmt.Sprintf("  %-8s %6s %s", roleLabel(role), formatTokensCompact(a.tokens), tokenBarColor(share, 8, roleColor(string(role)))))
 	}
 	lines = append(lines, "")
 	lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render("TESTS"))
@@ -1485,8 +1558,20 @@ func (c *CockpitModel) renderInspector(w, h int) string {
 		if a == nil {
 			continue
 		}
+		dim := lipgloss.NewStyle().Foreground(crt.dim)
 		g, style := statusGlyph(string(a.status))
-		lines = append(lines, fmt.Sprintf("  %s %-8s %s", style.Render(g), roleLabel(role), truncateOneLine(a.current, 18)))
+		row := func(g string) string {
+			return fmt.Sprintf("%s %-8s %-4s", g, roleLabel(role), fmt.Sprintf("×%d", a.calls))
+		}
+		if a.status == AgentRunning || a.status == AgentFixing {
+			bold := lipgloss.NewStyle().Foreground(roleColor(string(role))).Bold(true)
+			lines = append(lines, "  "+bold.Render(row(agentStripGlyph(a))))
+		} else {
+			lines = append(lines, "  "+style.Render(g)+dim.Render(strings.TrimPrefix(row(g), g)))
+		}
+		if a.current != "" {
+			lines = append(lines, "    "+dim.Render(ansi.Truncate(a.current, w-6, "")))
+		}
 	}
 	lines = append(lines, "")
 	lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render("CHANGES"))
@@ -1495,17 +1580,12 @@ func (c *CockpitModel) renderInspector(w, h int) string {
 		noun = "file"
 	}
 	lines = append(lines, fmt.Sprintf("  %d %s  %d fix rounds", len(c.files), noun, c.fixRounds))
-	if c.failed && c.errMsg != "" {
+	if !(c.failed && c.errMsg != "") {
 		lines = append(lines, "")
-		lines = append(lines, lipgloss.NewStyle().Foreground(galaxyRed).Bold(true).Render("ERROR"))
-		for _, l := range wrapText(c.errMsg, w-4) {
-			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(galaxyRed).Render(l))
+		lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render("NEXT"))
+		for _, l := range wrapText(c.nextAction(), w-4) {
+			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(crt.bright).Render(l))
 		}
-	}
-	lines = append(lines, "")
-	lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render("NEXT"))
-	for _, l := range wrapText(c.nextAction(), w-4) {
-		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(crt.bright).Render(l))
 	}
 	return cockpitPane("RUN", w, h, lines, c.focus == cockpitFocusInspector, galaxyBlue)
 }
@@ -1548,7 +1628,11 @@ func cockpitPane(title string, w, h int, lines []string, focused bool, accent li
 	innerW := w - 2
 	bodyH := h - 2
 	var sb strings.Builder
-	sb.WriteString(panelTop(w, " "+title, accent, borderColor) + "\n")
+	if focused {
+		sb.WriteString(focusedPanelTop(w, title, accent) + "\n")
+	} else {
+		sb.WriteString(panelTop(w, " "+title, accent, borderColor) + "\n")
+	}
 	for i := 0; i < bodyH; i++ {
 		line := ""
 		if i < len(lines) {
@@ -1566,6 +1650,22 @@ func cockpitPane(title string, w, h int, lines []string, focused bool, accent li
 	}
 	sb.WriteString("\n" + bs.Render("└"+strings.Repeat("─", innerW)+"┘"))
 	return sb.String()
+}
+
+// focusedPanelTop is panelTop with a pixel marker before the title, so the
+// focused pane is clear without relying on border color. Same total width.
+func focusedPanelTop(w int, title string, accent lipgloss.Color) string {
+	if w < 8 {
+		return panelTop(w, "", accent, focusBorder)
+	}
+	bs := lipgloss.NewStyle().Foreground(focusBorder)
+	t := ansi.Truncate(title, w-8, "…")
+	fill := w - 6 - ansi.StringWidth(t)
+	if fill < 0 {
+		fill = 0
+	}
+	return bs.Render("┌─ ▌") + lipgloss.NewStyle().Foreground(accent).Bold(true).Render(t) +
+		bs.Render(" "+strings.Repeat("─", fill)+"┐")
 }
 
 func windowLines(lines []string, h, scroll int) []string {

@@ -632,7 +632,7 @@ func renderModulePathScreen(width, height int, root, guess, inputView, escLabel 
 	if panelW < 40 {
 		panelW = 40
 	}
-	panel := pixelPanel("◆ GO MODULE PATH", galaxyViolet, true,
+	panel := pixelPanel("◆ GO MODULE PATH", galaxyAzure, true,
 		lipgloss.NewStyle().Padding(1, 2).Width(panelW), strings.Join(lines, "\n"))
 
 	header := screenHeader(width, "Go Module Path", projectName)

@@ -1687,11 +1687,11 @@ func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active,
 }
 
 // setupCard wraps card lines in a pixel panel titled in its top border. The
-// focused card gets the violet focus border.
+// focused card gets the azure focus border.
 func setupCard(title string, focused bool, contentWidth int, lines []string) string {
 	tc := crt.primary
 	if focused {
-		tc = galaxyViolet
+		tc = galaxyAzure
 	}
 	return pixelPanel("◆ "+strings.ToUpper(title), tc, focused,
 		lipgloss.NewStyle().Padding(0, 1).Width(contentWidth-2), strings.Join(lines, "\n"))

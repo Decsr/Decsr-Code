@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next action. The CPU/MEM/NET system monitor is removed.
 - Tokens are tracked per agent and per subtask; the workflow rail shows
   dependencies, owners and subtask progress.
+- TUI theme switched to a deep-space blue Galaxy × Pixel palette that matches
+  the README artwork. The old violet palette stays in code as
+  `themeGalaxyViolet`.
+- The cockpit header is now two lines: task title, phase strip and elapsed
+  time on the first, and an agent strip (state, tokens, calls per agent) on the
+  second.
+
+### Added
+- Per-call token tracking: the Tokens tab shows a total with share bar, per
+  agent input/output bars, a tokens-per-call chart, a call log (last 500
+  calls), and subtask usage. The inspector and Agents tab gain sparklines and
+  per-agent call counts.
+- The focused pane title shows a `▌` marker.
 
 ## [0.2.0] - 2026-10-28
 

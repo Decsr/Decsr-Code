@@ -186,7 +186,7 @@ func (m AgentPanelModel) statusChip() string {
 	case AgentError:
 		return chip("✗ ERROR", crt.warn)
 	case AgentGate:
-		return chip("⏸ GATE", galaxyPink)
+		return chip("⏸ GATE", galaxyGold)
 	}
 	return ""
 }

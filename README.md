@@ -286,13 +286,13 @@ decsr run --requirements requirements.md
 
 ## Theme: Galaxy × Pixel
 
-A dark-grey base with starlight text and nebula, aurora and pulsar accents.
+A deep-space navy base with starlight text and azure, comet and star-gold accents.
 
 <p align="center">
   <img src="doc/assets/palette.svg" alt="Galaxy × Pixel palette" width="100%">
 </p>
 
-**Role legend:** PM nebula violet `#9d7cff` · Coder / success aurora mint `#6ff2b4` · Coder fixer deeper mint `#4fcf95` · QA cosmic pink `#ff7ac6` · UX star gold `#ffd166` · Security / warnings pulsar red `#ff5c7a` · PR / done comet cyan `#5ce1e6`. Also: the logo gradient uses nebula purple `#c77dff`; navigation and cockpit inspector headers use nebula blue `#7c9cff`; inspector warnings use solar orange `#ffa36b`; the reopen-gate hint uses ice `#9ee8ff`.
+**Role legend:** PM azure `#4a86ff` · Coder comet cyan `#5ce1e6` · Coder fixer teal `#3fb8c0` · QA sky `#7cb8ff` · UX frost `#bfe3ff` · Security star gold `#ffd166` · PR ice `#9ee8ff`. Errors use pulsar red `#ff5c7a`, passing tests use aurora mint `#6ff2b4`, and gates use star gold.
 
 <p align="center"><img src="doc/assets/divider.svg" width="100%" alt=""></p>
 

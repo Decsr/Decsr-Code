@@ -106,7 +106,7 @@ type statusBarShortcut struct {
 // statusBarShortcuts defines the shortcut hints with per-action accent colors.
 var statusBarShortcuts = []statusBarShortcut{
 	{"↑↓", "move", galaxyBlue},          // nebula blue — navigation
-	{"Tab", "focus", galaxyViolet},      // nebula violet — pane focus
+	{"Tab", "focus", galaxyAzure},       // azure — pane focus
 	{"1-7", "views", galaxyCyan},        // comet cyan — cockpit tabs
 	{"Ctrl+A", "approve", galaxyMint},   // aurora mint — approve
 	{"Ctrl+C", "chat", galaxyCyan},      // comet cyan — chat
@@ -155,7 +155,7 @@ func (m StatusBarModel) viewLines() []string {
 	// ── Left side: fixed prefix + scrollable stageInfo + fixed suffix ──
 	prefix := ""
 	if m.branch != "" {
-		prefix = chip(m.branch, galaxyViolet) + styleStatusBar.Render(" ")
+		prefix = chip(m.branch, galaxyAzure) + styleStatusBar.Render(" ")
 	}
 	prefix += styleStatusBar.Render("● " + m.state)
 
