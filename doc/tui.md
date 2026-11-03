@@ -4,6 +4,18 @@ DECSR ships with a full-screen terminal interface built around the **Workflow
 Cockpit**. It is designed for one question: *what is the pipeline doing, and
 what needs me now?*
 
+The run header is two lines. Line 1 is the task title, an optional pipeline
+tag, a 7-segment phase strip, an optional state label (`FAILED`, `GATE`,
+`DONE`), the elapsed time, and total tokens. In the strip, `▰` is a finished
+or active phase and `▱` is pending: done is cyan, active is azure, a gate turns
+the segment gold, and a failure turns it red. Line 2 is the agent strip, one
+chip per agent: a glyph (a spinner for the running agent, `✓` done, `○`
+waiting, `!` error), the short label, its tokens (`—` if none), and `×calls`.
+Below 110 columns the strip uses a compact form.
+
+A **call** is one token-usage report from an agent. The Coder may report a
+whole subtask in a single call.
+
 The run screen has three panes:
 
 1. **Workflow** — the phase spine and the subtask tree.
@@ -51,43 +63,95 @@ The left pane is the run's navigation:
 |---|---|---|
 | `1` | Activity | Structured agent steps: read, edit, command, test, write, errors. |
 | `2` | Plan | The full subtask table: status, owner, tokens, dependencies. |
-| `3` | Agents | PM, Coder, QA, UX, and Security with state, current handoff, tokens, last action. |
-| `4` | Tokens | Total, input/output, per-agent shares, per-subtask usage, estimates. |
+| `3` | Agents | PM, Coder, QA, UX, and Security with state, current handoff, tokens, last action, `calls N · last call X · avg Y`, and a per-agent sparkline. |
+| `4` | Tokens | Total, share bar, per-agent bars, tokens-per-call chart, call log, subtask usage. |
 | `5` | Files | Files observed from agent activity (reads, edits, writes, tests). |
 | `6` | Tests | Test-first status per subtask and the global verification state. |
 | `7` | Output | Raw agent output for the selected/active agent. |
 
 Activity is the default. Raw output is one key away rather than the main view.
+On narrow panes the tab labels compact to `1Act 2Plan …`. The focused pane's
+title shows a `▌` marker.
 
 ## Run inspector
 
 The right pane shows:
 
 - **GATE** — the pending approval, or `none`.
-- **TOKENS** — total, per-agent bars, estimate marker.
+- **TOKENS** — total, share bar, a sparkline of recent calls, and per-agent rows.
 - **TESTS** — waiting, running, pass, or fail; last test command.
-- **AGENTS** — status and current work item for each agent.
+- **AGENTS** — status, current work item and `×calls` for each agent. The running agent is highlighted in its color with a spinner.
 - **CHANGES** — observed files and fix rounds.
 - **ERROR** — the failure detail when the run stops.
 - **NEXT** — the next action, e.g. “Finish T3 → global verification”.
 
 ## Tokens
 
-Tokens are shown in the inspector and the Tokens tab:
+Tokens are shown in the header, the inspector, and the Tokens tab. The Tokens
+tab has these sections, top to bottom:
+
+1. **TOTAL** — total tokens (with `~` right after the number when estimated),
+   input, output, and the call count.
+2. **Share bar and legend** — each agent's share of the total.
+3. **PER AGENT** — input (`█`) and output (`▓`) bars per agent.
+4. **TOKENS PER CALL** — a column chart with one column per call. Phase letters
+   mark where each phase starts (`C` context, `S` spec, `P` plan, `B` build,
+   `V` verify, `R` review, `D` done). `+N earlier calls` shows how many calls
+   are scrolled out of the chart.
+5. **SUBTASK USAGE** — tokens per subtask.
+6. **CALL LOG** — newest first (last section): `#n`, time, agent, phase,
+   subtask, in, out, total. `#n` counts every call in the run, even after the
+   log is capped.
 
 ```text
-TOTAL 75.6k   in 62.1k   out 13.5k   ~
-Coder   33.7k  ██████████  44%
-QA      27.0k  ███████     35%
-PM      11.9k  ███         15%
+TOTAL 65.3k   in 53.0k   out 12.3k   10 calls
+
+██████████████████████████████████████████████████████████████████████
+■ PM 10%  ■ Coder 69%  ■ QA 20%
+
+PER AGENT
+PM           7.0k    ×2 █████▓▓
+Coder       45.2k    ×6 █████████████████████████████████████▓▓▓▓▓▓▓▓▓
+QA          13.1k    ×2 ███████████▓▓
+UX              0    ×0
+Security        0    ×0
+
+TOKENS PER CALL
+          ▁ █
+        ▃ █ █
+      ▄ █ █ █   ▄
+    ▅ █ █ █ █   █ ▄
+    █ █ █ █ █   █ █
+█ ▃ █ █ █ █ █ ▇ █ █
+█ █ █ █ █ █ █ █ █ █
+█ █ █ █ █ █ █ █ █ █
+──────────────────────────────────────────────────────────────────────
+S P B         V R
+
+SUBTASK USAGE
+  T1   10.2k  Add session model
+  T2   18.0k  Wire login handler
+
+CALL LOG
+#10  09:59:26  QA       review  —      5.0k    900   5.9k
+#9   09:59:26  QA       review  —      6.0k   1.2k   7.2k
+#8   09:59:26  Coder    verify  —      3.0k    700   3.7k
+#7   09:59:26  Coder    build   T5     8.5k   2.0k  10.5k
 ```
 
-- `↓` / `↑` are input and output tokens in the old notation; the cockpit uses
-  `in` / `out` for clarity.
+The share bar is a single run of `█`; agents differ by color only, and the
+legend uses the same colors. In the per-call chart each column is colored by
+the agent that made the call.
+
+
 - A trailing `~` means the runner estimated the count locally.
-- `—` means usage has not been reported for that item.
+- `—` means usage has not been reported for that item. With no data at all,
+  `no usage reported yet` replaces the share bar, charts and log; TOTAL and
+  SUBTASK USAGE still render.
 - Per-subtask counters are scoped to the subtask; agent totals include the
   whole run.
+- The session log keeps the last 500 calls. Totals are lifetime and are not
+  affected by the cap.
 
 ## Keyboard
 

@@ -50,8 +50,8 @@ var homePalette = struct {
 	accent, green, dim, bright, gold, cyan, red lipgloss.Color
 	border, activeBg, headerBg, footerBg        lipgloss.Color
 }{
-	accent:   galaxyViolet, // nebula violet accent for titles
-	green:    galaxyMint,   // aurora mint
+	accent:   galaxyAzure, // azure accent for titles
+	green:    galaxyMint,  // aurora mint
 	dim:      crt.dim,
 	bright:   crt.bright,
 	gold:     galaxyGold, // star gold
@@ -597,14 +597,14 @@ func (m HomeModel) renderLogo(maxW int) string {
 		)
 	}
 
-	// Nebula gradient (violet → purple → pink), one colour per pixel row.
+	// Nebula gradient (azure → sky → ice), one colour per pixel row.
 	rowColors := make([]lipgloss.Color, 5)
 	for r := range rowColors {
 		t := float64(r) / 4
 		if t < 0.5 {
-			rowColors[r] = lerpColor(galaxyViolet, galaxyPurple, t*2)
+			rowColors[r] = lerpColor(galaxyAzure, galaxySky, t*2)
 		} else {
-			rowColors[r] = lerpColor(galaxyPurple, galaxyPink, (t-0.5)*2)
+			rowColors[r] = lerpColor(galaxySky, galaxyIce, (t-0.5)*2)
 		}
 	}
 	blockLines := renderBlockTextColored("DECSR", rowColors)
@@ -628,9 +628,9 @@ var pipelineStages = []struct {
 	color       lipgloss.Color
 }{
 	{"CONTEXT", "CTX", galaxyCyan},
-	{"NEGOTIATE", "NEG", galaxyViolet},
-	{"DECOMPOSE", "DEC", galaxyPurple},
-	{"TESTS", "TEST", galaxyPink},
+	{"NEGOTIATE", "NEG", galaxyAzure},
+	{"DECOMPOSE", "DEC", galaxyIce},
+	{"TESTS", "TEST", galaxySky},
 	{"CODE", "CODE", galaxyMint},
 	{"BUILD/FIX", "FIX", galaxyGold},
 	{"REVIEW", "REV", galaxyOrange},

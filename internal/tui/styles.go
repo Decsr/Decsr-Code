@@ -41,7 +41,21 @@ var themeAmber = galaxyTheme{
 	scanline: lipgloss.Color("#111111"),
 }
 
-var themeGalaxy = galaxyTheme{
+var themeGalaxyBlue = galaxyTheme{
+	primary:  lipgloss.Color("#c9d8f5"),
+	dim:      lipgloss.Color("#8a9bc2"),
+	bright:   lipgloss.Color("#e8f1ff"),
+	bg:       lipgloss.Color("#0b1426"),
+	border:   lipgloss.Color("#22335a"),
+	panelBg:  lipgloss.Color("#101c36"),
+	warn:     lipgloss.Color("#ff5c7a"), // pulsar red
+	success:  lipgloss.Color("#6ff2b4"), // aurora mint
+	muted:    lipgloss.Color("#17233f"),
+	scanline: lipgloss.Color("#0e182e"),
+}
+
+// themeGalaxyViolet is the previous violet-on-grey palette, kept so it can be switched back.
+var themeGalaxyViolet = galaxyTheme{
 	primary:  lipgloss.Color("#c8c6d8"), // starlight
 	dim:      lipgloss.Color("#77758a"),
 	bright:   lipgloss.Color("#f4f2ff"),
@@ -55,7 +69,7 @@ var themeGalaxy = galaxyTheme{
 }
 
 // crt is the active theme used across the TUI.
-var crt = themeGalaxy
+var crt = themeGalaxyBlue
 
 // Galaxy accent palette shared by roles, pipeline steps and widgets.
 var (
@@ -70,12 +84,16 @@ var (
 	galaxyRed      = lipgloss.Color("#ff5c7a") // pulsar red
 	galaxyCyan     = lipgloss.Color("#5ce1e6") // comet cyan
 	galaxyIce      = lipgloss.Color("#9ee8ff") // ice
+	galaxyAzure    = lipgloss.Color("#4a86ff") // azure
+	galaxySky      = lipgloss.Color("#7cb8ff") // sky
+	galaxyFrost    = lipgloss.Color("#bfe3ff") // frost
+	galaxyTeal     = lipgloss.Color("#3fb8c0") // teal
 )
 
 // Derived surface shades (galaxy theme).
 var (
-	surfaceRaised = lipgloss.Color("#34343f") // raised surface: keycaps, selected rows
-	focusBorder   = lipgloss.Color("#7a5fd9") // focused-panel border (deep nebula violet)
+	surfaceRaised = lipgloss.Color("#1c2b4d") // raised surface: keycaps, selected rows
+	focusBorder   = lipgloss.Color("#4a86ff") // focused-panel border (azure)
 )
 
 // pixelBorder is the shared square-cornered panel border (┌┐└┘─│).
@@ -90,18 +108,18 @@ var pixelSpinner = spinner.Spinner{
 
 // Role colors — each agent gets a distinct accent against the dark base.
 var roleColors = map[string]lipgloss.Color{
-	"pm":          galaxyViolet,   // nebula violet — project manager
-	"coder":       galaxyMint,     // aurora mint
-	"coder_fixer": galaxyMintDeep, // deeper mint — fixer variant
-	"qa":          galaxyPink,     // cosmic pink — QA (tests + review)
-	"ux_reviewer": galaxyGold,     // star gold
-	"security":    galaxyRed,      // pulsar red
-	"pr":          galaxyCyan,     // comet cyan
+	"pm":          galaxyAzure, // azure — project manager
+	"coder":       galaxyCyan,  // comet cyan
+	"coder_fixer": galaxyTeal,  // teal — fixer variant
+	"qa":          galaxySky,   // sky — QA (tests + review)
+	"ux_reviewer": galaxyFrost, // frost
+	"security":    galaxyGold,  // star gold
+	"pr":          galaxyIce,   // ice
 	"system":      crt.dim,
 	// Deprecated roles — kept for legacy Pipeline.
 	"architect": galaxyCyan,
-	"planner":   galaxyViolet,
-	"tester":    galaxyPink,
+	"planner":   galaxyAzure,
+	"tester":    galaxySky,
 	"reviewer":  galaxyRed,
 }
 
@@ -146,7 +164,7 @@ var (
 	styleFixing  = lipgloss.NewStyle().Foreground(galaxyGold).Bold(true)
 	styleDone    = lipgloss.NewStyle().Foreground(galaxyCyan).Bold(true)
 	styleError   = lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
-	styleGate    = lipgloss.NewStyle().Foreground(galaxyPink).Bold(true)
+	styleGate    = lipgloss.NewStyle().Foreground(galaxyGold).Bold(true)
 )
 
 // Gate banner — phosphor highlight.
@@ -227,10 +245,10 @@ func lerpColor(a, b lipgloss.Color, t float64) lipgloss.Color {
 // pixel mark + DECSR + screen name on the left, project name on the right.
 func screenHeader(width int, screen, project string) string {
 	bar := lipgloss.NewStyle().Background(crt.panelBg)
-	left := bar.Foreground(galaxyViolet).Bold(true).Render(" ◆ ") +
+	left := bar.Foreground(galaxyAzure).Bold(true).Render(" ◆ ") +
 		bar.Foreground(crt.bright).Bold(true).Render("DECSR") +
 		bar.Foreground(crt.border).Render("  ▌ ") +
-		bar.Foreground(galaxyViolet).Bold(true).Render(strings.ToUpper(screen))
+		bar.Foreground(galaxyAzure).Bold(true).Render(strings.ToUpper(screen))
 	right := ""
 	if project != "" {
 		right = bar.Foreground(crt.dim).Render(project + " ")
@@ -307,7 +325,7 @@ func panelTop(w int, title string, titleColor, borderColor lipgloss.Color) strin
 
 // pixelPanel renders body inside a square-cornered border (padding/width taken
 // from st) with the title embedded in the top edge. A focused panel uses the
-// violet focus border; otherwise crt.border.
+// azure focus border; otherwise crt.border.
 func pixelPanel(title string, titleColor lipgloss.Color, focused bool, st lipgloss.Style, body string) string {
 	bc := crt.border
 	if focused {
