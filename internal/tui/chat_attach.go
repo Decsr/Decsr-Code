@@ -143,6 +143,18 @@ func (m mdPicker) Update(msg tea.Msg) (mdPicker, tea.Cmd) {
 		if m.cursor < len(m.files)-1 {
 			m.cursor++
 		}
+	case "home", "g":
+		m.cursor = 0
+	case "end", "G":
+		if len(m.files) > 0 {
+			m.cursor = len(m.files) - 1
+		}
+	case "pgup":
+		m.cursor = max(0, m.cursor-m.pageSize())
+	case "pgdown":
+		if len(m.files) > 0 {
+			m.cursor = min(len(m.files)-1, m.cursor+m.pageSize())
+		}
 	case " ", "space":
 		if len(m.files) > 0 {
 			rel := m.files[m.cursor]
@@ -162,6 +174,11 @@ func (m mdPicker) Update(msg tea.Msg) (mdPicker, tea.Cmd) {
 		return m, func() tea.Msg { return mdPickerDoneMsg{selected: sel} }
 	}
 	return m, nil
+}
+
+// pageSize is how far pgup/pgdown move the cursor.
+func (m mdPicker) pageSize() int {
+	return max(1, m.height-8)
 }
 
 // commitManualEntry validates the typed path, adds it to the file list, selects

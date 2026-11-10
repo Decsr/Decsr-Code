@@ -2259,15 +2259,23 @@ func (m *SetupModel) exportAgentPrompts() {
 // deleteAgentPrompts removes project-level prompt overrides for the selected agent.
 func (m *SetupModel) deleteAgentPrompts() {
 	if m.root == "" {
+		m.promptStatus = "no project root — cannot delete"
 		return
 	}
 	role := m.agentRoles[m.agentCursor]
 	promptNames := prompts.PromptsForRole(role)
 	destDir := m.promptsDir()
 
+	var deleted []string
 	for _, name := range promptNames {
 		path := filepath.Join(destDir, name+".md")
-		_ = os.Remove(path)
+		if err := os.Remove(path); err == nil {
+			deleted = append(deleted, filepath.Base(path))
+		}
 	}
-	m.promptStatus = fmt.Sprintf("removed custom prompts for %s", role)
+	if len(deleted) == 0 {
+		m.promptStatus = fmt.Sprintf("no exported prompt for %s", role)
+		return
+	}
+	m.promptStatus = fmt.Sprintf("deleted .decsr/prompts/%s", strings.Join(deleted, ", "))
 }

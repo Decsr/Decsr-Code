@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -552,12 +553,33 @@ func reportCmd(args []string) {
 		fatal(err)
 	}
 
-	for _, name := range []string{
-		artifacts.ImplementationPlanFile,
-		artifacts.TestReportFile,
-		artifacts.ReviewFile,
-	} {
-		printIfExists(ws, name)
+	printReport(os.Stdout, ws)
+}
+
+// reportFiles lists the run artifacts shown by "decsr report", in order.
+var reportFiles = []string{
+	artifacts.SummaryFile,
+	artifacts.TaskPlanFile,
+	artifacts.ResearchReportFile,
+	artifacts.ImplementationPlanFile,
+	artifacts.TestReportFile,
+	artifacts.ReviewFile,
+	artifacts.UXReviewFile,
+	artifacts.SecurityReviewFile,
+	artifacts.NiceToHaveFile,
+}
+
+// printReport writes every existing report artifact to w, or a hint when the
+// workspace has none.
+func printReport(w io.Writer, ws artifacts.Workspace) {
+	found := false
+	for _, name := range reportFiles {
+		if printIfExists(w, ws, name) {
+			found = true
+		}
+	}
+	if !found {
+		_, _ = fmt.Fprintf(w, "no reports yet in %s — run `decsr task` first\n", ws.Dir)
 	}
 }
 
@@ -676,21 +698,22 @@ func cleanSummary(dir string, kept []string) string {
 	return fmt.Sprintf("cleaned %s (kept: %s)", dir, strings.Join(kept, ", "))
 }
 
-func printIfExists(ws artifacts.Workspace, name string) {
+func printIfExists(w io.Writer, ws artifacts.Workspace, name string) bool {
 	data, err := ws.ReadFile(name)
 	if err != nil {
-		return
+		return false
 	}
 	// Pretty-print JSON files.
 	if strings.HasSuffix(name, ".json") {
 		var v any
 		if json.Unmarshal(data, &v) == nil {
 			pretty, _ := json.MarshalIndent(v, "", "  ")
-			fmt.Printf("== %s ==\n%s\n\n", name, pretty)
-			return
+			_, _ = fmt.Fprintf(w, "== %s ==\n%s\n\n", name, pretty)
+			return true
 		}
 	}
-	fmt.Printf("== %s ==\n%s\n\n", name, strings.TrimSpace(string(data)))
+	_, _ = fmt.Fprintf(w, "== %s ==\n%s\n\n", name, strings.TrimSpace(string(data)))
+	return true
 }
 
 func writeApproval(ws artifacts.Workspace, marker string) error {

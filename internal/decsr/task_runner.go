@@ -1162,14 +1162,16 @@ func (tr *TaskRunner) generateAllTests(ctx context.Context, ctxFragment string, 
 		tr.event(fmt.Sprintf("── Tests %d/%d: %s ──", i+1, total, t.Title))
 		tr.event("QA writing tests (TDD)…")
 		tr.b.Publish(bus.NewMessage(bus.RoleSystem, bus.RoleQA, bus.MsgRequest, "tdd-generate"))
-		if err := qa.GenerateTests(ctx, agent.QATestPayload{
+		testFiles, err := qa.GenerateTests(ctx, agent.QATestPayload{
 			Plan:           t.Title + "\n\n" + t.Description,
 			ProjectContext: ctxFragment,
 			StageName:      t.Title,
 			Files:          collectProjectFilesFromRoot(nil, tr.root),
-		}); err != nil {
+		})
+		if err != nil {
 			tr.event(fmt.Sprintf("warning: QA test generation (%s): %v", t.Title, err))
 		}
+		tr.markTouched(testFiles)
 		tr.b.Publish(bus.NewMessage(bus.RoleQA, "", bus.MsgResponse, "tests generated"))
 	}
 }
@@ -1270,6 +1272,7 @@ func (tr *TaskRunner) globalBuildFix(ctx context.Context, ctxFragment string, fi
 			} else {
 				tr.event(fmt.Sprintf("QA updated %d test file(s)", len(verifyResult.UpdatedFiles)))
 				files = mergeFileList(files, verifyResult.UpdatedFiles)
+				tr.markTouched(verifyResult.UpdatedFiles)
 			}
 		}
 

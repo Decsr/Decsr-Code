@@ -142,6 +142,8 @@ type CockpitModel struct {
 
 	leftScroll   int
 	centerScroll int
+	centerManual bool // user scrolled the activity/output log away from the bottom
+	centerMax    int  // largest valid scroll offset seen by the last render
 	inspector    bool
 	clock        func() time.Time // test hook; nil means time.Now
 
@@ -164,7 +166,7 @@ var cockpitTabs = []string{"Activity", "Plan", "Agents", "Tokens", "Files", "Tes
 var (
 	subTaskLineRe = regexp.MustCompile(`^── Sub-task (\d+)/(\d+)(?: \([^)]*\))?: (.*) ──$`)
 	testLineRe    = regexp.MustCompile(`^── Tests (\d+)/(\d+): (.*) ──$`)
-	filePathRe    = regexp.MustCompile(`([A-Za-z0-9_./-]+\.(?:go|rs|py|js|jsx|ts|tsx|java|rb|ex|exs|c|cc|cpp|h|hpp|cs|swift|kt|kts|scala|md|json|ya?ml|toml|css|html|sql|sh))`)
+	filePathRe    = regexp.MustCompile(`([A-Za-z0-9_./-]+\.(?:go|rs|py|js|jsx|ts|tsx|java|rb|ex|exs|c|cc|cpp|h|hpp|cs|swift|kt|kts|scala|md|json|ya?ml|toml|css|html|sql|sh)\b)`)
 	registerRe    = regexp.MustCompile(`registered (T\d+) as ([A-Za-z0-9._-]+)`)
 )
 
@@ -331,6 +333,7 @@ func (c *CockpitModel) SetTab(i int) {
 	if i >= 0 && i < len(cockpitTabs) {
 		c.tab = i
 		c.centerScroll = 0
+		c.centerManual = false
 	}
 }
 
@@ -666,15 +669,18 @@ func (c *CockpitModel) observeActivityEvidence(role bus.AgentRole, text string) 
 		if strings.HasPrefix(m, "http") {
 			continue
 		}
-		kind := "file"
+		// Only files the agents wrote or edited count as changed; mere
+		// mentions (reads, bd init output, listings) are not changes.
+		kind := ""
 		low := strings.ToLower(text)
 		switch {
 		case strings.Contains(low, "wrote test"):
 			kind = "test"
-		case strings.Contains(low, "edit"), strings.Contains(low, "write"):
+		case strings.Contains(low, "edit"), strings.Contains(low, "write"), strings.Contains(low, "wrote"):
 			kind = "edit"
-		case strings.Contains(low, "read"):
-			kind = "read"
+		}
+		if kind == "" {
+			continue
 		}
 		c.files[m] = cockpitFile{path: m, kind: kind}
 		if c.currentSub >= 0 {
@@ -1365,9 +1371,6 @@ func (c *CockpitModel) activityLines(w, h int) []string {
 	var lines []string
 	limit := w - 2
 	for _, a := range c.activity[start:] {
-		if len(lines) >= h {
-			break
-		}
 		role := roleShort(a.role)
 		roleStyle := lipgloss.NewStyle().Foreground(roleColor(string(a.role))).Bold(true)
 		kindStyle := lipgloss.NewStyle().Foreground(activityColor(a.kind))
@@ -1381,7 +1384,22 @@ func (c *CockpitModel) activityLines(w, h int) []string {
 	if len(lines) == 0 {
 		lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Render("  waiting for agent activity…"))
 	}
-	return windowLines(lines, h, c.centerScroll)
+	return windowLines(lines, h, c.followScroll(len(lines), h))
+}
+
+// followScroll returns the scroll offset for a log view: the bottom while
+// following, the user's offset once they scrolled up.
+func (c *CockpitModel) followScroll(total, h int) int {
+	maxScroll := max(0, total-h)
+	c.centerMax = maxScroll
+	if !c.centerManual {
+		return maxScroll
+	}
+	if c.centerScroll >= maxScroll {
+		c.centerManual = false
+		return maxScroll
+	}
+	return c.centerScroll
 }
 
 func activityColor(kind string) lipgloss.Color {
@@ -1519,7 +1537,7 @@ func (c *CockpitModel) fileLines(w, h int) []string {
 	lines := []string{lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render(fmt.Sprintf("CHANGED FILES  %d", len(paths)))}
 	for _, p := range paths {
 		f := c.files[p]
-		lines = append(lines, fmt.Sprintf("  %-5s %s", f.kind, p))
+		lines = append(lines, fmt.Sprintf("  %-5s %s", f.kind, truncateLeft(p, max(10, w-10))))
 	}
 	return windowLines(lines, h, c.centerScroll)
 }
@@ -1538,7 +1556,7 @@ func (c *CockpitModel) testLines(w, h int) []string {
 		g, style := statusGlyph(st.testStatus)
 		ig, ist := statusGlyph(st.implStatus)
 		vg, vst := statusGlyph(st.verifyStatus)
-		lines = append(lines, fmt.Sprintf("  %s %-3s  tests %s  impl %s  verify %s  %s",
+		lines = append(lines, fmt.Sprintf("  %s %-3s  %s  %s  %s  %s",
 			style.Render(g), st.key, style.Render("tests"), ist.Render("impl"), vst.Render("verify"), ansi.Truncate(st.title, max(10, w-42), "…")))
 		_ = ig
 		_ = vg
@@ -1560,13 +1578,10 @@ func (c *CockpitModel) outputLines(w, h int) []string {
 	}
 	text := b.String()
 	lines := strings.Split(text, "\n")
-	if len(lines) > h {
-		lines = lines[len(lines)-h:]
-	}
 	for i := range lines {
 		lines[i] = ansi.Truncate(lines[i], w-2, "…")
 	}
-	return windowLines(lines, h, c.centerScroll)
+	return windowLines(lines, h, c.followScroll(len(lines), h))
 }
 
 func (c *CockpitModel) renderInspector(w, h int) string {
@@ -1750,6 +1765,15 @@ func focusedPanelTop(w int, title string, accent lipgloss.Color) string {
 		bs.Render(" "+strings.Repeat("─", fill)+"┐")
 }
 
+// truncateLeft shortens s to at most w cells, dropping the start and marking it
+// with an ellipsis so the file name and extension stay visible.
+func truncateLeft(s string, w int) string {
+	if ansi.StringWidth(s) <= w {
+		return s
+	}
+	return "…" + ansi.TruncateLeft(s, ansi.StringWidth(s)-w+1, "")
+}
+
 func windowLines(lines []string, h, scroll int) []string {
 	if h <= 0 {
 		return nil
@@ -1862,16 +1886,15 @@ func (c CockpitModel) Update(msg tea.KeyMsg) (CockpitModel, tea.Cmd) {
 	case "down", "j":
 		c.move(1)
 	case "pgup":
-		c.centerScroll -= 8
-		if c.centerScroll < 0 {
-			c.centerScroll = 0
-		}
+		c.scrollCenter(-8)
 	case "pgdown":
-		c.centerScroll += 8
+		c.scrollCenter(8)
 	case "home":
 		c.centerScroll = 0
+		c.centerManual = true
 	case "end":
 		c.centerScroll = 1 << 20
+		c.centerManual = false
 	case "enter":
 		if c.focus == cockpitFocusWorkflow {
 			c.focus = cockpitFocusCenter
@@ -1917,10 +1940,20 @@ func (c *CockpitModel) move(dir int) {
 			c.selPhase = len(c.phases) - 1
 		}
 	case cockpitFocusCenter:
-		c.centerScroll += dir
-		if c.centerScroll < 0 {
-			c.centerScroll = 0
-		}
+		c.scrollCenter(dir)
+	}
+}
+
+// scrollCenter moves the center pane by d lines. On the log tabs the first
+// manual scroll starts from the bottom the view was following.
+func (c *CockpitModel) scrollCenter(d int) {
+	if (c.tab == 0 || c.tab == 6) && !c.centerManual {
+		c.centerScroll = c.centerMax
+	}
+	c.centerManual = true
+	c.centerScroll += d
+	if c.centerScroll < 0 {
+		c.centerScroll = 0
 	}
 }
 

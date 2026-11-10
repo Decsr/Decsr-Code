@@ -98,7 +98,7 @@ func RemoveRecentProject(projectPath string) error {
 	}
 
 	existing := LoadRecentProjects()
-	var filtered []RecentProject
+	filtered := []RecentProject{}
 	for _, p := range existing {
 		if p.Path != projectPath {
 			filtered = append(filtered, p)
