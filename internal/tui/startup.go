@@ -285,6 +285,7 @@ func (m startupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					projectCfg := config.LoadProject(m.root)
 					projectCfg.Project.ModulePath = val
 					_ = config.Save(m.root, projectCfg)
+					_ = ensureGoModModule(m.root, val)
 					return m, m.resumePendingAction()
 				}
 			case "esc":
@@ -727,8 +728,35 @@ func NeedsModulePath(root string, cfg config.Config) bool {
 	if cfg.Project.ModulePath != "" {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(root, "go.mod"))
-	return err != nil
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return true
+	}
+	return !hasModuleDirective(string(data))
+}
+
+// hasModuleDirective reports whether go.mod content has a module line.
+func hasModuleDirective(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 2 && f[0] == "module" {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureGoModModule adds a module directive to an existing go.mod that lacks
+// one, since go mod init refuses to run when go.mod exists. A missing go.mod
+// is left alone (the pipeline runs go mod init for it).
+func ensureGoModModule(root, modulePath string) error {
+	path := filepath.Join(root, "go.mod")
+	data, err := os.ReadFile(path)
+	if err != nil || hasModuleDirective(string(data)) {
+		return nil
+	}
+	out := "module " + modulePath + "\n\n" + string(data)
+	return os.WriteFile(path, []byte(out), 0o600)
 }
 
 // detectDefaultRunnerModel finds the most common runner+model+effort triple
@@ -854,6 +882,7 @@ func (m modulePathModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				projectCfg := config.LoadProject(m.root)
 				projectCfg.Project.ModulePath = val
 				_ = config.Save(m.root, projectCfg)
+				_ = ensureGoModModule(m.root, val)
 				return m, tea.Quit
 			}
 		case "esc", "ctrl+c":

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/Decsr/Decsr-Code/internal/artifacts"
@@ -244,7 +245,33 @@ func (a *CoderAgent) Research(ctx context.Context, p CoderResearchPayload) (stri
 	}
 	a.emitUsage(usage)
 
-	return strings.TrimSpace(out.String()), nil
+	return tidyResearchReport(out.String()), nil
+}
+
+var (
+	gluedHeadingRe = regexp.MustCompile(`([.!?:])(#{1,6} \S)`)
+	firstHeadingRe = regexp.MustCompile(`(?m)^#{1,6} `)
+)
+
+// maxResearchPreamble is the longest leading narration, in bytes, that
+// tidyResearchReport will drop in front of the first markdown heading.
+const maxResearchPreamble = 300
+
+// tidyResearchReport cleans streamed research text: separate assistant
+// messages arrive concatenated, so a heading can end up glued to the previous
+// sentence. It puts such headings on their own line and drops a short leading
+// narration paragraph ("I'll start by...") that precedes the first heading.
+func tidyResearchReport(s string) string {
+	s = strings.TrimSpace(gluedHeadingRe.ReplaceAllString(s, "$1\n\n$2"))
+	loc := firstHeadingRe.FindStringIndex(s)
+	if loc == nil || loc[0] == 0 {
+		return s
+	}
+	pre := strings.TrimSpace(s[:loc[0]])
+	if len(pre) <= maxResearchPreamble && !strings.Contains(pre, "\n\n") {
+		return s[loc[0]:]
+	}
+	return s
 }
 
 // isNoChangesDeclared reports whether the CHANGES section explicitly states

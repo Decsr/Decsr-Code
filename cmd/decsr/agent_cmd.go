@@ -5,10 +5,27 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
+	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/Decsr/Decsr-Code/internal/bus"
+	"github.com/Decsr/Decsr-Code/internal/config"
 )
+
+// validAgentRoles returns the sorted agent roles configured by default. The
+// legacy planner, tester and reviewer roles are gone from the pipeline (the
+// bus only knows pm, coder, qa, ux_reviewer and security), so they are no
+// longer accepted.
+func validAgentRoles() []string {
+	var roles []string
+	for r := range config.DefaultConfig().Agents {
+		roles = append(roles, r)
+	}
+	sort.Strings(roles)
+	return roles
+}
 
 // agentCmd is the "decsr agent" sub-command.
 // It connects to a remote bus via Unix socket, subscribes for messages
@@ -17,7 +34,7 @@ import (
 // In multiplexer mode, this process runs in its own pane and displays agent output.
 func agentCmd(args []string) {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
-	roleFlag := fs.String("role", "", "agent role (planner|coder|tester|reviewer|pr)")
+	roleFlag := fs.String("role", "", "agent role (see error output for the valid list)")
 	sessionFlag := fs.String("session", "", "decsr session ID")
 	busAddrFlag := fs.String("bus-addr", "", "unix socket path of the bus server")
 	_ = fs.Parse(args)
@@ -27,13 +44,8 @@ func agentCmd(args []string) {
 		os.Exit(2)
 	}
 
-	validRoles := map[string]bool{
-		"pm": true, "planner": true, "coder": true, "tester": true,
-		"reviewer": true, "ux_reviewer": true, "security": true,
-		"pr": true,
-	}
-	if !validRoles[*roleFlag] {
-		_, _ = fmt.Fprintf(os.Stderr, "invalid --role %q (must be one of: pm, planner, coder, tester, reviewer, ux_reviewer, security, pr)\n", *roleFlag)
+	if !slices.Contains(validAgentRoles(), *roleFlag) {
+		_, _ = fmt.Fprintf(os.Stderr, "invalid --role %q (must be one of: %s)\n", *roleFlag, strings.Join(validAgentRoles(), ", "))
 		os.Exit(2)
 	}
 

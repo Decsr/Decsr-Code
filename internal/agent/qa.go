@@ -122,9 +122,9 @@ func (a *QAAgent) ReviewPlan(ctx context.Context, planText, projectCtx string) (
 }
 
 // GenerateTests creates test files via LLM in TDD mode (tests before implementation).
-func (a *QAAgent) GenerateTests(ctx context.Context, payload QATestPayload) error {
+func (a *QAAgent) GenerateTests(ctx context.Context, payload QATestPayload) ([]string, error) {
 	if len(payload.Files) == 0 && strings.TrimSpace(payload.Plan) == "" {
-		return nil
+		return nil, nil
 	}
 	return a.generateTests(ctx, payload)
 }
@@ -305,7 +305,7 @@ func (a *QAAgent) runTests(ctx context.Context) (bus.Message, error) {
 	return bus.NewMessage(bus.RoleQA, "", bus.MsgResponse, report), nil
 }
 
-func (a *QAAgent) generateTests(ctx context.Context, payload QATestPayload) error {
+func (a *QAAgent) generateTests(ctx context.Context, payload QATestPayload) ([]string, error) {
 	var promptParts []string
 
 	if gomod, err := safefile.ReadFile(a.root, "go.mod"); err == nil {
@@ -337,7 +337,7 @@ func (a *QAAgent) generateTests(ctx context.Context, payload QATestPayload) erro
 	}
 
 	if len(promptParts) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	systemPrompt := prompts.MustLoad("qa-tests")
@@ -353,18 +353,18 @@ func (a *QAAgent) generateTests(ctx context.Context, payload QATestPayload) erro
 		Messages:     []runner.ConvMessage{{Role: "user", Content: userContent}},
 	})
 	if err != nil {
-		return fmt.Errorf("qa tests: runner: %w", err)
+		return nil, fmt.Errorf("qa tests: runner: %w", err)
 	}
 
 	output, err := a.collectStream(ch)
 	if err != nil {
-		return fmt.Errorf("qa tests: stream: %w", err)
+		return nil, fmt.Errorf("qa tests: stream: %w", err)
 	}
 
 	sections := parseSections(output, "TEST_CMDS")
 	if cmds := strings.TrimSpace(sections["TEST_CMDS"]); cmds != "" {
 		if err := a.ws.WriteFile(artifacts.TestCmdsFile, []byte(cmds+"\n")); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -374,10 +374,10 @@ func (a *QAAgent) generateTests(ctx context.Context, payload QATestPayload) erro
 		if err := a.ws.WriteFile(artifacts.TesterRawOutputFile, []byte(output)); err != nil {
 			a.emitToken(fmt.Sprintf("warning: failed to save QA raw output: %v\n", err), false)
 		}
-		return nil
+		return nil, nil
 	}
 	a.emitToken(fmt.Sprintf("QA wrote %d test file(s)\n", len(testFiles)), false)
-	return nil
+	return testFiles, nil
 }
 
 func (a *QAAgent) writeTestBlocks(output string) []string {
