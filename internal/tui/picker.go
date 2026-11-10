@@ -110,9 +110,7 @@ func (m PickerModel) Update(msg tea.Msg) (PickerModel, tea.Cmd) {
 				_ = SaveHistory(m.wsPath, item.path)
 				return m, func() tea.Msg { return PickerSelectedMsg{Path: item.path} }
 			}
-		case "q":
-			return m, tea.Quit
-		case "esc":
+		case "esc", "q":
 			return m, func() tea.Msg { return PickerCancelledMsg{} }
 		}
 	case tea.WindowSizeMsg:
@@ -223,7 +221,7 @@ func (m PickerModel) View() string {
 	body := lipgloss.Place(m.width, vpH, lipgloss.Center, lipgloss.Center, card)
 
 	// Footer with key hints.
-	footer := hintBar(m.width, []keyHint{{"↑↓", "navigate"}, {"Enter", "select"}, {"Esc", "menu"}, {"q", "quit"}}, "")
+	footer := hintBar(m.width, []keyHint{{"↑↓", "navigate"}, {"Enter", "select"}, {"Esc/q", "back"}}, "")
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }

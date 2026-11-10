@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Decsr/Decsr-Code/internal/logging"
 	"github.com/Decsr/Decsr-Code/internal/safefile"
 )
 
@@ -39,6 +40,7 @@ const (
 	NiceToHaveFile           = "nice_to_have.md"
 	SummaryFile              = "summary.md"
 	RunLogFile               = "runlog.txt"
+	BusLogFile               = "runlog.jsonl" // event bus log, held open for the whole session
 	TaskSpecFile             = "task_spec.json"
 	TaskPlanFile             = "task_plan.md"
 	ContextPackFile          = "context_pack.md"       // PM-compacted repository context, user-editable
@@ -161,10 +163,21 @@ var generatedArtifacts = []string{
 	SummaryFile,
 }
 
+// IsLiveLog reports whether name is a log file the running process keeps open
+// (the slog file and the event bus log). Workspace cleaning must never delete
+// these: the open handle would keep writing to an unlinked inode and the run's
+// log would be unrecoverable.
+func IsLiveLog(name string) bool {
+	return name == logging.LogFileName || name == BusLogFile
+}
+
 // CleanGeneratedArtifacts removes all generated artifacts from the workspace,
 // forcing the pipeline to regenerate everything from scratch.
 func (w Workspace) CleanGeneratedArtifacts() {
 	for _, name := range generatedArtifacts {
+		if IsLiveLog(name) {
+			continue
+		}
 		_ = os.Remove(w.Path(name))
 	}
 }

@@ -687,10 +687,21 @@ func (a *PMAgent) CompactRepository(ctx context.Context, projectCtx string, maxT
 // returned without invoking the LLM. Cache is invalidated automatically when
 // either the user input or the project context changes by a single byte.
 func (a *PMAgent) NegotiateTask(ctx context.Context, input, projectCtx string, humanCh <-chan string) (TaskSpec, error) {
+	return a.negotiateTask(ctx, input, projectCtx, humanCh, true)
+}
+
+// RenegotiateTask is NegotiateTask for a user-requested regeneration: the cache
+// lookup is skipped so the LLM always runs, and the fresh spec replaces the
+// cached entry.
+func (a *PMAgent) RenegotiateTask(ctx context.Context, input, projectCtx string, humanCh <-chan string) (TaskSpec, error) {
+	return a.negotiateTask(ctx, input, projectCtx, humanCh, false)
+}
+
+func (a *PMAgent) negotiateTask(ctx context.Context, input, projectCtx string, humanCh <-chan string, useCache bool) (TaskSpec, error) {
 	cacheKey := ""
 	if strings.TrimSpace(input) != "" {
 		cacheKey = negotiateCacheKey(input, projectCtx)
-		if spec, ok := a.loadCachedTaskSpec(cacheKey); ok {
+		if spec, ok := a.loadCachedTaskSpec(cacheKey); ok && useCache {
 			a.emit(bus.MsgEvent, fmt.Sprintf("reusing cached task spec (key=%s)", cacheKey[:8]))
 			return spec, nil
 		}
@@ -713,7 +724,7 @@ func (a *PMAgent) NegotiateTask(ctx context.Context, input, projectCtx string, h
 			}
 			messages = append(messages, runner.ConvMessage{Role: "user", Content: reply})
 			cacheKey = negotiateCacheKey(reply, projectCtx)
-			if spec, ok := a.loadCachedTaskSpec(cacheKey); ok {
+			if spec, ok := a.loadCachedTaskSpec(cacheKey); ok && useCache {
 				a.emit(bus.MsgEvent, fmt.Sprintf("reusing cached task spec (key=%s)", cacheKey[:8]))
 				return spec, nil
 			}

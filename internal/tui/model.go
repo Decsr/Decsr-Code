@@ -836,6 +836,9 @@ func (m Model) updateOverlay(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Selected existing file — close picker.
 			m.overlay = overlayNone
 			return m, nil
+		case PickerCancelledMsg:
+			m.overlay = overlayNone
+			return m, nil
 		default:
 			var cmd tea.Cmd
 			m.overlayPicker, cmd = m.overlayPicker.Update(msg)

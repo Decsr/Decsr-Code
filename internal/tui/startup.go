@@ -663,7 +663,7 @@ func cleanWorkspace(wsDir string, preserveRequirements bool) {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if preserve[name] {
+		if preserve[name] || artifacts.IsLiveLog(name) {
 			continue
 		}
 		// Preserve the SQLite memory index and its WAL/SHM companions.

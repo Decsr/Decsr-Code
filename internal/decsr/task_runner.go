@@ -369,36 +369,11 @@ func (tr *TaskRunner) run(ctx context.Context, taskInput string, resume bool) (r
 
 		// ── Phase 1: Negotiate ── (human in the loop)
 		curStage = "negotiate"
-		for {
-			spec, err = tr.negotiate(ctx, intent, ctxFragment)
-			if err != nil {
-				return fmt.Errorf("negotiate: %w", err)
-			}
-
-			if projCtx.IsBrownfield && strings.EqualFold(spec.Scope, "greenfield") {
-				newScope := inferBrownfieldScope(intent, spec.Description)
-				tr.event(fmt.Sprintf("brownfield project detected — downgrading scope from greenfield to %s", newScope))
-				spec.Scope = newScope
-			}
-
-			specData, _ := json.MarshalIndent(spec, "", "  ")
-			if err := tr.ws.WriteFile(artifacts.TaskSpecFile, specData); err != nil {
-				return fmt.Errorf("write task spec: %w", err)
-			}
-
-			approved, err := tr.waitArtifact(ctx, artifacts.TaskSpecFile)
-			if err != nil {
-				return err
-			}
-			if approved {
-				curSpec = spec
-				tr.memAppend("spec-approved", fmt.Sprintf("**Title:** %s\n\n**Scope:** %s\n\n**Description:**\n\n%s",
-					spec.Title, spec.Scope, strings.TrimSpace(spec.Description)))
-				break
-			}
-			tr.event("re-negotiating task spec…")
-			_ = removeWorkspaceFile(tr.ws, artifacts.TaskSpecFile)
+		spec, err = tr.negotiateSpec(ctx, intent, ctxFragment, projCtx.IsBrownfield)
+		if err != nil {
+			return err
 		}
+		curSpec = spec
 
 		tr.pipeline = resolvePipeline(spec, projCtx.IsBrownfield)
 		if projCtx.IsBrownfield && tr.pipeline == agent.PipelineGreen {
@@ -564,8 +539,46 @@ func (tr *TaskRunner) implementAndReview(ctx context.Context, spec agent.TaskSpe
 	return nil
 }
 
-// negotiate conducts PM↔human conversation to produce a TaskSpec.
-func (tr *TaskRunner) negotiate(ctx context.Context, input, ctxFragment string) (agent.TaskSpec, error) {
+// negotiateSpec runs the negotiate-and-approve loop for the task spec. A
+// regenerate request at the gate re-negotiates from scratch, bypassing the PM's
+// cached spec.
+func (tr *TaskRunner) negotiateSpec(ctx context.Context, intent, ctxFragment string, brownfield bool) (agent.TaskSpec, error) {
+	fresh := false
+	for {
+		spec, err := tr.negotiate(ctx, intent, ctxFragment, fresh)
+		if err != nil {
+			return agent.TaskSpec{}, fmt.Errorf("negotiate: %w", err)
+		}
+
+		if brownfield && strings.EqualFold(spec.Scope, "greenfield") {
+			newScope := inferBrownfieldScope(intent, spec.Description)
+			tr.event(fmt.Sprintf("brownfield project detected — downgrading scope from greenfield to %s", newScope))
+			spec.Scope = newScope
+		}
+
+		specData, _ := json.MarshalIndent(spec, "", "  ")
+		if err := tr.ws.WriteFile(artifacts.TaskSpecFile, specData); err != nil {
+			return agent.TaskSpec{}, fmt.Errorf("write task spec: %w", err)
+		}
+
+		approved, err := tr.waitArtifact(ctx, artifacts.TaskSpecFile)
+		if err != nil {
+			return agent.TaskSpec{}, err
+		}
+		if approved {
+			tr.memAppend("spec-approved", fmt.Sprintf("**Title:** %s\n\n**Scope:** %s\n\n**Description:**\n\n%s",
+				spec.Title, spec.Scope, strings.TrimSpace(spec.Description)))
+			return spec, nil
+		}
+		tr.event("re-negotiating task spec…")
+		_ = removeWorkspaceFile(tr.ws, artifacts.TaskSpecFile)
+		fresh = true
+	}
+}
+
+// negotiate conducts PM↔human conversation to produce a TaskSpec. When fresh is
+// set the PM's cached spec is ignored.
+func (tr *TaskRunner) negotiate(ctx context.Context, input, ctxFragment string, fresh bool) (agent.TaskSpec, error) {
 	tr.setState(PipelineNegotiating)
 
 	pm, ok := tr.agents[bus.RolePM].(*agent.PMAgent)
@@ -583,7 +596,11 @@ func (tr *TaskRunner) negotiate(ctx context.Context, input, ctxFragment string) 
 	tr.b.Publish(bus.NewMessage(bus.RoleSystem, bus.RolePM, bus.MsgRequest, "negotiate"))
 
 	started := time.Now()
-	spec, err := pm.NegotiateTask(ctx, input, ctxFragment, tr.humanCh)
+	negotiate := pm.NegotiateTask
+	if fresh {
+		negotiate = pm.RenegotiateTask
+	}
+	spec, err := negotiate(ctx, input, ctxFragment, tr.humanCh)
 	elapsed := time.Since(started)
 	tr.agentDurations[bus.RolePM] += elapsed
 
