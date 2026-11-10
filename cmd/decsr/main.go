@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -633,7 +634,7 @@ func cleanCmd(args []string) {
 	}
 
 	dir := filepath.Join(root, artifacts.DirName)
-	entries, err := os.ReadDir(dir)
+	kept, err := cleanDecsrDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			fmt.Println("nothing to clean")
@@ -641,21 +642,38 @@ func cleanCmd(args []string) {
 		}
 		fatal(err)
 	}
+	fmt.Println(cleanSummary(dir, kept))
+}
 
-	preserve := map[string]bool{
-		artifacts.RequirementsFile:  true,
-		artifacts.ProjectConfigFile: true,
+// cleanDecsrDir removes generated artifacts from dir and returns the sorted
+// names of the entries it kept: requirements, project config, and project
+// memory (memory/ and the memory.db index with its sqlite sidecar files).
+func cleanDecsrDir(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
 	}
+	var kept []string
 	for _, entry := range entries {
-		if preserve[entry.Name()] {
+		name := entry.Name()
+		if name == artifacts.RequirementsFile || name == artifacts.ProjectConfigFile ||
+			name == artifacts.MemoryDirName || strings.HasPrefix(name, artifacts.MemoryDBFile) {
+			if entry.IsDir() {
+				name += "/"
+			}
+			kept = append(kept, name)
 			continue
 		}
-		path := filepath.Join(dir, entry.Name())
-		if err := os.RemoveAll(path); err != nil {
-			fatal(err)
+		if err := os.RemoveAll(filepath.Join(dir, name)); err != nil {
+			return nil, err
 		}
 	}
-	fmt.Printf("cleaned %s (preserved %v)\n", dir, preserve)
+	sort.Strings(kept)
+	return kept, nil
+}
+
+func cleanSummary(dir string, kept []string) string {
+	return fmt.Sprintf("cleaned %s (kept: %s)", dir, strings.Join(kept, ", "))
 }
 
 func printIfExists(ws artifacts.Workspace, name string) {

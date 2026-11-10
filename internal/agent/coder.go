@@ -1181,7 +1181,7 @@ func (a *CoderAgent) buildCmd() string {
 	}
 	switch lang {
 	case "go":
-		return "go build ./..."
+		return goBuildCmd
 	case "rust":
 		return "cargo build"
 	case "node", "javascript", "typescript":

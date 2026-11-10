@@ -463,12 +463,12 @@ func (a *QAAgent) detectLanguage() string {
 
 func (a *QAAgent) fallbackTestCmds() []string {
 	if a.cfg.Project.TestCmd != "" {
-		return []string{"go build ./...", a.cfg.Project.TestCmd}
+		return []string{goBuildCmd, a.cfg.Project.TestCmd}
 	}
 	lang := a.detectLanguage()
 	switch lang {
 	case "go":
-		return []string{"go build ./...", "go test -count=1 ./..."}
+		return []string{goBuildCmd, "go test -count=1 ./..."}
 	case "node", "javascript", "typescript":
 		return []string{"npm test"}
 	case "python":
