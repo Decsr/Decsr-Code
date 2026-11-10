@@ -62,3 +62,39 @@ func TestModelMemory_ResultUsesActiveMode(t *testing.T) {
 		t.Errorf("result: want context/16384, got %s/%d", res.Mode, res.MaxContextTokens)
 	}
 }
+
+// The prefilled value is a suggestion: the first typed digit replaces it.
+func TestModelMemory_FirstDigitReplacesPrefill(t *testing.T) {
+	m := newModelMemoryModel(config.Config{ModelMemory: config.ModelMemoryConfig{Mode: "ram", MaxRAMGB: 10.5}})
+	if got := m.value.Value(); got != "10.5" {
+		t.Fatalf("prefill: want 10.5, got %q", got)
+	}
+	m, _ = m.Update(key("8"))
+	if got := m.value.Value(); got != "8" {
+		t.Fatalf("after first digit: want 8, got %q", got)
+	}
+	m, _ = m.Update(key("4"))
+	if got := m.value.Value(); got != "84" {
+		t.Fatalf("second digit must append: want 84, got %q", got)
+	}
+}
+
+func TestModelMemory_BackspaceEditsPrefill(t *testing.T) {
+	m := newModelMemoryModel(config.Config{ModelMemory: config.ModelMemoryConfig{Mode: "ram", MaxRAMGB: 10.5}})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m, _ = m.Update(key("7"))
+	if got := m.value.Value(); got != "10.7" {
+		t.Fatalf("backspace then digit: want 10.7, got %q", got)
+	}
+}
+
+func TestModelMemory_ModeSwitchReplacesPrefill(t *testing.T) {
+	m := newModelMemoryModel(config.Config{ModelMemory: config.ModelMemoryConfig{Mode: "ram", MaxRAMGB: 10.5}})
+	m, _ = m.Update(key("5")) // typed, no longer fresh
+	m, _ = m.Update(key("l"))
+	m, _ = m.Update(key("h"))
+	m, _ = m.Update(key("9"))
+	if got := m.value.Value(); got != "9" {
+		t.Fatalf("digit after mode switch: want 9, got %q", got)
+	}
+}

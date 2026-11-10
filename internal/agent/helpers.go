@@ -82,6 +82,21 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
+// goBuildCmd compiles every package without writing a binary into the project.
+// A plain `go build` (or `go build ./...` with a single main package) leaves an
+// executable in the working directory.
+var goBuildCmd = "go build -o " + os.DevNull + " ./..."
+
+// safeBuildCmd rewrites `go build`, `go build .` and `go build ./...` (no -o) to
+// goBuildCmd so verification never leaves artifacts in the project.
+func safeBuildCmd(cmd string) string {
+	switch strings.Join(strings.Fields(cmd), " ") {
+	case "go build", "go build .", "go build ./...":
+		return goBuildCmd
+	}
+	return cmd
+}
+
 func parseCmds(input string) []string {
 	var cmds []string
 	scanner := bufio.NewScanner(strings.NewReader(input))
@@ -100,7 +115,7 @@ func parseCmds(input string) []string {
 		if !looksLikeCommand(cleaned) {
 			continue
 		}
-		cmds = append(cmds, cleaned)
+		cmds = append(cmds, safeBuildCmd(cleaned))
 	}
 	return cmds
 }

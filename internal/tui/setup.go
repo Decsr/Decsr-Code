@@ -215,6 +215,7 @@ type SetupModel struct {
 	effortLoading     bool
 	effortFor         string // provider/model whose options are loaded
 	effortUnsupported string // configured value not offered by this model
+	effortTouched     bool   // user changed the effort in this session (or it had to fall back)
 
 	// Project display name (project setup only).
 	projectNameInput textinput.Model
@@ -524,7 +525,7 @@ func fetchEffortOptions(provider, model string) tea.Cmd {
 
 // selectedEffort returns the global effort value to persist.
 func (m SetupModel) selectedEffort() string {
-	if m.effortLoading || m.effortFor == "" {
+	if m.effortLoading || m.effortFor == "" || !m.effortTouched {
 		return normalizeSetupEffort(m.effort)
 	}
 	choices := effortChoices(m.effortOptions)
@@ -568,9 +569,14 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 			idx, found := effortChoiceIndex(choices, m.effort)
 			m.effortIdx = idx
 			m.effortUnsupported = ""
-			if !found {
+			// A model that exposes no levels cannot exclude the current
+			// value, so keep it; only fall back when the list rules it out.
+			if !found && len(m.effortOptions) > 0 {
 				m.effortUnsupported = m.effort
 				m.effort = setupEffortDefault
+				m.effortTouched = true
+			} else if !found {
+				m.effortIdx = 0
 			}
 		}
 		if key == m.agentEffortFor {
@@ -606,6 +612,18 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 			pending := *m.pendingSave
 			m.pendingSave = nil
 			if pending.close {
+				if m.globalOnly {
+					// Save here so untouched per-agent effort is preserved;
+					// the parent only reloads config from disk.
+					if err := m.savePayload(pending.msg); err != nil {
+						m.setSaveStatus("✗ "+err.Error(), false)
+						if m.ready {
+							m.viewport.SetContent(m.renderContent())
+						}
+						return m, nil
+					}
+					return m, func() tea.Msg { return setupClosedMsg{} }
+				}
 				return m, func() tea.Msg { return pending.msg }
 			}
 			if err := m.savePayload(pending.msg); err != nil {
@@ -889,6 +907,7 @@ func (m SetupModel) handleProviderKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		m.modelIdx = 0
 		m.pingErr = nil
 		m.effort = setupEffortDefault
+		m.effortTouched = true
 		m.effortIdx = 0
 		m.effortOptions = nil
 		m.effortFor = ""
@@ -935,10 +954,10 @@ func (m SetupModel) handleModelKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 	return m, nil
 }
 
-// resetEffortForNewModel clears a global effort that may not be supported by
-// the newly selected model. The user can pick a new level in the effort section.
+// resetEffortForNewModel drops the loaded effort levels of the previous model.
+// The current effort is kept; it is validated against the new model's levels
+// once they load.
 func (m *SetupModel) resetEffortForNewModel() {
-	m.effort = setupEffortDefault
 	m.effortIdx = 0
 	m.effortOptions = nil
 	m.effortFor = ""
@@ -959,6 +978,7 @@ func (m SetupModel) handleEffortKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		}
 		if m.effortIdx > 0 {
 			m.effortIdx--
+			m.effortTouched = true
 			m.effortUnsupported = ""
 		}
 	case "down", "j":
@@ -967,6 +987,7 @@ func (m SetupModel) handleEffortKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		}
 		if m.effortIdx < len(choices)-1 {
 			m.effortIdx++
+			m.effortTouched = true
 			m.effortUnsupported = ""
 		}
 	case "enter":
@@ -976,7 +997,9 @@ func (m SetupModel) handleEffortKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		if m.effortIdx < 0 || m.effortIdx >= len(choices) {
 			m.effortIdx = 0
 		}
-		m.effort = choices[m.effortIdx]
+		if m.effortTouched {
+			m.effort = choices[m.effortIdx]
+		}
 		if m.globalOnly {
 			return m.commitGlobalSelection(sectionProvider)
 		}
@@ -1226,9 +1249,30 @@ func (m SetupModel) clearSaveStatusLater() tea.Cmd {
 // savePayload writes the current values to the active config target.
 func (m SetupModel) savePayload(payload setupDoneMsg) error {
 	if m.globalOnly {
+		if !m.effortTouched {
+			return saveGlobalSetupKeepEffort(m.baseAgents, payload)
+		}
 		return saveGlobalSetup(m.baseAgents, payload)
 	}
 	return saveProjectSetup(m.root, payload)
+}
+
+// saveGlobalSetupKeepEffort applies provider and model to every agent but
+// leaves each agent's own effort alone, so changing only the model does not
+// reset effort levels the user never touched.
+func saveGlobalSetupKeepEffort(baseAgents map[string]config.AgentConfig, msg setupDoneMsg) error {
+	globalAgents := make(map[string]config.AgentConfig, len(baseAgents))
+	for role, ac := range baseAgents {
+		ac.Runner = msg.provider
+		if msg.model != "" {
+			ac.Model = msg.model
+		}
+		if ac.Effort == "" {
+			ac.Effort = msg.effort
+		}
+		globalAgents[role] = ac
+	}
+	return config.SaveGlobal(config.Config{Agents: globalAgents})
 }
 
 // commitProjectSelection saves the current project values and advances.

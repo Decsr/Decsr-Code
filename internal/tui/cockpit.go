@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -142,6 +143,7 @@ type CockpitModel struct {
 	leftScroll   int
 	centerScroll int
 	inspector    bool
+	clock        func() time.Time // test hook; nil means time.Now
 
 	gate         string
 	currentSub   int
@@ -207,6 +209,20 @@ func NewCockpit(cfg config.Config, root, wsPath string) CockpitModel {
 	return c
 }
 
+func (c *CockpitModel) now() time.Time {
+	if c.clock != nil {
+		return c.clock()
+	}
+	return time.Now()
+}
+
+// cockpitTickMsg refreshes the elapsed clock and stage timers between events.
+type cockpitTickMsg struct{}
+
+func cockpitTick() tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg { return cockpitTickMsg{} })
+}
+
 func (c *CockpitModel) SetSize(width, height int) {
 	if width < 20 {
 		width = 20
@@ -215,6 +231,19 @@ func (c *CockpitModel) SetSize(width, height int) {
 		height = 8
 	}
 	c.width, c.height = width, height
+	c.fixFocus()
+}
+
+// showInspector reports whether the right-hand RUN pane is on screen.
+func (c *CockpitModel) showInspector() bool {
+	return c.inspector && c.width >= 110
+}
+
+// fixFocus keeps focus off the inspector while it is hidden.
+func (c *CockpitModel) fixFocus() {
+	if c.focus == cockpitFocusInspector && !c.showInspector() {
+		c.focus = cockpitFocusCenter
+	}
 }
 
 func (c *CockpitModel) SetTaskInput(input string) {
@@ -282,10 +311,11 @@ func (c *CockpitModel) ClearGate() {
 
 func (c *CockpitModel) ToggleInspector() {
 	c.inspector = !c.inspector
+	c.fixFocus()
 }
 
 func (c *CockpitModel) CycleFocus(dir int) {
-	if c.width < 110 || !c.inspector {
+	if !c.showInspector() {
 		if c.focus == cockpitFocusWorkflow {
 			c.focus = cockpitFocusCenter
 		} else {
@@ -674,6 +704,47 @@ func (c *CockpitModel) observeActivityEvidence(role bus.AgentRole, text string) 
 	_ = role
 }
 
+// SeedUsageFromRunLog restores token and call counters when a task is resumed:
+// the resumed runner starts with an empty ledger, but the bus log still holds
+// every usage record of the interrupted run. Only records after the last
+// "task complete" event are used, so earlier tasks in the same log are ignored.
+func (c *CockpitModel) SeedUsageFromRunLog(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	type entry struct {
+		From    bus.AgentRole   `json:"from"`
+		Type    string          `json:"type"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	var usage []bus.Message
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	for sc.Scan() {
+		var e entry
+		if json.Unmarshal(sc.Bytes(), &e) != nil {
+			continue
+		}
+		switch bus.MessageType(e.Type) {
+		case bus.MsgEvent:
+			var text string
+			if json.Unmarshal(e.Payload, &text) == nil && strings.Contains(text, "task complete") {
+				usage = usage[:0]
+			}
+		case bus.MsgUsage:
+			var u bus.AgentUsage
+			if json.Unmarshal(e.Payload, &u) == nil {
+				usage = append(usage, bus.NewMessage(e.From, "", bus.MsgUsage, u))
+			}
+		}
+	}
+	for _, m := range usage {
+		c.Observe(m)
+	}
+}
+
 func (c *CockpitModel) observeEvent(from, to bus.AgentRole, s string) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -688,7 +759,8 @@ func (c *CockpitModel) observeEvent(from, to bus.AgentRole, s string) {
 		c.setActiveAgent(role)
 	}
 	for _, st := range []string{"idle", "compacting", "negotiating", "research", "planning", "coder", "poc", "qa_tests", "qa_review", "ux_reviewer", "security", "coder_fixer", "done", "gate", "rate_limited"} {
-		if s == st {
+		// Agents also print "done" as a log line; only the pipeline state counts.
+		if s == st && (st != "done" || from == bus.RoleSystem) {
 			c.applyStatePhase(st)
 		}
 	}
@@ -768,7 +840,7 @@ func (c *CockpitModel) observeEvent(from, to bus.AgentRole, s string) {
 		if a := c.agents[bus.RoleUXReviewer]; a != nil {
 			a.status = AgentDone
 		}
-	case strings.Contains(s, "Security reviewing"):
+	case strings.Contains(s, "Security reviewing") && !strings.Contains(s, "the plan"):
 		c.setPhase("review", "security audit")
 		c.setActiveAgent(bus.RoleSecurity)
 	case strings.Contains(s, "Security review passed"):
@@ -905,7 +977,10 @@ func (c *CockpitModel) applyStatePhase(state string) {
 	case "coder_fixer":
 		c.setPhase("verify", "build/test/fix")
 	case "qa_review", "ux_reviewer", "security":
-		c.setPhase("review", "quality review")
+		// The same states also fire for plan review; that is part of Plan.
+		if phaseIndex(c.phases, c.phase) >= phaseIndex(c.phases, "build") {
+			c.setPhase("review", "quality review")
+		}
 	case "done":
 		c.setPhase("done", "run complete")
 	case "rate_limited":
@@ -930,10 +1005,10 @@ func (c *CockpitModel) setPhase(id, detail string) {
 		}
 		return
 	}
-	now := time.Now()
+	now := c.now()
 	for i := range c.phases {
 		if c.phases[i].status == "active" {
-			c.phases[i].duration = now.Sub(c.phases[i].started)
+			c.phases[i].duration += now.Sub(c.phases[i].started)
 		}
 		switch {
 		case i < idx:
@@ -983,7 +1058,7 @@ func (c *CockpitModel) elapsed() time.Duration {
 	if c.startedAt.IsZero() {
 		return 0
 	}
-	return time.Since(c.startedAt)
+	return c.now().Sub(c.startedAt)
 }
 
 func (c *CockpitModel) View() string {
@@ -1008,11 +1083,15 @@ func (c *CockpitModel) View() string {
 			leftW = 34
 			rightW = 40
 		}
-		centerW := c.width - leftW - rightW - 2
 		left := c.renderLeft(leftW, bodyH)
-		center := c.renderCenter(centerW, bodyH)
-		right := c.renderInspector(rightW, bodyH)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, left, " ", center, " ", right)
+		if c.inspector {
+			centerW := c.width - leftW - rightW - 2
+			center := c.renderCenter(centerW, bodyH)
+			right := c.renderInspector(rightW, bodyH)
+			body = lipgloss.JoinHorizontal(lipgloss.Top, left, " ", center, " ", right)
+		} else {
+			body = lipgloss.JoinHorizontal(lipgloss.Top, left, " ", c.renderCenter(c.width-leftW-1, bodyH))
+		}
 	} else {
 		leftW := 26
 		if c.width < 90 {
@@ -1123,7 +1202,10 @@ func (c *CockpitModel) leftRows() []cockpitLeftRow {
 		dur := ""
 		phaseDur := p.duration
 		if p.status == "active" && !p.started.IsZero() {
-			phaseDur = time.Since(p.started)
+			phaseDur += c.now().Sub(p.started)
+		}
+		if p.status == "pending" {
+			phaseDur = 0
 		}
 		if phaseDur > 0 {
 			dur = "  " + formatElapsed(phaseDur.Round(time.Second))

@@ -155,6 +155,7 @@ type Model struct {
 	pipelineDone       bool   // true after pipeline finished (enables return-to-menu)
 	returnToMenu       bool   // true when user chose to return to menu
 	pauseForModel      bool   // true when user paused to change the model (resume after)
+	cockpitTicking     bool   // true while the 1s cockpit refresh tick loop is scheduled
 	log                *slog.Logger
 
 	// Planning sub-stage tracking.
@@ -198,6 +199,11 @@ type Model struct {
 func (m Model) WithTaskInput(input string) Model {
 	m.taskInput = input
 	m.cockpit.SetTaskInput(input)
+	if strings.TrimSpace(input) == "" && m.wsPath != "" {
+		// No new task input means this run resumes an interrupted task: its
+		// runner starts with empty counters, so restore them from the run log.
+		m.cockpit.SeedUsageFromRunLog(filepath.Join(m.wsPath, "runlog.jsonl"))
+	}
 	return m
 }
 
@@ -375,6 +381,15 @@ func (m Model) Init() tea.Cmd {
 		cmds = append(cmds, p.Init())
 	}
 	return tea.Batch(cmds...)
+}
+
+// startCockpitTick starts the 1s refresh loop unless one is already running.
+func (m *Model) startCockpitTick() tea.Cmd {
+	if m.cockpitTicking {
+		return nil
+	}
+	m.cockpitTicking = true
+	return cockpitTick()
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -573,9 +588,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Pipeline completion and status-bar ticks must never be swallowed by an overlay.
 	_, isPipelineDone := msg.(PipelineDoneMsg)
 	_, isStatusTick := msg.(statusBarTickMsg)
+	_, isCockpitTick := msg.(cockpitTickMsg)
 
 	// Non-bus messages: route to overlay or normal handling.
-	if m.overlay != overlayNone && !isPipelineDone && !isStatusTick {
+	if m.overlay != overlayNone && !isPipelineDone && !isStatusTick && !isCockpitTick {
 		return m.updateOverlay(msg)
 	}
 
@@ -732,7 +748,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.hidePipelineErr = false
 					m.pipelineResuming = true
 					m.statusbar = m.statusbar.WithState("↻ resuming build-fix loop…")
-					cmds = append(cmds, runResumeCmd(resumeFn))
+					cmds = append(cmds, runResumeCmd(resumeFn), m.startCockpitTick())
 				}
 			}
 		case "ctrl+r":
@@ -778,6 +794,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cockpit.SetStarted(time.Now())
 		m.cockpit.SetTaskInput(m.taskInput)
 		m.cockpit.LoadPlan()
+		cmds = append(cmds, m.startCockpitTick())
+
+	case cockpitTickMsg:
+		// Re-rendering is all that is needed: the clock and stage timers are
+		// derived from the wall clock in View. Stop once the pipeline is done.
+		if m.pipelineDone {
+			m.cockpitTicking = false
+		} else {
+			cmds = append(cmds, cockpitTick())
+		}
 
 	case PipelineDoneMsg:
 		// The negotiate overlay waits on the pipeline; close it so the

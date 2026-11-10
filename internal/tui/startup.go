@@ -160,6 +160,7 @@ func (m startupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case homeActionClean:
 				cleanWorkspace(m.wsDir, true)
 				m.home = NewHomeModel(m.cfg, m.root)
+				m.home.status = "✓ artifacts reset"
 				// Trigger viewport init + spinner for the fresh model.
 				m.home.width, m.home.height = m.width, m.height
 				m.home.syncViewport()
@@ -654,24 +655,66 @@ func cleanWorkspace(wsDir string, preserveRequirements bool) {
 	if err != nil {
 		return
 	}
-	preserve := map[string]bool{
-		artifacts.ProjectConfigFile: true,
-		artifacts.MemoryDirName:     true, // memory/ — Markdown facts/decisions
-	}
-	if preserveRequirements {
-		preserve[artifacts.RequirementsFile] = true
-	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if preserve[name] || artifacts.IsLiveLog(name) {
-			continue
-		}
-		// Preserve the SQLite memory index and its WAL/SHM companions.
-		if name == artifacts.MemoryDBFile || strings.HasPrefix(name, artifacts.MemoryDBFile+"-") {
+		if keptByClean(name, preserveRequirements) {
 			continue
 		}
 		_ = os.RemoveAll(filepath.Join(wsDir, name))
 	}
+}
+
+// keptByClean reports whether cleanWorkspace leaves the named workspace entry
+// alone. It is the single source of truth shared with wouldClean.
+func keptByClean(name string, preserveRequirements bool) bool {
+	switch name {
+	case artifacts.ProjectConfigFile, artifacts.MemoryDirName:
+		return true
+	case artifacts.RequirementsFile:
+		if preserveRequirements {
+			return true
+		}
+	}
+	if artifacts.IsLiveLog(name) {
+		return true
+	}
+	// The SQLite memory index and its WAL/SHM companions.
+	return name == artifacts.MemoryDBFile || strings.HasPrefix(name, artifacts.MemoryDBFile+"-")
+}
+
+// wouldClean reports whether cleanWorkspace(wsDir, preserveRequirements) would
+// remove anything non-empty.
+func wouldClean(wsDir string, preserveRequirements bool) bool {
+	entries, err := os.ReadDir(wsDir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if keptByClean(entry.Name(), preserveRequirements) {
+			continue
+		}
+		if hasContent(filepath.Join(wsDir, entry.Name())) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasContent is true for a non-empty file or a directory holding one.
+func hasContent(path string) bool {
+	found := false
+	_ = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
+		if err != nil || found {
+			return nil
+		}
+		if !d.IsDir() {
+			if info, err := d.Info(); err == nil && info.Size() > 0 {
+				found = true
+			}
+		}
+		return nil
+	})
+	return found
 }
 
 // NeedsModulePath returns true if the project looks like Go, has no module path

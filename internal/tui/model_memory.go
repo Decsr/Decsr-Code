@@ -43,6 +43,10 @@ type modelMemoryModel struct {
 	ramValue string
 	ctxValue string
 
+	// fresh is true while the input shows a prefilled value the user has not
+	// edited yet; the first typed character replaces it instead of appending.
+	fresh bool
+
 	// Available local models discovered across backends, for the live
 	// RAM→context preview. Loaded asynchronously on Init.
 	localModels  []runner.LocalModel
@@ -95,6 +99,7 @@ func newModelMemoryModel(cfg config.Config) modelMemoryModel {
 	m.ramValue = m.valueForMode(cfg, mmModeRAM)
 	m.ctxValue = m.valueForMode(cfg, mmModeContext)
 	m.value.SetValue(m.currentValue())
+	m.fresh = true
 	return m
 }
 
@@ -150,11 +155,13 @@ func (m modelMemoryModel) Update(msg tea.Msg) (modelMemoryModel, tea.Cmd) {
 			m.stashValue()
 			m.mode = (m.mode + len(mmModeKeys) - 1) % len(mmModeKeys)
 			m.value.SetValue(m.currentValue())
+			m.fresh = true
 			return m, nil
 		case "right", "l":
 			m.stashValue()
 			m.mode = (m.mode + 1) % len(mmModeKeys)
 			m.value.SetValue(m.currentValue())
+			m.fresh = true
 			return m, nil
 		case "enter", "ctrl+s":
 			m.stashValue()
@@ -163,6 +170,12 @@ func (m modelMemoryModel) Update(msg tea.Msg) (modelMemoryModel, tea.Cmd) {
 	}
 	if m.mode == mmModeOff {
 		return m, nil
+	}
+	if km, ok := msg.(tea.KeyMsg); ok {
+		if m.fresh && km.Type == tea.KeyRunes {
+			m.value.SetValue("")
+		}
+		m.fresh = false
 	}
 	var cmd tea.Cmd
 	m.value, cmd = m.value.Update(msg)

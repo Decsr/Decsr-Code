@@ -50,6 +50,8 @@ type ArtifactViewerModel struct {
 	// inline edit mode — embedded textarea replaces the viewport
 	editMode bool
 	editTA   textarea.Model
+	editOrig string // content loaded into the editor, to detect unsaved changes
+	editWarn bool   // true after the first Esc with unsaved changes
 }
 
 type artifactViewerClosedMsg struct {
@@ -145,7 +147,12 @@ func (m ArtifactViewerModel) Update(msg tea.Msg) (ArtifactViewerModel, tea.Cmd) 
 		if m.editMode {
 			switch msg.String() {
 			case "esc":
+				if m.editTA.Value() != m.editOrig && !m.editWarn {
+					m.editWarn = true
+					return m, nil
+				}
 				m.editMode = false
+				m.editWarn = false
 				m.editTA.Blur()
 				return m, nil
 			case "ctrl+s":
@@ -153,12 +160,14 @@ func (m ArtifactViewerModel) Update(msg tea.Msg) (ArtifactViewerModel, tea.Cmd) 
 				filePath := filepath.Join(m.wsDir, m.filename)
 				err := os.WriteFile(filePath, []byte(content), 0o600)
 				m.editMode = false
+				m.editWarn = false
 				m.editTA.Blur()
 				if err == nil {
 					m.reloadContent()
 				}
 				return m, func() tea.Msg { return artifactEditedMsg{err: err} }
 			default:
+				m.editWarn = false
 				var cmd tea.Cmd
 				m.editTA, cmd = m.editTA.Update(msg)
 				return m, cmd
@@ -218,12 +227,16 @@ func (m ArtifactViewerModel) Update(msg tea.Msg) (ArtifactViewerModel, tea.Cmd) 
 					return m, nil
 				}
 				ta := textarea.New()
+				ta.MaxHeight = 0 // unlimited; the default (99) blocks new lines in long files
+				ta.ShowLineNumbers = false
 				ta.SetValue(string(data))
 				ta.Focus()
 				ta.CharLimit = 0
 				ta.SetWidth(m.width - 6)
 				ta.SetHeight(m.vpHeight(false) - 1)
 				m.editTA = ta
+				m.editOrig = ta.Value()
+				m.editWarn = false
 				m.editMode = true
 				return m, textarea.Blink
 			}
@@ -409,7 +422,11 @@ func (m ArtifactViewerModel) View() string {
 	// Hint line inside the frame.
 	var hintLine string
 	if m.editMode {
-		hintLine = dimStyle.Render("Ctrl+S save   Esc cancel editing")
+		if m.editWarn {
+			hintLine = errStyle.Render("unsaved changes — Esc again to discard, Ctrl+S to save")
+		} else {
+			hintLine = dimStyle.Render("Ctrl+S save   Esc cancel editing")
+		}
 	} else if m.chatMode {
 		if m.chatBusy {
 			hintLine = dimStyle.Render("Revising… please wait")

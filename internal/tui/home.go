@@ -92,8 +92,10 @@ type HomeModel struct {
 	// Recent projects from ~/.decsr/projects.json.
 	recentProjects []RecentProject
 
-	confirmQuit bool // true when showing quit confirmation
-	scrollX     int  // horizontal scroll offset (visible chars)
+	confirmQuit   bool        // true when showing quit confirmation
+	confirmAction *homeAction // destructive action awaiting y/Enter confirmation
+	status        string      // transient message, cleared on the next keypress
+	scrollX       int         // horizontal scroll offset (visible chars)
 
 	viewport viewport.Model
 	ready    bool // viewport initialised after first WindowSizeMsg
@@ -224,7 +226,38 @@ func (m HomeModel) Update(msg tea.Msg) (HomeModel, tea.Cmd) {
 			return m, nil
 		}
 
+		// Destructive-action confirmation intercepts all keys too.
+		if m.confirmAction != nil {
+			action := *m.confirmAction
+			m.confirmAction = nil
+			switch msg.String() {
+			case "y", "Y", "enter":
+				return m, m.selectAction(action)
+			}
+			if m.ready {
+				m.viewport.SetContent(m.renderContent())
+			}
+			return m, nil
+		}
+		m.status = ""
+
 		switch msg.String() {
+		case "home":
+			m.cursor = 0
+		case "end":
+			m.cursor = len(m.items) - 1
+		case "r", "R":
+			for _, it := range m.items {
+				if it.action == homeActionResume || it.action == homeActionResumeProject {
+					return m, m.selectAction(it.action)
+				}
+			}
+		case "d", "D":
+			for _, it := range m.items {
+				if it.action == homeActionDoneTasks {
+					return m, m.selectAction(it.action)
+				}
+			}
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
@@ -241,7 +274,7 @@ func (m HomeModel) Update(msg tea.Msg) (HomeModel, tea.Cmd) {
 			if selected == homeActionQuit {
 				m.confirmQuit = true
 			} else {
-				return m, m.selectAction(selected)
+				return m.requestAction(selected)
 			}
 		case "s", "S":
 			if !m.projectValid {
@@ -258,7 +291,7 @@ func (m HomeModel) Update(msg tea.Msg) (HomeModel, tea.Cmd) {
 			if !m.projectValid {
 				return m, m.selectAction(homeActionOpenProject)
 			}
-			return m, m.selectAction(homeActionClean)
+			return m.requestAction(homeActionClean)
 		case "q", "Q":
 			m.confirmQuit = true
 		case "left":
@@ -274,7 +307,7 @@ func (m HomeModel) Update(msg tea.Msg) (HomeModel, tea.Cmd) {
 			if !m.projectValid {
 				return m, m.selectAction(homeActionOpenProject)
 			}
-			return m, m.selectAction(homeActionNewTask)
+			return m.requestAction(homeActionNewTask)
 		case "2":
 			return m, m.selectAction(homeActionOpenProject)
 		case "3":
@@ -288,7 +321,7 @@ func (m HomeModel) Update(msg tea.Msg) (HomeModel, tea.Cmd) {
 			if !m.projectValid {
 				return m, m.selectAction(homeActionOpenProject)
 			}
-			return m, m.selectAction(homeActionClean)
+			return m.requestAction(homeActionClean)
 		case "6":
 			m.confirmQuit = true
 		}
@@ -300,6 +333,29 @@ func (m HomeModel) Update(msg tea.Msg) (HomeModel, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// requestAction runs action, first asking for confirmation when it would
+// remove existing plans and reports (New Task, Reset Artifacts).
+func (m HomeModel) requestAction(action homeAction) (HomeModel, tea.Cmd) {
+	if (action == homeActionNewTask || action == homeActionClean) && m.hasArtifactsToLose(action) {
+		m.confirmAction = &action
+		if m.ready {
+			m.viewport.SetContent(m.renderContent())
+		}
+		return m, nil
+	}
+	return m, m.selectAction(action)
+}
+
+// hasArtifactsToLose is true when the clean run by action would delete
+// something, or an interrupted task could be resumed.
+func (m HomeModel) hasArtifactsToLose(action homeAction) bool {
+	if _, ok := decsr.Resumable(context.Background(), m.root); ok {
+		return true
+	}
+	// New Task cleans everything; Reset keeps requirements.md.
+	return wouldClean(m.wsPath, action == homeActionClean)
 }
 
 func (m HomeModel) selectAction(action homeAction) tea.Cmd {
@@ -409,15 +465,26 @@ func (m HomeModel) renderContent() string {
 		vpH = 4
 	}
 
-	// Quit confirmation overlay.
-	if m.confirmQuit {
+	// Confirmation overlay (quit, or a destructive action).
+	if m.confirmQuit || m.confirmAction != nil {
+		title, detail := "  QUIT DECSR?", ""
+		if m.confirmAction != nil {
+			if *m.confirmAction == homeActionNewTask {
+				title = "  START A NEW TASK?"
+				detail = "  Start a new task? This removes the current plan and\n  reports (code, config and memory are kept).\n\n"
+			} else {
+				title = "  RESET ARTIFACTS?"
+				detail = "  Reset artifacts? This removes generated plans and\n  reports (keeps code, config, and project memory).\n\n"
+			}
+		}
 		warnStyle := lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
 		confirmBox := lipgloss.NewStyle().
 			Border(pixelBorder).
 			BorderForeground(crt.warn).
 			Padding(1, 3).
 			Render(
-				warnStyle.Render("  QUIT DECSR?") + "\n\n" +
+				warnStyle.Render(title) + "\n\n" +
+					dimStyle.Render(detail) +
 					dimStyle.Render("  Press ") +
 					lipgloss.NewStyle().Foreground(crt.bright).Bold(true).Render("y") +
 					dimStyle.Render(" or ") +
@@ -912,9 +979,14 @@ func (m HomeModel) renderFooter() string {
 	if m.width < 80 {
 		hints = append(hints, keyHint{"←→", "scroll"})
 	}
+	hints = append(hints, keyHint{"Enter", "select"})
+	for _, it := range m.items {
+		if it.action == homeActionResume || it.action == homeActionResumeProject {
+			hints = append(hints, keyHint{"r", "resume"})
+			break
+		}
+	}
 	hints = append(hints,
-		keyHint{"Enter", "select"},
-		keyHint{"r", "pipeline"},
 		keyHint{"o", "project"},
 		keyHint{"g", "global"},
 		keyHint{"s", "setup"},
@@ -924,11 +996,18 @@ func (m HomeModel) renderFooter() string {
 
 	bar := lipgloss.NewStyle().Background(p.footerBg)
 	right := ""
+	if m.status != "" {
+		right = bar.Foreground(p.green).Bold(true).Render(m.status) + bar.Render("  ")
+	}
 	if m.ready && m.viewport.TotalLineCount() > m.viewport.Height {
 		pct := m.viewport.ScrollPercent() * 100
-		right = bar.Foreground(p.dim).Render(fmt.Sprintf("%.0f%%", pct)) + bar.Render("  ")
+		right += bar.Foreground(p.dim).Render(fmt.Sprintf("%.0f%%", pct)) + bar.Render("  ")
 	}
 	right += bar.Foreground(p.gold).Bold(true).Render("v" + Version)
+	if m.status != "" {
+		// The status replaces the key hints so it is never truncated away.
+		hints = nil
+	}
 	return hintBar(m.width, hints, right)
 }
 
