@@ -2,6 +2,7 @@ package decsr
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -269,5 +270,36 @@ func TestRunContextPackGate_ApprovalUsesEditedFile(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for approval")
+	}
+}
+
+func TestNegotiateSpec_RegenerateRunsFreshNegotiation(t *testing.T) {
+	specOutput := func(title string) string {
+		return "===TASKSPEC===\nTITLE: " + title + "\nSCOPE: feature\nDESCRIPTION:\nd\n===END==="
+	}
+	tr, mock, ws := testContextPackRunner(t, specOutput("First"), specOutput("Second"))
+	tr.SetInteractive(true)
+	tr.Regenerate()
+
+	// Approve once the second spec gate is reached.
+	go func() {
+		for i := 0; i < 200; i++ {
+			if data, err := os.ReadFile(ws.Path(artifacts.TaskSpecFile)); err == nil && strings.Contains(string(data), "Second") {
+				tr.Approve()
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	spec, err := tr.negotiateSpec(context.Background(), "do the thing", "ctx", false)
+	if err != nil {
+		t.Fatalf("negotiateSpec: %v", err)
+	}
+	if spec.Title != "Second" {
+		t.Errorf("approved spec title = %q, want Second", spec.Title)
+	}
+	if len(mock.Requests) != 2 {
+		t.Errorf("PM runner calls = %d, want 2", len(mock.Requests))
 	}
 }

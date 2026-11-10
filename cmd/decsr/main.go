@@ -276,7 +276,7 @@ func runTaskFlow(root, taskInput, branch, uiMode string, cfg config.Config, ws a
 	agents := buildAgents(b, cfg, ws, root)
 	events := b.Subscribe()
 	wsPath := ws.Path("")
-	chatLLM := runner.OpenCodeRunner{}
+	chatLLM := chatRunner(cfg)
 	tuiModel := tui.New(events, root, wsPath, chatLLM, cfg).WithTaskInput(taskInput)
 	p := tea.NewProgram(tuiModel, tea.WithAltScreen())
 
@@ -301,6 +301,9 @@ func runTaskFlow(root, taskInput, branch, uiMode string, cfg config.Config, ws a
 	}()
 
 	result, err := p.Run()
+	// Any exit path (quit confirm, Ctrl+C, return to menu) must stop the
+	// pipeline so runner subprocesses are killed rather than orphaned.
+	stopPipeline(pipelineCancel, pipelineDone, pipelineShutdownTimeout)
 	b.Close()
 	if err != nil {
 		fatal(err)
@@ -311,13 +314,8 @@ func runTaskFlow(root, taskInput, branch, uiMode string, cfg config.Config, ws a
 		return
 	}
 
-	// A follow-up flow must not start while the cancelled pipeline is still
-	// touching .decsr artifacts and bd state.
-	if final.PauseForModelChange() || final.ReturnToMenu() {
-		pipelineCancel()
-		waitForPipeline(pipelineDone, pipelineShutdownTimeout)
-	}
-
+	// The pipeline is already stopped above, so a follow-up flow never runs
+	// alongside it on .decsr artifacts and bd state.
 	// Pause-to-change-model: show the per-agent setup screen, then resume the
 	// interrupted task with the updated config.
 	if final.PauseForModelChange() {
@@ -734,4 +732,26 @@ func waitForPipeline(done <-chan struct{}, timeout time.Duration) bool {
 		slog.Warn("previous pipeline did not stop in time; continuing", slog.Duration("timeout", timeout))
 		return false
 	}
+}
+
+// stopPipeline cancels the pipeline context and waits (bounded) for the
+// pipeline goroutine to exit, so subprocesses started with
+// exec.CommandContext are killed before the process returns. Returns true
+// when the pipeline exited within the timeout.
+func stopPipeline(cancel context.CancelFunc, done <-chan struct{}, timeout time.Duration) bool {
+	cancel()
+	return waitForPipeline(done, timeout)
+}
+
+// chatRunner builds the PM chat overlay runner from the configured PM agent
+// using the same factory as the pipeline, so chat honours the user's runner,
+// model, effort and context limit. Falls back to opencode like buildAgents.
+func chatRunner(cfg config.Config) runner.LLMRunner {
+	runner.ApplyModelMemory(&cfg)
+	r, err := runner.New(cfg.Agents["pm"], nil, cfg.PromptLanguage)
+	if err != nil {
+		slog.Warn("chat runner creation failed, falling back to opencode", slog.String("error", err.Error()))
+		return runner.OpenCodeRunner{}
+	}
+	return r
 }

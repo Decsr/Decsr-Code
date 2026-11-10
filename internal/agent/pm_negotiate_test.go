@@ -313,3 +313,44 @@ func TestNegotiateTask_EmptyInputDoesNotReplayPreviousTask(t *testing.T) {
 		t.Errorf("second empty-input task replayed cached spec: %q", got.Title)
 	}
 }
+
+func TestRenegotiateTask_SkipsCacheAndRefreshesIt(t *testing.T) {
+	b := bus.New()
+	defer b.Close()
+
+	root := t.TempDir()
+	ws, err := artifacts.EnsureWorkspace(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	specOutput := func(title string) string {
+		return "===TASKSPEC===\nTITLE: " + title + "\nSCOPE: feature\nDESCRIPTION:\nd\n===END==="
+	}
+	mock := &runner.MockRunner{Responses: []string{specOutput("First"), specOutput("Second")}}
+	pm := NewPMAgent(b, mock, ws, nil, "")
+
+	input, projectCtx := "regenerate me", "ctx"
+	first, err := pm.NegotiateTask(context.Background(), input, projectCtx, make(chan string))
+	if err != nil || first.Title != "First" {
+		t.Fatalf("first negotiate = %q, %v", first.Title, err)
+	}
+
+	// Plain NegotiateTask still hits the cache.
+	again, err := pm.NegotiateTask(context.Background(), input, projectCtx, make(chan string))
+	if err != nil || again.Title != "First" || len(mock.Requests) != 1 {
+		t.Fatalf("cached negotiate = %q, %v, runner calls %d; want First, nil, 1", again.Title, err, len(mock.Requests))
+	}
+
+	// RenegotiateTask must call the runner again despite the cache entry.
+	fresh, err := pm.RenegotiateTask(context.Background(), input, projectCtx, make(chan string))
+	if err != nil || fresh.Title != "Second" || len(mock.Requests) != 2 {
+		t.Fatalf("renegotiate = %q, %v, runner calls %d; want Second, nil, 2", fresh.Title, err, len(mock.Requests))
+	}
+
+	// The fresh result replaces the cache entry.
+	cached, err := pm.NegotiateTask(context.Background(), input, projectCtx, make(chan string))
+	if err != nil || cached.Title != "Second" || len(mock.Requests) != 2 {
+		t.Fatalf("post-renegotiate cache = %q, %v, runner calls %d; want Second, nil, 2", cached.Title, err, len(mock.Requests))
+	}
+}

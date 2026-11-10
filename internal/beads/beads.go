@@ -22,7 +22,7 @@ type Issue struct {
 	Description string `json:"description"`
 	Status      string `json:"status"`
 	Priority    int    `json:"priority"`
-	Type        string `json:"type"`
+	Type        string `json:"issue_type"`
 }
 
 // Available reports whether the `bd` binary is on PATH.
@@ -32,14 +32,15 @@ func Available() bool {
 }
 
 // Create registers a new issue and returns its ID. Output is parsed from
-// `bd q` (quick capture) which prints only the issue ID. labels are attached
+// `bd create --silent`, which prints only the issue ID. labels are attached
 // at creation time (may be empty).
 func Create(ctx context.Context, root, title, description string, priority int, labels ...string) (string, error) {
 	if !Available() {
 		return "", fmt.Errorf("bd not installed")
 	}
 	args := []string{
-		"q", title,
+		"create", "--silent",
+		"--title", title,
 		"--description", description,
 		"--type", "task",
 		"--priority", fmt.Sprintf("%d", priority),
