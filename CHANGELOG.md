@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-10
+
 ### Changed
 - TUI run screen rebuilt as a workflow cockpit: workflow spine with subtask
   tree, Activity-first center tabs (Plan, Agents, Tokens, Files, Tests,
@@ -27,6 +29,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calls), and subtask usage. The inspector and Agents tab gain sparklines and
   per-agent call counts.
 - The focused pane title shows a `▌` marker.
+
+### Fixed
+- Beads integration works with bd 1.3.1 (issues are created via `bd create`
+  and the issue type is decoded), so sub-task tracking, Resume Task and Done
+  Tasks work again.
+- Regenerate on the task-spec gate now produces a fresh spec instead of a
+  cached one.
+- `q` in the Ctrl+R requirements picker goes back instead of quitting.
+  Quitting decsr stops running agents instead of leaving them orphaned.
+- PM chat (Ctrl+C) uses the configured PM runner, model and effort.
+- Starting a new task no longer deletes the open `decsr.log` and
+  `runlog.jsonl`.
+- New Task and Reset Artifacts ask for confirmation when they would delete a
+  plan or report, and Reset shows feedback. `r` resumes, `d` opens Done Tasks,
+  and Home/End navigate the menu.
+- Cockpit: the elapsed clock ticks while waiting, the inspector toggle hides
+  the run pane, stage timers are measured correctly, and token counters
+  survive pause/resume.
+- Cockpit tabs: Files lists only files written in this run and keeps
+  extensions visible, Tests labels are shown once, and Activity and Output
+  follow the newest entries.
+- The inline artifact editor can add lines in long files and warns before
+  discarding unsaved edits.
+- Global Settings keeps each agent's effort when the model changes, and the
+  Model Memory input replaces the prefilled value.
+- Build checks no longer leave a compiled binary in the project.
+- `decsr clean` keeps project memory and prints a readable summary.
+  `decsr report` explains when there is nothing to show and lists the
+  pipeline reports. `decsr agent` lists the current roles.
+- Smaller fixes: attach picker Home/End/PgUp/PgDn, recent-project removal
+  writes `[]`, the module-path prompt handles a go.mod without a module line,
+  prompt-delete feedback, the summary counts QA test files, and the research
+  report heading is no longer glued to narration.
 
 ## [0.2.0] - 2026-10-28
 
