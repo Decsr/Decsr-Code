@@ -864,6 +864,7 @@ func TestWorkspaceViewsFitSize(t *testing.T) {
 		},
 		"status": func(h *wsHarness) { h.toGraph(); h.key("tab"); h.typeCmd("/status") },
 		"cost":   func(h *wsHarness) { h.toGraph(); h.key("tab"); h.typeCmd("/cost") },
+		"plugin": func(h *wsHarness) { h.typeCmd("/plugin") },
 		"custom": func(h *wsHarness) {
 			wsWriteCommand(t, h.root, "review", "# Review the change\nReview $ARGUMENTS")
 			h.key("/")

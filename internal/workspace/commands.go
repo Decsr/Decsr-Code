@@ -9,17 +9,16 @@ import (
 	"strings"
 
 	"github.com/Decsr/Decsr-Code/internal/config"
+	"github.com/Decsr/Decsr-Code/internal/plugins"
 )
 
 // maxCommandBytes caps one custom command file.
 const maxCommandBytes = 64 * 1024
 
-// maxDescriptionRunes is the length of a description taken from the body.
-const maxDescriptionRunes = 60
-
 // CustomCommand is a user-defined /name command read from a markdown file.
 type CustomCommand struct {
-	Name, Description, Body, Source string // Source: "project" or "user"
+	Name, Description, Body, Source string // Source: "project", "user" or "plugin:<name>"
+	ArgHint                         string // shown after the name in the palette
 }
 
 // LoadCustomCommands reads the *.md files of <root>/.decsr/commands and then
@@ -44,13 +43,13 @@ func LoadCustomCommands(projectRoot string) []CustomCommand {
 			if !ok {
 				continue
 			}
-			desc, body := splitCommand(body)
+			desc, hint, body := plugins.SplitCommand(body)
 			desc = Sanitize(desc)
 			if body == "" {
 				continue
 			}
 			seen[name] = true
-			out = append(out, CustomCommand{Name: name, Description: desc, Body: body, Source: source})
+			out = append(out, CustomCommand{Name: name, Description: desc, Body: body, Source: source, ArgHint: hint})
 		}
 	}
 	load(filepath.Join(projectRoot, config.GlobalDir, "commands"), "project")
@@ -75,21 +74,6 @@ func readCommandFile(path string) (string, bool) {
 	return string(data), true
 }
 
-// splitCommand returns the description and the body of a command file: a
-// leading "# heading" line becomes the description and leaves the body;
-// otherwise the description is the first 60 characters of the body.
-func splitCommand(text string) (desc, body string) {
-	text = strings.TrimSpace(text)
-	if first, rest, _ := strings.Cut(text, "\n"); strings.HasPrefix(first, "# ") {
-		return strings.TrimSpace(strings.TrimPrefix(first, "# ")), strings.TrimSpace(rest)
-	}
-	desc = strings.Join(strings.Fields(text), " ")
-	if r := []rune(desc); len(r) > maxDescriptionRunes {
-		desc = string(r[:maxDescriptionRunes])
-	}
-	return desc, text
-}
-
 // Expand returns the task text: every $ARGUMENTS in the body replaced by the
 // trimmed args. A body without $ARGUMENTS gets the args appended after a blank
 // line when there are any.
@@ -102,4 +86,17 @@ func (c CustomCommand) Expand(args string) string {
 		return c.Body + "\n\n" + args
 	}
 	return strings.ReplaceAll(c.Body, "$ARGUMENTS", args)
+}
+
+// PluginCommands returns the commands of the enabled plugins as custom
+// commands named "<plugin>:<command>" with the source "plugin:<plugin>".
+func PluginCommands(set plugins.Set) []CustomCommand {
+	var out []CustomCommand
+	for _, c := range set.Commands() {
+		out = append(out, CustomCommand{
+			Name: c.Plugin + ":" + c.Name, Description: Sanitize(c.Description), Body: c.Body,
+			Source: "plugin:" + c.Plugin, ArgHint: Sanitize(c.ArgHint),
+		})
+	}
+	return out
 }

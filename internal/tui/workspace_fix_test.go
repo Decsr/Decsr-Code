@@ -318,14 +318,14 @@ func TestWorkspaceFramesAndFit(t *testing.T) {
 
 func TestPickRowKeepsDescription(t *testing.T) {
 	it := wsPickItem{kind: "role", name: "docs_writer", desc: "Writes user docs for everything", meta: "claude:very-long-model-name-for-testing", suggested: true}
-	row := ansi.Strip(renderPickRow(it, false, 54))
+	row := ansi.Strip(renderPickRow(it, false, 54, 14))
 	if ansi.StringWidth(row) != 54 {
 		t.Fatalf("row width %d", ansi.StringWidth(row))
 	}
 	if !strings.Contains(row, "Writes user") {
 		t.Fatalf("description crowded out: %q", row)
 	}
-	row = ansi.Strip(renderPickRow(wsPickItem{kind: "role", name: "qa", desc: "Writes tests", meta: "deepseek-v4.1-flash"}, false, 66))
+	row = ansi.Strip(renderPickRow(wsPickItem{kind: "role", name: "qa", desc: "Writes tests", meta: "deepseek-v4.1-flash"}, false, 66, 14))
 	if !strings.Contains(row, "deepseek-v4.1-flash") || !strings.Contains(row, "Writes tests") {
 		t.Fatalf("row = %q", row)
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/agent"
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/executil"
+	"github.com/Decsr/Decsr-Code/internal/plugins"
 	"github.com/Decsr/Decsr-Code/internal/runner"
 	"github.com/Decsr/Decsr-Code/internal/skills"
 )
@@ -125,7 +126,10 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 		return Result{}, fmt.Errorf("runner for role %q: %w", role.Name, err)
 	}
 	rolePrompt := ""
-	if !role.Builtin {
+	switch {
+	case role.Plugin:
+		rolePrompt = role.Prompt
+	case !role.Builtin:
 		rolePrompt = role.Description
 	}
 	skillBlock, skillWarnings := x.userSkills(role.UserSkills)
@@ -177,7 +181,13 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 func (x *executor) userSkills(names []string) (block string, warnings []string) {
 	var sb strings.Builder
 	for _, name := range names {
-		doc, err := config.LoadUserSkill(x.root, name)
+		var doc string
+		var err error
+		if config.ValidQualifiedName(name) {
+			doc, err = plugins.LoadSkill(x.root, name)
+		} else {
+			doc, err = config.LoadUserSkill(x.root, name)
+		}
 		switch {
 		case errors.Is(err, os.ErrNotExist):
 			warnings = append(warnings, fmt.Sprintf("skill %q not found", name))

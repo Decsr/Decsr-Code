@@ -14,6 +14,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/lang"
+	"github.com/Decsr/Decsr-Code/internal/plugins"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -25,7 +26,8 @@ type wsCommand struct {
 	aliases []string
 	args    string // shown after the name, e.g. "[args]"
 	desc    string
-	tag     string // "(project)" | "(user)" for custom commands
+	hint    string // argument hint from the command file, shown in the palette
+	tag     string // "(project)" | "(user)" | "(plugin:<name>)" for custom commands
 	run     func(m workspaceModel, args string) (tea.Model, tea.Cmd)
 }
 
@@ -48,6 +50,7 @@ func (m workspaceModel) commandList() []wsCommand {
 			m.pickNode = ""
 			return m, nil
 		}},
+		{name: "/plugin", aliases: []string{"/plugins"}, args: "[enable|disable <name>|reload]", desc: "list plugins, enable, disable or reload them", run: workspaceModel.cmdPlugin},
 		{name: "/status", desc: "project, session, roles and limits", run: workspaceModel.cmdStatus},
 		{name: "/cost", desc: "tokens per node and per role", run: workspaceModel.cmdCost},
 		{name: "/export", desc: "write this session to a markdown file", run: workspaceModel.cmdExport},
@@ -65,7 +68,7 @@ func (m workspaceModel) commandList() []wsCommand {
 			taken[a] = true
 		}
 	}
-	for _, cc := range m.custom {
+	for _, cc := range append(append([]workspace.CustomCommand(nil), m.custom...), workspace.PluginCommands(m.plug)...) {
 		name := "/" + cc.Name
 		if taken[name] {
 			continue
@@ -76,7 +79,7 @@ func (m workspaceModel) commandList() []wsCommand {
 		if desc == "" {
 			desc = "custom command"
 		}
-		cmds = append(cmds, wsCommand{name: name, args: "[args]", desc: desc, tag: "(" + cc.Source + ")",
+		cmds = append(cmds, wsCommand{name: name, args: "[args]", hint: cc.ArgHint, desc: desc, tag: "(" + cc.Source + ")",
 			run: func(m workspaceModel, args string) (tea.Model, tea.Cmd) {
 				return m.sendTask(cc.Expand(args), strings.TrimSpace(name+" "+args))
 			}})
@@ -342,9 +345,9 @@ func (m workspaceModel) applyProfile(name string) (tea.Model, tea.Cmd) {
 		m.say("error", oneLine(err.Error()))
 		return m, nil
 	}
-	m.cfg = c
+	m.cfg = m.withPluginAgents(c)
 	if m.eng != nil {
-		if err := m.eng.Replace(func(g *workspace.Graph) { workspace.Reconcile(g, c) }); err != nil {
+		if err := m.eng.Replace(func(g *workspace.Graph) { workspace.Reconcile(g, m.cfg) }); err != nil {
 			m.say("error", oneLine(err.Error()))
 		}
 		m.g = m.eng.Snapshot()
@@ -370,6 +373,9 @@ func (m workspaceModel) doDeleteProfile(name string) workspaceModel {
 func (m workspaceModel) effectiveAgents() map[string]config.AgentConfig {
 	out := map[string]config.AgentConfig{}
 	for _, r := range workspace.Roles(m.cfg) {
+		if r.Plugin { // plugin roles are never saved
+			continue
+		}
 		own := m.cfg.Agents[r.Name]
 		ac := config.AgentConfig{Runner: own.Runner, Model: own.Model, Effort: own.Effort, UserSkills: own.UserSkills}
 		if !r.Builtin {
@@ -848,4 +854,153 @@ func orDefault(s, def string) string {
 		return def
 	}
 	return s
+}
+
+// ── /plugin ──────────────────────────────────────────────────────────────────
+
+// withPluginAgents returns c with the roles of the loaded plugins, which are
+// never read from or written to a config file.
+func (m workspaceModel) withPluginAgents(c config.Config) config.Config {
+	c.PluginAgents = m.plug.AgentRoles()
+	return c
+}
+
+// reloadPlugins rescans the plugin folders and refreshes the roles; nodes
+// whose plugin role is gone lose their assignment.
+func (m workspaceModel) reloadPlugins() workspaceModel {
+	m.plug = m.deps.loadPlugins()
+	m.cfg = m.withPluginAgents(m.cfg)
+	if m.eng != nil {
+		cfg := m.cfg
+		if err := m.eng.Replace(func(g *workspace.Graph) { workspace.Reconcile(g, cfg) }); err != nil {
+			m.say("error", oneLine(err.Error()))
+		}
+		m.g = m.eng.Snapshot()
+	}
+	return m
+}
+
+func (m workspaceModel) cmdPlugin(args string) (tea.Model, tea.Cmd) {
+	f := strings.Fields(args)
+	if len(f) == 0 {
+		return m.openInfo("Plugins", m.pluginLines()), nil
+	}
+	switch {
+	case f[0] == "reload" && len(f) == 1:
+		if m.busy() {
+			return m.refuseBusy()
+		}
+		m = m.reloadPlugins()
+		m.say("system", fmt.Sprintf("plugins reloaded: %d found", len(m.plug.Plugins)))
+		return m, nil
+	case (f[0] == "enable" || f[0] == "disable") && len(f) == 2:
+		if m.busy() { // roles would change under the running nodes
+			return m.refuseBusy()
+		}
+		found := false
+		for _, p := range m.plug.Plugins {
+			found = found || p.Name == f[1]
+		}
+		if !found {
+			m.say("error", fmt.Sprintf("no plugin named %q (see /plugin)", workspace.Sanitize(f[1])))
+			return m, nil
+		}
+		on := f[0] == "enable"
+		if err := plugins.SetEnabled(f[1], on); err != nil {
+			m.say("error", oneLine(err.Error()))
+			return m, nil
+		}
+		m = m.reloadPlugins()
+		m.say("system", fmt.Sprintf("plugin %s %sd", f[1], f[0]))
+		return m, nil
+	}
+	m.say("error", "usage: /plugin [enable <name> | disable <name> | reload]")
+	return m, nil
+}
+
+// pluginListWidth is the width the ids of a /plugin list wrap at, so a line
+// fits the 80-column overlay after the 11-cell label.
+const pluginListWidth = 60
+
+// pluginLines is the text of the /plugin overlay.
+func (m workspaceModel) pluginLines() []string {
+	if len(m.plug.Plugins) == 0 {
+		lines := []string{
+			"No plugins found.",
+			"",
+			"Put a plugin folder (with .claude-plugin/plugin.json) in",
+			"  " + filepath.Join(m.root, config.GlobalDir, "plugins") + " (this project) or",
+			"  ~/" + config.GlobalDir + "/plugins (all projects).",
+			"scripts/install-plugins.sh installs a recommended set.",
+		}
+		if w := m.pluginWarnings(); len(w) > 0 {
+			lines = append(append(lines, ""), w...)
+		}
+		return lines
+	}
+	// list wraps the ids under the label instead of cutting them off.
+	list := func(label string, items []string) []string {
+		if len(items) == 0 {
+			return []string{kv("  "+label, "none")}
+		}
+		var out []string
+		for i, l := range wrapText(strings.Join(items, ", "), pluginListWidth) {
+			if i == 0 {
+				out = append(out, kv("  "+label, l))
+			} else {
+				out = append(out, strings.Repeat(" ", 11)+l)
+			}
+		}
+		return out
+	}
+	var lines []string
+	for i, p := range m.plug.Plugins {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		state := "enabled"
+		if !p.Enabled {
+			state = "disabled"
+		}
+		head := p.Name
+		if p.Version != "" {
+			head += " " + p.Version
+		}
+		lines = append(lines, head+" · "+p.Scope+" · "+state)
+		if p.Description != "" {
+			lines = append(lines, "  "+p.Description)
+		}
+		if !p.Enabled {
+			lines = append(lines, "  (not loaded; /plugin enable "+p.Name+")")
+		} else {
+			var cmds, skills, agents []string
+			for _, c := range p.Commands {
+				cmds = append(cmds, "/"+p.Name+":"+c.Name)
+			}
+			for _, s := range p.Skills {
+				skills = append(skills, s.ID)
+			}
+			for _, a := range p.Agents {
+				agents = append(agents, a.Role())
+			}
+			lines = append(lines, list("Commands", cmds)...)
+			lines = append(lines, list("Skills", skills)...)
+			lines = append(lines, list("Agents", agents)...)
+		}
+		if p.HasHooks || p.HasMCP {
+			lines = append(lines, "  Note: hooks and MCP servers are not used by decsr")
+		}
+	}
+	if w := m.pluginWarnings(); len(w) > 0 {
+		lines = append(append(lines, ""), w...)
+	}
+	return lines
+}
+
+func (m workspaceModel) pluginWarnings() []string {
+	var out []string
+	for _, w := range m.plug.Warnings {
+		out = append(out, "! "+workspace.Sanitize(w))
+	}
+	return out
 }

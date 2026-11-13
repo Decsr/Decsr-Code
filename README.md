@@ -72,7 +72,8 @@ Each project keeps its own sessions in `.decsr/sessions/`: `decsr resume` (or
 nodes into a summary. `/profile` saves the role settings once in
 `~/.decsr/profiles/` and applies them to any project, `/project` switches
 project, and markdown files in `.decsr/commands/` and `.decsr/skills/` add your
-own `/commands` and role skills. The classic pipeline stays available from the
+own `/commands` and role skills. Claude-format plugins in `.decsr/plugins/` add
+commands, skills and agent roles (`/plugin`). The classic pipeline stays available from the
 Home menu (`/config`). See [`doc/workspace.md`](doc/workspace.md).
 
 ### Interactive TUI

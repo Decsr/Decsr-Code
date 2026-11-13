@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Plugins: Claude-format plugins in `.decsr/plugins/` and `~/.decsr/plugins/`
+  add commands (`/<plugin>:<command>`), skills (`<plugin>:<skill>`, usable in a
+  role's `skills:`) and agent roles (`<plugin>:<agent>`). `/plugin` lists them
+  and enables, disables or reloads one. Frontmatter (`description`,
+  `argument-hint`) is also read in `.decsr/commands/*.md`.
+- Workspace suggested prompts: the empty prompt shows the likely next step as
+  ghost text (fix a failed Build & test, `/compact` or a review when all
+  nodes are done, `/resume` in a fresh session). `Right` accepts it, `Esc`
+  hides it.
+- `scripts/install-plugins.sh` installs a recommended plugin set into
+  `~/.decsr/plugins` and writes a `plugins` profile that maps their skills to
+  the built-in roles (`--dry-run`, `--uninstall`).
+
 ## [0.4.0] - 2026-11-13
 
 ### Added

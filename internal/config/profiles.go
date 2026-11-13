@@ -177,8 +177,19 @@ func ApplyProfile(root, name string) error {
 	for _, role := range roles {
 		pa := p.Agents[role]
 		existing := cfg.Agents[role]
-		existing.Runner, existing.Model, existing.Effort = pa.Runner, pa.Model, pa.Effort
-		existing.Description, existing.ReadOnly, existing.UserSkills = pa.Description, pa.ReadOnly, pa.UserSkills
+		// An empty runner, model, effort or description keeps the project value.
+		for _, f := range []struct {
+			dst *string
+			src string
+		}{
+			{&existing.Runner, pa.Runner}, {&existing.Model, pa.Model},
+			{&existing.Effort, pa.Effort}, {&existing.Description, pa.Description},
+		} {
+			if f.src != "" {
+				*f.dst = f.src
+			}
+		}
+		existing.ReadOnly, existing.UserSkills = pa.ReadOnly, pa.UserSkills
 		cfg.Agents[role] = existing
 	}
 	cfg.Project.Profile = name

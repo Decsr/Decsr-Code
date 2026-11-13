@@ -167,13 +167,17 @@ func ParseSplitWith(task, output string, roles []Role, existing []string) (*Grap
 		}
 	}
 
+	known := map[string]bool{}
+	for _, r := range roles {
+		known[r.Name] = true
+	}
 	declared := map[string]string{} // lead-declared new roles: name -> description
 	var declaredOrder []string
 	if raw, ok := section(output, markerNewRoles); ok {
 		var nr []NewRole
 		if err := unmarshalArray(raw, &nr); err == nil {
 			for _, r := range nr {
-				name := normalizeRole(r.Name)
+				name := splitRole(r.Name, known)
 				if name == "" {
 					continue
 				}
@@ -187,10 +191,6 @@ func ParseSplitWith(task, output string, roles []Role, existing []string) (*Grap
 
 	ids := splitIDs(tasks)
 
-	known := map[string]bool{}
-	for _, r := range roles {
-		known[r.Name] = true
-	}
 	proposed := map[string]bool{}
 	var proposedOrder []string
 	for i, t := range tasks {
@@ -215,7 +215,7 @@ func ParseSplitWith(task, output string, roles []Role, existing []string) (*Grap
 			}
 			nd.DependsOn = append(nd.DependsOn, d)
 		}
-		if role := normalizeRole(t.Role); role != "" {
+		if role := splitRole(t.Role, known); role != "" {
 			nd.SuggestedRole = role
 			if !known[role] && !proposed[role] {
 				proposed[role] = true
@@ -519,6 +519,15 @@ func shortReason(err error) string {
 		r = r[:100] + "..."
 	}
 	return r
+}
+
+// splitRole is normalizeRole, except that the exact name of a known plugin
+// role ("<plugin>:<agent>") is kept as it is.
+func splitRole(s string, known map[string]bool) string {
+	if name := strings.TrimSpace(s); config.ValidQualifiedName(name) && known[name] {
+		return name
+	}
+	return normalizeRole(s)
 }
 
 // normalizeRole lower-cases a role name, maps characters outside [a-z0-9_]
