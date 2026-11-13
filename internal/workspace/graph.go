@@ -46,6 +46,7 @@ type Node struct {
 	Files         []string  `json:"files,omitempty"`
 	Observed      []string  `json:"observed,omitempty"` // changed on disk by the agent's own tools
 	Warnings      []string  `json:"warnings,omitempty"`
+	Skills        []string  `json:"skills,omitempty"` // plugin skill ids the lead chose for this node
 	Error         string    `json:"error,omitempty"`
 	InputTokens   int       `json:"input_tokens,omitempty"`
 	OutputTokens  int       `json:"output_tokens,omitempty"`
@@ -76,6 +77,22 @@ type NewRole struct {
 	Description string `json:"description"`
 }
 
+// Plugin request states.
+const (
+	PluginPending   = "pending"
+	PluginInstalled = "installed"
+	PluginDeclined  = "declined"
+)
+
+// PluginRequest is a catalog plugin the lead asked for. Status is pending
+// until the user answered, then installed (also for an enabled one) or
+// declined.
+type PluginRequest struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason,omitempty"`
+	Status string `json:"status"`
+}
+
 // Graph is the whole workspace: the task and its nodes.
 type Graph struct {
 	Task     string    `json:"task"`
@@ -85,6 +102,34 @@ type Graph struct {
 	// FixSeq is the highest fix-node number handed out; F<n> is never reused,
 	// even after Compact removed the earlier fix nodes.
 	FixSeq int `json:"fix_seq,omitempty"`
+	// PluginRequests are the plugins the lead asked for, with the answers.
+	PluginRequests []PluginRequest `json:"plugin_requests,omitempty"`
+	// SplitWarnings are the notes of the split that produced the graph (an
+	// unusable skill or plugin dropped). Not saved.
+	SplitWarnings []string `json:"-"`
+}
+
+// PendingPlugins returns the plugin requests nobody answered yet.
+func (g *Graph) PendingPlugins() []PluginRequest {
+	var out []PluginRequest
+	for _, r := range g.PluginRequests {
+		if r.Status == PluginPending {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// SetPluginStatus sets the status of the request for name; false when there
+// is none.
+func (g *Graph) SetPluginStatus(name, status string) bool {
+	for i := range g.PluginRequests {
+		if g.PluginRequests[i].Name == name {
+			g.PluginRequests[i].Status = status
+			return true
+		}
+	}
+	return false
 }
 
 // highestFix is the highest F<number> among the node IDs (0 for none).
@@ -254,9 +299,12 @@ func (g *Graph) Clone() *Graph {
 		nn.Files = append([]string(nil), n.Files...)
 		nn.Observed = append([]string(nil), n.Observed...)
 		nn.Warnings = append([]string(nil), n.Warnings...)
+		nn.Skills = append([]string(nil), n.Skills...)
 		c.Nodes[i] = &nn
 	}
 	c.NewRoles = append([]NewRole(nil), g.NewRoles...)
+	c.PluginRequests = append([]PluginRequest(nil), g.PluginRequests...)
+	c.SplitWarnings = append([]string(nil), g.SplitWarnings...)
 	return &c
 }
 
@@ -370,6 +418,7 @@ func (g *Graph) Append(add *Graph, nextID int) (newNext int, idMap map[string]st
 		c.Files = append([]string(nil), n.Files...)
 		c.Observed = append([]string(nil), n.Observed...)
 		c.Warnings = append([]string(nil), n.Warnings...)
+		c.Skills = append([]string(nil), n.Skills...)
 		g.Nodes = append(g.Nodes, &c)
 	}
 	if g.Task == "" {
@@ -386,6 +435,17 @@ func (g *Graph) Append(add *Graph, nextID int) (newNext int, idMap map[string]st
 		if !have[r.Name] {
 			have[r.Name] = true
 			g.NewRoles = append(g.NewRoles, r)
+		}
+	}
+
+	asked := make(map[string]bool, len(g.PluginRequests))
+	for _, r := range g.PluginRequests {
+		asked[r.Name] = true
+	}
+	for _, r := range add.PluginRequests {
+		if !asked[r.Name] { // an answered request stays answered
+			asked[r.Name] = true
+			g.PluginRequests = append(g.PluginRequests, r)
 		}
 	}
 

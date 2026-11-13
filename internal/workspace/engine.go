@@ -196,6 +196,30 @@ func (e *Engine) Assign(id, role string) error {
 	return nil
 }
 
+// SetSkills sets the plugin skills of a todo or failed work node (the role's
+// own skills are not part of the list). Ids that are not well formed are
+// dropped.
+func (e *Engine) SetSkills(id string, skills []string) error {
+	e.mu.Lock()
+	n := e.g.Node(id)
+	switch {
+	case n == nil:
+		e.mu.Unlock()
+		return fmt.Errorf("unknown node %s", id)
+	case n.Kind != KindWork:
+		e.mu.Unlock()
+		return fmt.Errorf("node %s does not take skills", id)
+	case !editable(n):
+		e.mu.Unlock()
+		return fmt.Errorf("node %s is %s and its skills cannot be changed", id, n.Status)
+	}
+	n.Skills = validSkillIDs(skills)
+	err := e.saveLocked()
+	e.mu.Unlock()
+	e.reportSave(err)
+	return nil
+}
+
 // AcceptSuggestions assigns the suggested role of every unassigned work node
 // whose suggestion is defined. It returns how many nodes were assigned.
 func (e *Engine) AcceptSuggestions(defined func(string) bool) int {

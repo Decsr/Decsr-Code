@@ -50,7 +50,7 @@ func (m workspaceModel) commandList() []wsCommand {
 			m.pickNode = ""
 			return m, nil
 		}},
-		{name: "/plugin", aliases: []string{"/plugins"}, args: "[enable|disable <name>|reload]", desc: "list plugins, enable, disable or reload them", run: workspaceModel.cmdPlugin},
+		{name: "/plugin", aliases: []string{"/plugins"}, args: "[available|install <name>|enable|disable <name>|reload]", desc: "list plugins, see or install catalog plugins, enable, disable or reload", run: workspaceModel.cmdPlugin},
 		{name: "/status", desc: "project, session, roles and limits", run: workspaceModel.cmdStatus},
 		{name: "/cost", desc: "tokens per node and per role", run: workspaceModel.cmdCost},
 		{name: "/export", desc: "write this session to a markdown file", run: workspaceModel.cmdExport},
@@ -885,7 +885,15 @@ func (m workspaceModel) cmdPlugin(args string) (tea.Model, tea.Cmd) {
 	if len(f) == 0 {
 		return m.openInfo("Plugins", m.pluginLines()), nil
 	}
+	if m.installing != "" && f[0] != "available" {
+		m.say("error", "a plugin install is running; try again when it is done")
+		return m, nil
+	}
 	switch {
+	case f[0] == "available" && len(f) == 1:
+		return m.openInfo("Plugin catalog", m.catalogLines()), nil
+	case f[0] == "install" && len(f) == 2:
+		return m.cmdPluginInstall(f[1])
 	case f[0] == "reload" && len(f) == 1:
 		if m.busy() {
 			return m.refuseBusy()
@@ -914,7 +922,7 @@ func (m workspaceModel) cmdPlugin(args string) (tea.Model, tea.Cmd) {
 		m.say("system", fmt.Sprintf("plugin %s %sd", f[1], f[0]))
 		return m, nil
 	}
-	m.say("error", "usage: /plugin [enable <name> | disable <name> | reload]")
+	m.say("error", "usage: /plugin [available | install <name> | enable <name> | disable <name> | reload]")
 	return m, nil
 }
 
@@ -931,7 +939,8 @@ func (m workspaceModel) pluginLines() []string {
 			"Put a plugin folder (with .claude-plugin/plugin.json) in",
 			"  " + filepath.Join(m.root, config.GlobalDir, "plugins") + " (this project) or",
 			"  ~/" + config.GlobalDir + "/plugins (all projects).",
-			"scripts/install-plugins.sh installs a recommended set.",
+			"scripts/install-plugins.sh installs a recommended set;",
+			"/plugin available lists the plugins decsr can install.",
 		}
 		if w := m.pluginWarnings(); len(w) > 0 {
 			lines = append(append(lines, ""), w...)

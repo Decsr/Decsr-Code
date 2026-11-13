@@ -35,6 +35,9 @@ func (m workspaceModel) suggestion() string {
 func (m workspaceModel) suggestionText() string {
 	g := m.g
 	if g != nil && len(g.Nodes) > 0 {
+		if pend := g.PendingPlugins(); len(pend) > 0 {
+			return "/plugin install " + pend[0].Name
+		}
 		if c := g.Node("CHECK"); c != nil && c.Status == workspace.StatusFailed && !hasOpenFixNode(g, c) {
 			return wsSuggestFix
 		}
