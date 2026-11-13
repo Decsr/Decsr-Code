@@ -13,6 +13,7 @@ type Role struct {
 	Builtin     bool
 	ReadOnly    bool // reviews and reports only; never writes files
 	Agent       config.AgentConfig
+	UserSkills  []string // file-based skills (.decsr/skills/<name>.md)
 }
 
 var builtinDescriptions = map[string]string{
@@ -37,7 +38,7 @@ func Roles(cfg config.Config) []Role {
 	for _, name := range config.BuiltinRoles {
 		ac := cfg.Agents[name]
 		desc := builtinDescriptions[name]
-		out = append(out, Role{Name: name, Description: desc, Builtin: true, ReadOnly: readOnlyBuiltin[name], Agent: ac})
+		out = append(out, Role{Name: name, Description: desc, Builtin: true, ReadOnly: readOnlyBuiltin[name], Agent: ac, UserSkills: ac.UserSkills})
 	}
 	var custom []string
 	for name := range cfg.Agents {
@@ -59,7 +60,7 @@ func Roles(cfg config.Config) []Role {
 			ac.Effort = pm.Effort
 		}
 		ac.Skills = nil
-		out = append(out, Role{Name: name, Description: ac.Description, ReadOnly: ac.ReadOnly, Agent: ac})
+		out = append(out, Role{Name: name, Description: Sanitize(ac.Description), ReadOnly: ac.ReadOnly, Agent: ac, UserSkills: ac.UserSkills})
 	}
 	return out
 }

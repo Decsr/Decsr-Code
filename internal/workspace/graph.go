@@ -4,6 +4,7 @@ package workspace
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -81,6 +82,22 @@ type Graph struct {
 	Title    string    `json:"title"`
 	Nodes    []*Node   `json:"nodes"`
 	NewRoles []NewRole `json:"new_roles,omitempty"`
+	// FixSeq is the highest fix-node number handed out; F<n> is never reused,
+	// even after Compact removed the earlier fix nodes.
+	FixSeq int `json:"fix_seq,omitempty"`
+}
+
+// highestFix is the highest F<number> among the node IDs (0 for none).
+func (g *Graph) highestFix() int {
+	top := 0
+	for _, n := range g.Nodes {
+		if isFixID(n.ID) {
+			if v, err := strconv.Atoi(n.ID[1:]); err == nil && v > top {
+				top = v
+			}
+		}
+	}
+	return top
 }
 
 // Validate checks unique non-empty IDs, existing dependencies, no self
@@ -287,12 +304,17 @@ func (g *Graph) AddFix(checkID, failure string) (*Node, error) {
 			failure = failure[1:]
 		}
 	}
+	seq := g.FixSeq
+	if top := g.highestFix(); top > seq {
+		seq = top
+	}
 	id := ""
-	for i := 1; ; i++ {
-		if id = fmt.Sprintf("F%d", i); g.Node(id) == nil {
+	for seq++; ; seq++ {
+		if id = fmt.Sprintf("F%d", seq); g.Node(id) == nil {
 			break
 		}
 	}
+	g.FixSeq = seq
 	f := &Node{
 		ID:            id,
 		Title:         "Fix: " + c.Title,
@@ -307,4 +329,187 @@ func (g *Graph) AddFix(checkID, failure string) (*Node, error) {
 	c.Error = ""
 	c.DependsOn = append(c.DependsOn, id)
 	return f, nil
+}
+
+// Append merges the work nodes of add into g under fresh IDs T<n>, T<n+1>, …
+// (n is at least nextID and above every T number already in g), rewrites their
+// dependencies, merges add's new roles and drops add's CHECK. g's CHECK (created
+// when missing) is moved last, depends on every work node, and is reset to
+// todo. It returns the next free number and the old-to-new ID map. add is not
+// modified. A dependency naming one of add's own keys follows the renumbering
+// (also when the key collides with an existing ID); one naming another work
+// node already in g is kept; any other dependency is dropped.
+func (g *Graph) Append(add *Graph, nextID int) (newNext int, idMap map[string]string) {
+	if m := g.nextWorkNumber(); nextID < m {
+		nextID = m
+	}
+	idMap = make(map[string]string)
+	for _, n := range add.Nodes {
+		if n.Kind == KindCheck {
+			continue
+		}
+		idMap[n.ID] = fmt.Sprintf("T%d", nextID)
+		nextID++
+	}
+	for _, n := range add.Nodes {
+		if n.Kind == KindCheck {
+			continue
+		}
+		c := *n
+		c.ID = idMap[n.ID]
+		c.DependsOn = nil
+		for _, d := range n.DependsOn {
+			if nd, ok := idMap[d]; ok {
+				c.DependsOn = append(c.DependsOn, nd)
+			} else if dep := g.Node(d); dep != nil && dep.Kind == KindWork {
+				// An existing node of g that add did not define itself.
+				c.DependsOn = append(c.DependsOn, d)
+			}
+		}
+		c.Commands = append([]string(nil), n.Commands...)
+		c.Files = append([]string(nil), n.Files...)
+		c.Observed = append([]string(nil), n.Observed...)
+		c.Warnings = append([]string(nil), n.Warnings...)
+		g.Nodes = append(g.Nodes, &c)
+	}
+	if g.Task == "" {
+		g.Task = add.Task
+	}
+	if g.Title == "" {
+		g.Title = add.Title
+	}
+	have := make(map[string]bool, len(g.NewRoles))
+	for _, r := range g.NewRoles {
+		have[r.Name] = true
+	}
+	for _, r := range add.NewRoles {
+		if !have[r.Name] {
+			have[r.Name] = true
+			g.NewRoles = append(g.NewRoles, r)
+		}
+	}
+
+	check := g.Node("CHECK")
+	if check == nil {
+		check = g.AddCheckDeferred()
+	} else {
+		for i, n := range g.Nodes {
+			if n == check {
+				g.Nodes = append(g.Nodes[:i], g.Nodes[i+1:]...)
+				break
+			}
+		}
+		g.Nodes = append(g.Nodes, check)
+	}
+	check.DependsOn = nil
+	for _, n := range g.Nodes {
+		if n.Kind == KindWork {
+			check.DependsOn = append(check.DependsOn, n.ID)
+		}
+	}
+	check.Status = StatusTodo
+	check.Error, check.Summary, check.Warnings = "", "", nil
+	return nextID, idMap
+}
+
+// Compact removes done work and fix nodes (CHECK stays) and drops their IDs
+// from the dependencies of the remaining nodes. A done node is folded only
+// when every node that depends on it (the CHECK node aside) is folded too, so
+// unfinished nodes keep the work they need. It returns the removed nodes in
+// Nodes order.
+func (g *Graph) Compact() (folded []*Node) {
+	gone := make(map[string]bool)
+	for _, n := range g.Nodes {
+		if n.Kind == KindWork && n.Status == StatusDone {
+			gone[n.ID] = true
+		}
+	}
+	// Greatest fixed point: drop candidates that still have a dependent staying.
+	for changed := true; changed; {
+		changed = false
+		for _, n := range g.Nodes {
+			if gone[n.ID] || n.Kind == KindCheck {
+				continue
+			}
+			for _, d := range n.DependsOn {
+				if gone[d] {
+					gone[d] = false
+					changed = true
+				}
+			}
+		}
+	}
+	for id, ok := range gone {
+		if !ok {
+			delete(gone, id)
+		}
+	}
+	if len(gone) == 0 {
+		return nil
+	}
+	kept := g.Nodes[:0:0]
+	for _, n := range g.Nodes {
+		if gone[n.ID] {
+			folded = append(folded, n)
+			continue
+		}
+		var deps []string
+		for _, d := range n.DependsOn {
+			if !gone[d] {
+				deps = append(deps, d)
+			}
+		}
+		n.DependsOn = deps
+		kept = append(kept, n)
+	}
+	g.Nodes = kept
+	return folded
+}
+
+// maxSummaryChars caps the compacted session summary.
+const maxSummaryChars = 12000
+
+// CompactSummary appends one line per folded node to prev:
+// "- T1 <title> [<role>]: <summary, first 400 chars> (files: a, b)". When the
+// result exceeds 12,000 characters the oldest lines are dropped.
+func CompactSummary(prev string, folded []*Node) string {
+	var lines []string
+	if p := strings.TrimSpace(prev); p != "" {
+		lines = strings.Split(p, "\n")
+	}
+	for _, n := range folded {
+		var sb strings.Builder
+		sb.WriteString("- " + n.ID + " " + n.Title)
+		if n.Role != "" {
+			sb.WriteString(" [" + n.Role + "]")
+		}
+		if s := strings.Join(strings.Fields(n.Summary), " "); s != "" {
+			if r := []rune(s); len(r) > 400 {
+				s = string(r[:400])
+			}
+			sb.WriteString(": " + s)
+		}
+		if files := n.AllFiles(); len(files) > 0 {
+			sb.WriteString(" (files: " + strings.Join(files, ", ") + ")")
+		}
+		lines = append(lines, sb.String())
+	}
+	total := func() int {
+		t := 0
+		for _, l := range lines {
+			t += len(l) + 1
+		}
+		return t - 1
+	}
+	for len(lines) > 1 && total() > maxSummaryChars {
+		lines = lines[1:]
+	}
+	out := strings.Join(lines, "\n")
+	for len(out) > maxSummaryChars { // a single oversized line
+		out = out[:maxSummaryChars]
+		for len(out) > 0 && !utf8.ValidString(out) {
+			out = out[:len(out)-1]
+		}
+	}
+	return out
 }

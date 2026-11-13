@@ -48,8 +48,8 @@ func main() {
 	case "agent":
 		agentCmd(os.Args[2:])
 	case "resume":
-		_, _ = fmt.Fprintln(os.Stderr, "resume not implemented yet")
-		os.Exit(2)
+		opts, _ := subcommandWorkspaceOptions("resume")
+		runCmdWith(os.Args[2:], opts)
 	case "report":
 		reportCmd(os.Args[2:])
 	case "monitor":
@@ -78,7 +78,7 @@ func usage() {
 	  task --description "..."            Run a unified task (feature, bugfix, refactor, or greenfield)
 	  task --from-file task.md            Read task description from a file
 	  (both task and run accept --no-context-pack to skip the context pack phase)
-	  resume                              Resume last run (not implemented)
+	  resume                              Open the Workspace with this project's saved sessions listed
 	  report                              Summarize last run artifacts
 	  monitor                             Open the control TUI against a running bus
 	  approve                             Create approval marker
@@ -87,7 +87,40 @@ func usage() {
 
 }
 
-func runCmd(args []string) {
+// workspaceStep is what the entry loop does after the Workspace closes.
+type workspaceStep int
+
+const (
+	stepQuit   workspaceStep = iota // leave decsr
+	stepMenu                        // open the classic Home menu
+	stepSwitch                      // reopen the Workspace in another project
+)
+
+// workspaceNext decides what follows a closed Workspace. A project switch
+// beats the menu; an empty result quits.
+func workspaceNext(r tui.WorkspaceResult) (workspaceStep, string) {
+	switch {
+	case r.SwitchProject != "":
+		return stepSwitch, r.SwitchProject
+	case r.OpenMenu:
+		return stepMenu, ""
+	}
+	return stepQuit, ""
+}
+
+// subcommandWorkspaceOptions reports whether sub is a sub-command that opens
+// the Workspace, and how.
+func subcommandWorkspaceOptions(sub string) (tui.WorkspaceOptions, bool) {
+	if sub == "resume" {
+		return tui.WorkspaceOptions{Resume: true}, true
+	}
+	return tui.WorkspaceOptions{}, false
+}
+
+func runCmd(args []string) { runCmdWith(args, tui.WorkspaceOptions{}) }
+
+// runCmdWith is runCmd with options for the first Workspace that opens.
+func runCmdWith(args []string, wsOpts tui.WorkspaceOptions) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	reqPath := fs.String("requirements", "", "path to requirements.md (omit to open picker)")
 	branch := fs.String("branch", "", "git branch to create and checkout")
@@ -166,15 +199,42 @@ func runCmd(args []string) {
 	// picks something else or quits.
 	if *reqPath == "" && !*dryRun && *ui != "plain" {
 		var result tui.StartupResult
+		_ = tui.SaveRecentProject(root) // so /project can come back to this project
 		for {
-			wsResult, err := tui.RunWorkspace(root, cfg)
+			wsResult, err := tui.RunWorkspace(root, cfg, wsOpts)
+			wsOpts = tui.WorkspaceOptions{} // only the first Workspace opens on the session list
 			if err != nil {
 				fatal(fmt.Errorf("workspace: %w", err))
 			}
-			if !wsResult.OpenMenu {
+			cfg = wsResult.Cfg
+			step, target := workspaceNext(wsResult)
+			if step == stepQuit {
 				return // user quit the Workspace
 			}
-			cfg = wsResult.Cfg
+			if step == stepSwitch {
+				if chErr := os.Chdir(target); chErr != nil {
+					// Stay in the current project and reopen the Workspace there.
+					_, _ = fmt.Fprintf(os.Stderr, "cannot switch to %s: %v\n", target, chErr)
+					time.Sleep(2 * time.Second)
+					continue
+				}
+				_ = tui.SaveRecentProject(target)
+				root = target
+				if reloadedCfg, loadErr := config.Load(root); loadErr == nil {
+					cfg = reloadedCfg
+				}
+				if *noContextPack {
+					cfg.Project.Context.Pack.Disable = true
+				}
+				ws, err = artifacts.EnsureWorkspace(root)
+				if err != nil {
+					fatal(err)
+				}
+				if logErr := logging.SetupFile(ws.Dir, logging.LogFileName); logErr != nil {
+					_, _ = fmt.Fprintf(os.Stderr, "warn: could not open log file: %v\n", logErr)
+				}
+				continue
+			}
 
 			result, err = tui.RunStartup(root, ws.Path(artifacts.RequirementsFile), cfg)
 			if err != nil {

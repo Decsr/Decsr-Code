@@ -60,13 +60,20 @@ Manual back-and-forth with AI coding assistants is slow, error-prone, and hard t
 
 ### Workspace
 
-`decsr` opens a chat box. Describe a task, a lead agent splits it into
-sub-tasks shown as a node graph, you assign a role to each node, and assigned
-nodes run in parallel (3 at a time by default). A final **Build & test** node
-checks the result. Nothing runs until you press `r` or `R`. Roles are plain
-data (a name, a description and a model), so you can add your own under
-`agents:` in `.decsr/project.yaml`. The classic pipeline stays available from
-the Home menu (`/menu`). See [`doc/workspace.md`](doc/workspace.md).
+`decsr` opens one screen: the node graph with a prompt under it. Describe a
+task, a lead agent splits it into sub-tasks shown as a node graph, you assign a
+role to each node, and assigned nodes run in parallel (3 at a time by default).
+A final **Build & test** node checks the result. Nothing runs until you press
+`r` or `R`. Roles are plain data (a name, a description and a model), so you can
+add your own under `agents:` in `.decsr/project.yaml`.
+
+Each project keeps its own sessions in `.decsr/sessions/`: `decsr resume` (or
+`/resume`) continues one, `/clear` starts a new one, `/compact` folds finished
+nodes into a summary. `/profile` saves the role settings once in
+`~/.decsr/profiles/` and applies them to any project, `/project` switches
+project, and markdown files in `.decsr/commands/` and `.decsr/skills/` add your
+own `/commands` and role skills. The classic pipeline stays available from the
+Home menu (`/config`). See [`doc/workspace.md`](doc/workspace.md).
 
 ### Interactive TUI
 
@@ -249,11 +256,12 @@ decsr help
 
 ## Usage
 
-**Interactive mode** — launch the Workspace: type a task, assign agents to the nodes, run them (`/menu` opens the classic pipeline and requirements picker):
+**Interactive mode** — launch the Workspace: type a task, assign agents to the nodes, run them (`/config` opens the classic pipeline and requirements picker):
 
 ```bash
 cd /path/to/your/project
-decsr
+decsr            # new session
+decsr resume     # pick a saved session of this project
 ```
 
 Or, from this repository:
@@ -308,7 +316,7 @@ A deep-space navy base with starlight text and azure, comet and star-gold accent
 
 ## Docs
 
-- [`doc/workspace.md`](doc/workspace.md) — Workspace: chat, node graph, roles, keys, and parallel runs
+- [`doc/workspace.md`](doc/workspace.md) — Workspace: node graph, sessions, profiles, commands, roles, keys, and parallel runs
 - [`doc/tui.md`](doc/tui.md) — workflow cockpit: panes, tabs, gates, keyboard shortcuts, and token notation
 - [`doc/memory.md`](doc/memory.md) — project memory details
 - [`doc/context-pack.md`](doc/context-pack.md) — context pack format, editing flow, and configuration

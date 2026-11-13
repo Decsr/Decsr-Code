@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,7 +74,11 @@ type executor struct {
 	newRunner      func(config.AgentConfig) (runner.LLMRunner, error)
 	checkCommands  func() []string // commands for a check node without Commands; may be nil
 	checkTimeout   time.Duration   // 0 = checkTimeout
+	summary        func() string   // session summary for the work context; may be nil
 }
+
+// maxSessionSummaryChars caps the session summary given to a worker.
+const maxSessionSummaryChars = 4000
 
 // NewExecutor returns the real Executor: work nodes go through the generic
 // worker, check nodes run their shell commands.
@@ -84,12 +89,19 @@ func NewExecutor(root string, cfg config.Config, projectContext string) Executor
 // NewExecutorWithChecks is NewExecutor with a lazy source of check commands:
 // a check node without Commands calls checkCommands when it runs.
 func NewExecutorWithChecks(root string, cfg config.Config, projectContext string, checkCommands func() []string) Executor {
+	return NewExecutorWithSummary(root, cfg, projectContext, checkCommands, nil)
+}
+
+// NewExecutorWithSummary is NewExecutorWithChecks plus a source of the session
+// summary, which work nodes get as an "Earlier in this session" section.
+func NewExecutorWithSummary(root string, cfg config.Config, projectContext string, checkCommands func() []string, summary func() string) Executor {
 	loader := skills.New("")
 	return &executor{
 		root:           root,
 		cfg:            cfg,
 		projectContext: projectContext,
 		checkCommands:  checkCommands,
+		summary:        summary,
 		newRunner: func(ac config.AgentConfig) (runner.LLMRunner, error) {
 			return runner.New(ac, loader, cfg.PromptLanguage)
 		},
@@ -116,6 +128,13 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	if !role.Builtin {
 		rolePrompt = role.Description
 	}
+	skillBlock, skillWarnings := x.userSkills(role.UserSkills)
+	if skillBlock != "" {
+		if rolePrompt != "" {
+			rolePrompt += "\n\n"
+		}
+		rolePrompt += skillBlock
+	}
 	before, snapOK := snapshotTree(x.root, maxSnapshotFiles)
 	res, err := agent.RunWorker(ctx, r, x.root, x.cfg, agent.WorkerRequest{
 		RolePrompt:  rolePrompt,
@@ -132,7 +151,7 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	if err != nil {
 		return Result{}, err
 	}
-	out := Result{Summary: res.Summary, Files: res.Files}
+	out := Result{Summary: res.Summary, Files: res.Files, Warnings: skillWarnings}
 	if snapOK {
 		if after, ok := snapshotTree(x.root, maxSnapshotFiles); ok {
 			out.Observed = diffSnapshots(before, after, res.Files)
@@ -153,11 +172,57 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	return out, nil
 }
 
+// userSkills loads the file-based skills of a role and returns them as a
+// <skills> block plus one warning for each skill that could not be loaded.
+func (x *executor) userSkills(names []string) (block string, warnings []string) {
+	var sb strings.Builder
+	for _, name := range names {
+		doc, err := config.LoadUserSkill(x.root, name)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			warnings = append(warnings, fmt.Sprintf("skill %q not found", name))
+			continue
+		case err != nil:
+			warnings = append(warnings, fmt.Sprintf("skill %q: %v", name, err))
+			continue
+		}
+		if sb.Len() == 0 {
+			sb.WriteString("<skills>\n")
+		}
+		fmt.Fprintf(&sb, "### %s\n%s\n", name, strings.TrimSpace(doc))
+	}
+	if sb.Len() > 0 {
+		sb.WriteString("</skills>")
+	}
+	return sb.String(), warnings
+}
+
+// tailLines keeps the most recent (last) whole lines of s within max bytes; a
+// single line over the cap is cut from its start.
+func tailLines(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := s[len(s)-max:]
+	if i := strings.IndexByte(cut, '\n'); i >= 0 {
+		return cut[i+1:]
+	}
+	for len(cut) > 0 && !utf8.RuneStart(cut[0]) {
+		cut = cut[1:]
+	}
+	return cut
+}
+
 // workContext is the project context plus the summaries of the node's
 // dependencies.
 func (x *executor) workContext(g *Graph, n *Node) string {
 	var sb strings.Builder
 	sb.WriteString(x.projectContext)
+	if x.summary != nil {
+		if sum := tailLines(strings.TrimSpace(x.summary()), maxSessionSummaryChars); sum != "" {
+			sb.WriteString("\n\n## Earlier in this session\n" + sum + "\n")
+		}
+	}
 	var deps []*Node
 	for _, id := range n.DependsOn {
 		if d := g.Node(id); d != nil {

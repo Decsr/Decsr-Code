@@ -380,6 +380,7 @@ type wsPickItem struct {
 	meta      string
 	suggested bool
 	readOnly  bool
+	skills    string // file-based skills of a role, "a, b"
 }
 
 // buildPickItems lists what the assignment picker offers for node n.
@@ -443,6 +444,9 @@ func renderPickRow(it wsPickItem, selected bool, inner int) string {
 			used += 12
 		}
 		desc := it.desc
+		if it.skills != "" {
+			desc = strings.TrimSuffix("skills: "+it.skills+" · "+desc, " · ")
+		}
 		if it.readOnly {
 			desc = strings.TrimSuffix("read-only · "+desc, " · ")
 		}
@@ -537,30 +541,16 @@ func renderRoleForm(nameView, descView string, focus int, canChange bool, inheri
 
 // ── Command list ─────────────────────────────────────────────────────────────
 
-type wsCmd struct{ name, desc string }
-
-var wsCommands = []wsCmd{
-	{"/resume", "load the saved graph"},
-	{"/roles", "list roles, create a new one"},
-	{"/menu", "classic menu: settings, projects, pipeline"},
-	{"/help", "show all keys"},
-	{"/quit", "leave the workspace"},
-}
-
-func wsCmdMatches(prefix string) []wsCmd {
-	var out []wsCmd
-	for _, c := range wsCommands {
-		if strings.HasPrefix(c.name, strings.ToLower(prefix)) {
-			out = append(out, c)
-		}
+// renderCmdList draws the command rows (one line each, exactly width cells),
+// at most maxRows of them, scrolled so the selected row stays visible.
+func renderCmdList(cmds []wsCommand, idx, width, maxRows int) []string {
+	start := 0
+	if maxRows > 0 && idx >= maxRows {
+		start = idx - maxRows + 1
 	}
-	return out
-}
-
-// renderCmdList draws the command rows (one line each, exactly width cells).
-func renderCmdList(cmds []wsCmd, idx, width int) []string {
 	var out []string
-	for i, c := range cmds {
+	for i := start; i < len(cmds) && (maxRows <= 0 || len(out) < maxRows); i++ {
+		c := cmds[i]
 		sel := i == idx
 		nameSt := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
 		descSt := lipgloss.NewStyle().Foreground(crt.dim)
@@ -570,7 +560,11 @@ func renderCmdList(cmds []wsCmd, idx, width int) []string {
 			nameSt = nameSt.Background(surfaceRaised)
 			descSt = descSt.Background(surfaceRaised)
 		}
-		row := nameSt.Render(marker+padRight(c.name, 9)) + descSt.Render(" "+c.desc)
+		desc := c.desc
+		if c.tag != "" {
+			desc += " " + c.tag
+		}
+		row := nameSt.Render(marker+padRight(c.name, 10)) + descSt.Render(" "+desc)
 		row = ansi.Truncate(row, width, "…")
 		if pad := width - ansi.StringWidth(row); pad > 0 {
 			st := lipgloss.NewStyle()
@@ -586,32 +580,43 @@ func renderCmdList(cmds []wsCmd, idx, width int) []string {
 
 // ── Help ─────────────────────────────────────────────────────────────────────
 
-func workspaceHelp() []helpSection {
+func workspaceHelp(cmds []wsCommand) []helpSection {
+	var cmdKeys []keyHint
+	for _, c := range cmds {
+		name := c.name
+		if c.args != "" {
+			name += " " + c.args
+		}
+		label := c.desc
+		if c.tag != "" {
+			label += " " + c.tag
+		}
+		cmdKeys = append(cmdKeys, keyHint{name, label})
+	}
 	return []helpSection{
-		{"Navigate", []keyHint{
-			{"← ↑ ↓ →", "move between nodes (also h j k l)"},
+		{"Focus", []keyHint{
+			{"Tab", "switch between the prompt and the graph"},
+			{"Esc", "prompt: go to the graph (closes the command list first)"},
+			{"/ or c", "graph: go to the prompt"},
+			{"Enter", "prompt: send the task or run the command"},
+			{"Alt+Enter", "prompt: new line"},
+			{"/usr/lib is gone", "a first word with a second / is sent as a task"},
+			{"//text", "sends /text as a task, not a command"},
+		}},
+		{"Graph keys (graph focus)", []keyHint{
+			{"← ↑ ↓ → / h j k l", "move between nodes"},
 			{"Enter / o", "open the full output of the node"},
-			{"i", "show or hide the inspector"},
-		}},
-		{"Assign", []keyHint{
-			{"a", "pick the agent for the node"},
-			{"A", "accept all suggestions that are defined roles"},
-		}},
-		{"Run", []keyHint{
-			{"r", "run the selected node"},
-			{"R", "run every assigned node as dependencies finish"},
-			{"s", "stop the selected node"},
-			{"S", "stop all running nodes"},
+			{"i", "show or hide the inspector (under 100 columns it opens over the graph; i or Esc closes it)"},
+			{"a / A", "pick the agent / accept all suggestions"},
+			{"r / R", "run the node / run every assigned node"},
+			{"s / S", "stop the node / stop all nodes"},
 			{"f", "add a fix node after a failed Build & test"},
-		}},
-		{"Other", []keyHint{
-			{"n", "new task (asks first if work is unfinished)"},
-			{"/", "commands: resume, roles, menu, help, quit"},
-			{"Enter", "start screen: send the task to the lead"},
-			{"Alt+Enter", "start screen: new line in the task"},
-			{"?", "this help"},
 			{"q", "quit (asks first while nodes run)"},
+		}},
+		{"Anywhere", []keyHint{
+			{"?", "this help (empty prompt or graph focus)"},
 			{"Ctrl+C ×2", "quit"},
 		}},
+		{"Commands", cmdKeys},
 	}
 }

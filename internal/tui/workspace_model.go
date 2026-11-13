@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,31 +37,76 @@ const (
 )
 
 const (
-	wsInputHint     = "Type a task…  (/ for commands)"
+	wsInputHint     = "Type a task or / for commands"
 	wsSplittingHint = "The lead is splitting your task…"
 )
 
 // WorkspaceResult tells the caller why the Workspace closed.
 type WorkspaceResult struct {
-	OpenMenu bool
-	Cfg      config.Config
+	OpenMenu      bool
+	SwitchProject string // directory to reopen the Workspace in; "" = stay
+	Cfg           config.Config
 }
 
-// wsDeps are the seams between the model and the outside world.
+// WorkspaceOptions configures how the Workspace opens.
+type WorkspaceOptions struct {
+	Resume bool // open with the session picker showing
+}
+
+// wsDeps are the seams between the model and the outside world. The optional
+// ones fall back to the real implementations when nil.
 type wsDeps struct {
-	split     func(ctx context.Context, task string, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error)
-	newEngine func(g *workspace.Graph) *workspace.Engine
+	// split asks the lead to split task; earlier is the session summary and
+	// the current nodes ("" for a fresh session). existing are the node IDs
+	// already in the graph and next the first number for new sub-tasks.
+	split func(ctx context.Context, task, earlier string, existing []string, next int, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error)
+	// newEngine builds the engine; summary gives the workers the session summary.
+	newEngine func(g *workspace.Graph, save func(*workspace.Graph) error, summary func() string) *workspace.Engine
 	saveRole  func(name string, ac config.AgentConfig) (config.Config, error) // persists and returns the reloaded config
 	checkCmds func() []string
+
+	listProfiles   func() []string
+	saveProfile    func(name string, agents map[string]config.AgentConfig) error
+	applyProfile   func(name string) (config.Config, error) // applies and returns the reloaded config
+	deleteProfile  func(name string) error
+	recent         func() []RecentProject
+	customCommands func() []workspace.CustomCommand
+}
+
+func (d *wsDeps) fillDefaults(root string) {
+	if d.listProfiles == nil {
+		d.listProfiles = config.ListProfiles
+	}
+	if d.saveProfile == nil {
+		d.saveProfile = config.SaveProfile
+	}
+	if d.applyProfile == nil {
+		d.applyProfile = func(name string) (config.Config, error) {
+			if err := config.ApplyProfile(root, name); err != nil {
+				return config.Config{}, err
+			}
+			return config.Load(root)
+		}
+	}
+	if d.deleteProfile == nil {
+		d.deleteProfile = config.DeleteProfile
+	}
+	if d.recent == nil {
+		d.recent = LoadRecentProjects
+	}
+	if d.customCommands == nil {
+		d.customCommands = func() []workspace.CustomCommand { return workspace.LoadCustomCommands(root) }
+	}
 }
 
 // wsLiveExec builds the real executor per node from the current config, so a
 // role created while the Workspace is open can run straight away.
 type wsLiveExec struct {
-	root   string
-	cfg    func() config.Config
-	pctx   func() string
-	checks func() []string
+	root    string
+	cfg     func() config.Config
+	pctx    func() string
+	checks  func() []string
+	summary func() string
 }
 
 func (e wsLiveExec) Run(ctx context.Context, g *workspace.Graph, n *workspace.Node, emit func(workspace.Event)) (workspace.Result, error) {
@@ -71,7 +117,7 @@ func (e wsLiveExec) Run(ctx context.Context, g *workspace.Graph, n *workspace.No
 	}
 	c.Agents = agents
 	runner.ApplyModelMemory(&c)
-	return workspace.NewExecutorWithChecks(e.root, c, e.pctx(), e.checks).Run(ctx, g, n, emit)
+	return workspace.NewExecutorWithSummary(e.root, c, e.pctx(), e.checks, e.summary).Run(ctx, g, n, emit)
 }
 
 // writeSplitRaw saves the lead's full raw answer of the last split to
@@ -88,10 +134,11 @@ func writeSplitRaw(root, raw string) {
 }
 
 // RunWorkspace runs the Workspace program until the user leaves it.
-func RunWorkspace(root string, cfg config.Config) (WorkspaceResult, error) {
+func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (WorkspaceResult, error) {
 	var mu sync.Mutex
 	cur := cfg
 	getCfg := func() config.Config { mu.Lock(); defer mu.Unlock(); return cur }
+	setCfg := func(c config.Config) { mu.Lock(); cur = c; mu.Unlock() }
 
 	var once sync.Once
 	var pctx string
@@ -127,9 +174,9 @@ func RunWorkspace(root string, cfg config.Config) (WorkspaceResult, error) {
 	}
 
 	var engMu sync.Mutex
-	var lastEng *workspace.Engine
+	var engines []*workspace.Engine
 	deps := wsDeps{
-		split: func(ctx context.Context, task string, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error) {
+		split: func(ctx context.Context, task, earlier string, existing []string, next int, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error) {
 			c := getCfg()
 			agents := make(map[string]config.AgentConfig, len(c.Agents))
 			for k, v := range c.Agents {
@@ -142,8 +189,12 @@ func RunWorkspace(root string, cfg config.Config) (WorkspaceResult, error) {
 			if err != nil {
 				return nil, runner.TokenUsage{}, fmt.Errorf("lead runner: %w", err)
 			}
+			pc := projectContext()
+			if earlier != "" {
+				pc += "\n\n## Earlier in this session\n" + earlier
+			}
 			var raw strings.Builder
-			g, u, err := workspace.Split(ctx, r, pm.Model, task, workspace.Roles(c), projectContext(), func(s string) {
+			g, u, err := workspace.SplitNext(ctx, r, pm.Model, task, workspace.Roles(c), pc, existing, next, func(s string) {
 				raw.WriteString(s)
 				if onToken != nil {
 					onToken(s)
@@ -152,11 +203,11 @@ func RunWorkspace(root string, cfg config.Config) (WorkspaceResult, error) {
 			writeSplitRaw(root, raw.String())
 			return g, u, err
 		},
-		newEngine: func(g *workspace.Graph) *workspace.Engine {
-			e := workspace.NewEngine(g, wsLiveExec{root: root, cfg: getCfg, pctx: projectContext, checks: checkCmds},
-				workspace.MaxParallel(getCfg()), filepath.Join(root, artifacts.DirName, workspace.FileName))
+		newEngine: func(g *workspace.Graph, save func(*workspace.Graph) error, summary func() string) *workspace.Engine {
+			e := workspace.NewEngineWithSave(g, wsLiveExec{root: root, cfg: getCfg, pctx: projectContext, checks: checkCmds, summary: summary},
+				workspace.MaxParallel(getCfg()), save)
 			engMu.Lock()
-			lastEng = e
+			engines = append(engines, e)
 			engMu.Unlock()
 			return e
 		},
@@ -168,26 +219,35 @@ func RunWorkspace(root string, cfg config.Config) (WorkspaceResult, error) {
 			if err != nil {
 				return config.Config{}, err
 			}
-			mu.Lock()
-			cur = c
-			mu.Unlock()
+			setCfg(c)
+			return c, nil
+		},
+		applyProfile: func(name string) (config.Config, error) {
+			if err := config.ApplyProfile(root, name); err != nil {
+				return config.Config{}, err
+			}
+			c, err := config.Load(root)
+			if err != nil {
+				return config.Config{}, err
+			}
+			setCfg(c)
 			return c, nil
 		},
 		checkCmds: checkCmds,
 	}
 
-	prog := tea.NewProgram(newWorkspaceModel(root, cfg, deps), tea.WithAltScreen())
+	prog := tea.NewProgram(newWorkspaceModel(root, cfg, deps, opts), tea.WithAltScreen())
 	res, err := prog.Run()
 	engMu.Lock()
-	if lastEng != nil {
-		lastEng.Close()
+	for _, e := range engines {
+		e.Close()
 	}
 	engMu.Unlock()
 	if err != nil {
 		return WorkspaceResult{Cfg: getCfg()}, err
 	}
 	if final, ok := res.(workspaceModel); ok {
-		return WorkspaceResult{OpenMenu: final.openMenu, Cfg: final.cfg}, nil
+		return WorkspaceResult{OpenMenu: final.openMenu, SwitchProject: final.switchTo, Cfg: final.cfg}, nil
 	}
 	return WorkspaceResult{Cfg: getCfg()}, nil
 }
@@ -197,9 +257,15 @@ func RunWorkspace(root string, cfg config.Config) (WorkspaceResult, error) {
 type wsScreen int
 
 const (
-	wsScreenStart wsScreen = iota
-	wsScreenGraph
+	wsScreenMain wsScreen = iota
 	wsScreenOutput
+)
+
+type wsFocus int
+
+const (
+	wsFocusPrompt wsFocus = iota
+	wsFocusGraph
 )
 
 type wsOverlay int
@@ -209,13 +275,20 @@ const (
 	wsOverlayPicker
 	wsOverlayRoles
 	wsOverlayForm
-	wsOverlayCmds
 	wsOverlayConfirm
+	wsOverlaySessions
+	wsOverlayProjects
+	wsOverlayProfiles
+	wsOverlayText
+	wsOverlayInfo
 )
 
-type wsLine struct{ kind, text string } // kind: you | lead | err
-
-type wsConfirm struct{ kind, text string } // kind: quit | menu | discard
+// wsConfirm is a pending y/n question. kind: quit | menu | clear | delsession
+// | delprofile. back is the list overlay to return to on "no".
+type wsConfirm struct {
+	kind, text, arg string
+	back            wsOverlay
+}
 
 // wsStream carries streamed split text from the split goroutine to the UI. It
 // keeps only the current line and the last finished non-empty line, so reading
@@ -306,6 +379,70 @@ func closeEngine(e *workspace.Engine) {
 	}
 }
 
+// wsSess shares the session between the model and the engine's save callback,
+// which runs on engine goroutines.
+type wsSess struct {
+	mu   sync.Mutex
+	root string
+	s    *workspace.Session
+}
+
+func newWsSess(root string, s *workspace.Session) *wsSess { return &wsSess{root: root, s: s} }
+
+// snapshot returns a shallow copy that is safe to read while the engine saves.
+func (p *wsSess) snapshot() workspace.Session {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return *p.s
+}
+
+func (p *wsSess) update(f func(s *workspace.Session)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	f(p.s)
+}
+
+func (p *wsSess) addLine(who, text string) {
+	p.update(func(s *workspace.Session) { s.AddLine(who, text) })
+}
+
+// hasContent is true once the session holds a task or a graph; empty sessions
+// are never written.
+func (p *wsSess) hasContent() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.hasContentLocked()
+}
+
+func (p *wsSess) hasContentLocked() bool {
+	if p.s.Graph != nil && len(p.s.Graph.Nodes) > 0 {
+		return true
+	}
+	for _, l := range p.s.Transcript {
+		if l.Who == "you" {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *wsSess) save() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.hasContentLocked() {
+		return nil
+	}
+	return p.s.Save(p.root)
+}
+
+// saveGraph is the engine's save callback: it copies g into the session.
+func (p *wsSess) saveGraph(g *workspace.Graph) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.s.Graph = g.Clone()
+	return p.s.Save(p.root)
+}
+
 type workspaceModel struct {
 	root string
 	cfg  config.Config
@@ -314,40 +451,43 @@ type workspaceModel struct {
 
 	width, height int
 	screen        wsScreen
+	focus         wsFocus
 	showHelp      bool
 	overlay       wsOverlay
 	confirm       wsConfirm
 	openMenu      bool
+	switchTo      string
 	quitting      bool
 	quitAt        time.Time
 	notice        string
 	noticeErr     bool
 
-	// start screen
+	// session and prompt
+	sess        *wsSess
+	nSaved      int // saved sessions of this project, for the empty state
+	custom      []workspace.CustomCommand
 	input       textarea.Model
-	transcript  []wsLine
-	scroll      int // lines scrolled up from the newest
+	scroll      int // chat lines scrolled up from the newest
 	cmdIdx      int
-	saved       *workspace.Graph
+	cmdPicked   bool // the highlight was moved with the arrows
 	splitting   bool
 	splitGen    int
 	splitTask   string
 	cancelSplit context.CancelFunc
 	stream      *wsStream
 
-	// graph screen
-	eng        *workspace.Engine
-	g          *workspace.Graph
-	sel        string
-	inspFlip   bool
-	leadTokens int
-	outputs    map[string][]string
-	partial    map[string]string
-	outSize    map[string]int // bytes stored per node, partial line excluded
-	runCtx     context.Context
-	runCancel  context.CancelFunc
-	ticking    bool
-	spin       int
+	// graph
+	eng       *workspace.Engine
+	g         *workspace.Graph
+	sel       string
+	inspFlip  bool
+	outputs   map[string][]string
+	partial   map[string]string
+	outSize   map[string]int // bytes stored per node, partial line excluded
+	runCtx    context.Context
+	runCancel context.CancelFunc
+	ticking   bool
+	spin      int
 
 	// output screen
 	outVP     viewport.Model
@@ -357,7 +497,6 @@ type workspaceModel struct {
 	// overlays
 	pickNode      string
 	pickIdx       int
-	cmdFilter     string // graph-screen command overlay
 	formName      textinput.Model
 	formDesc      textinput.Model
 	formFocus     int
@@ -365,10 +504,20 @@ type workspaceModel struct {
 	formNode      string
 	formCanChange bool // "Can change files"; false saves a read-only role
 
-	pendingTask string // task waiting for the "replace the unfinished graph" answer
+	listIdx  int // cursor of the sessions, projects and profiles lists
+	sessions []workspace.SessionInfo
+	projects []wsProject
+	profiles []string
+	textIn   textinput.Model
+	textKind string // "path" | "profile"
+	textErr  string
+	infoName string
+	infoText []string
+	infoTop  int
 }
 
-func newWorkspaceModel(root string, cfg config.Config, deps wsDeps) workspaceModel {
+func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...WorkspaceOptions) workspaceModel {
+	deps.fillDefaults(root)
 	ta := textarea.New()
 	ta.Prompt = " "
 	ta.ShowLineNumbers = false
@@ -402,6 +551,8 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps) workspaceMod
 		root: root, cfg: cfg, deps: deps, now: time.Now,
 		width: 80, height: 24,
 		input:     ta,
+		g:         &workspace.Graph{},
+		sess:      newWsSess(root, workspace.NewSession()),
 		outputs:   map[string][]string{},
 		partial:   map[string]string{},
 		outSize:   map[string]int{},
@@ -409,23 +560,22 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps) workspaceMod
 		runCancel: runCancel,
 		formName:  newField("snake_case_name"),
 		formDesc:  newField("what this role does, in one line"),
+		textIn:    newField(""),
 		outVP:     viewport.New(78, 20),
 	}
 	m.resize()
-	if g, err := workspace.Load(m.savePath()); err == nil && len(g.Nodes) > 0 && g.Validate() == nil {
-		workspace.Reconcile(g, cfg)
-		if _, _, done, _ := g.Counts(); done < len(g.Nodes) {
-			m.saved = g
-		}
+	if _, err := workspace.MigrateLegacy(root); err != nil {
+		m.setNotice("old workspace graph: "+oneLine(err.Error()), true)
+	}
+	m.custom = deps.customCommands()
+	m.refreshSaved()
+	if len(opts) > 0 && opts[0].Resume {
+		m = m.openSessions()
 	}
 	return m
 }
 
 func (m workspaceModel) Init() tea.Cmd { return nil }
-
-func (m workspaceModel) savePath() string {
-	return filepath.Join(m.root, artifacts.DirName, workspace.FileName)
-}
 
 func (m workspaceModel) project() string {
 	if m.cfg.Project.Name != "" {
@@ -437,13 +587,34 @@ func (m workspaceModel) project() string {
 	return ""
 }
 
+// chatRows is the height of the chat strip.
+func (m workspaceModel) chatRows() int {
+	switch {
+	case m.height >= 24:
+		return 3
+	case m.height >= 20:
+		return 2
+	}
+	return 1
+}
+
+// promptRows is the text height of the prompt box (the border adds 2).
+func (m workspaceModel) promptRows() int {
+	if m.height < 24 {
+		return 1
+	}
+	return 3
+}
+
 func (m *workspaceModel) resize() {
 	m.input.SetWidth(max(m.width-2, 10))
+	m.input.SetHeight(m.promptRows())
 	m.outVP.Width = max(m.width, 1)
 	m.outVP.Height = max(m.height-3, 1)
 	fw := max(min(70, m.width-2)-4-22, 10)
 	m.formName.Width = fw
 	m.formDesc.Width = fw
+	m.textIn.Width = max(min(70, m.width-2)-6, 10)
 }
 
 func (m *workspaceModel) startTick() tea.Cmd {
@@ -458,6 +629,15 @@ func (m *workspaceModel) setNotice(s string, isErr bool) {
 	m.notice, m.noticeErr = s, isErr
 }
 
+func (m *workspaceModel) setFocus(f wsFocus) {
+	m.focus = f
+	if f == wsFocusPrompt {
+		m.input.Focus()
+	} else {
+		m.input.Blur()
+	}
+}
+
 func (m workspaceModel) defined(name string) bool {
 	_, ok := workspace.FindRole(m.cfg, name)
 	return ok
@@ -470,11 +650,41 @@ func (m workspaceModel) selNode() *workspace.Node {
 	return m.g.Node(m.sel)
 }
 
+func (m workspaceModel) hasNodes() bool { return m.g != nil && len(m.g.Nodes) > 0 }
+
+func (m workspaceModel) running() int {
+	if m.eng == nil {
+		return 0
+	}
+	return m.eng.Running()
+}
+
+// saveSession writes the session when it holds anything; a failure shows up in
+// the status line.
+func (m *workspaceModel) saveSession() {
+	if err := m.sess.save(); err != nil {
+		m.setNotice("could not save the session: "+oneLine(err.Error()), true)
+		return
+	}
+	m.refreshSaved()
+}
+
+func (m *workspaceModel) refreshSaved() { m.nSaved = workspace.CountSessions(m.root) }
+
+// say adds a chat line to the session. who: lead | system | error.
+func (m *workspaceModel) say(who, text string) {
+	m.scroll = 0
+	m.sess.addLine(who, text)
+}
+
 // ── Update ───────────────────────────────────────────────────────────────────
 
 func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		if (m.width >= wsInspectorMin) != (msg.Width >= wsInspectorMin) {
+			m.inspFlip = false // the flip means "hide" when wide and "open" when narrow
+		}
 		m.width, m.height = msg.Width, msg.Height
 		m.resize()
 		if m.screen == wsScreenOutput {
@@ -495,7 +705,7 @@ func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == wsScreenOutput && len(m.outputs[m.outNode]) == 0 {
 			m.refreshOutput() // keeps the waiting timer moving
 		}
-		if m.splitting || (m.eng != nil && m.eng.Running() > 0) {
+		if m.splitting || m.running() > 0 {
 			return m, wsTick()
 		}
 		m.ticking = false
@@ -503,7 +713,7 @@ func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.onKey(msg)
 	}
-	if m.screen == wsScreenStart && m.overlay == wsOverlayNone && !m.splitting {
+	if m.screen == wsScreenMain && m.focus == wsFocusPrompt && m.overlay == wsOverlayNone && !m.splitting {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
@@ -529,13 +739,22 @@ func (m workspaceModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.overlay != wsOverlayNone {
 		return m.overlayKey(msg)
 	}
-	switch m.screen {
-	case wsScreenOutput:
+	if m.screen == wsScreenOutput {
 		return m.outputKey(msg)
-	case wsScreenGraph:
+	}
+	if m.splitting {
+		if k == "esc" {
+			return m.cancelSplitting(), nil
+		}
+		return m, nil
+	}
+	if m.focus == wsFocusGraph {
+		if isBurst(msg) {
+			return m.insertBurst(msg), nil
+		}
 		return m.graphKey(msg)
 	}
-	return m.startKey(msg)
+	return m.promptKey(msg)
 }
 
 func (m workspaceModel) ctrlC() (tea.Model, tea.Cmd) {
@@ -544,7 +763,7 @@ func (m workspaceModel) ctrlC() (tea.Model, tea.Cmd) {
 		return m.quit(false)
 	}
 	m.quitAt = now
-	if m.eng != nil && m.eng.Running() > 0 {
+	if m.running() > 0 {
 		m.setNotice("Nodes are running. Press Ctrl+C again to stop them and quit", false)
 	} else {
 		m.setNotice("Press Ctrl+C again to quit", false)
@@ -552,8 +771,9 @@ func (m workspaceModel) ctrlC() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// quit stops every node, then ends the program.
+// quit saves the session, stops every node, then ends the program.
 func (m workspaceModel) quit(openMenu bool) (tea.Model, tea.Cmd) {
+	m.saveSession()
 	m.openMenu = openMenu
 	m.quitting = true
 	eng, cancel, cancelSplit := m.eng, m.runCancel, m.cancelSplit
@@ -571,115 +791,209 @@ func (m workspaceModel) quit(openMenu bool) (tea.Model, tea.Cmd) {
 
 // requestQuit asks first while nodes are running.
 func (m workspaceModel) requestQuit(openMenu bool) (tea.Model, tea.Cmd) {
-	if m.eng != nil {
-		if n := m.eng.Running(); n > 0 {
-			kind := "quit"
-			if openMenu {
-				kind = "menu"
-			}
-			m.confirm = wsConfirm{kind: kind, text: fmt.Sprintf("%d node(s) are running. Stop them and leave?", n)}
-			m.overlay = wsOverlayConfirm
-			return m, nil
+	if n := m.running(); n > 0 {
+		kind := "quit"
+		if openMenu {
+			kind = "menu"
 		}
+		m.confirm = wsConfirm{kind: kind, text: fmt.Sprintf("%d node(s) are running. Stop them and leave?", n)}
+		m.overlay = wsOverlayConfirm
+		return m, nil
 	}
 	return m.quit(openMenu)
 }
 
-// ── Start screen ─────────────────────────────────────────────────────────────
+// ── Prompt ───────────────────────────────────────────────────────────────────
 
+// paletteOpen is true while a command name is being typed: the text starts
+// with "/" and has no space or line break yet.
 func (m workspaceModel) paletteOpen() bool {
 	v := m.input.Value()
-	return strings.HasPrefix(v, "/") && !strings.Contains(v, "\n")
+	return strings.HasPrefix(v, "/") && !strings.ContainsAny(v, " \t\n")
 }
 
-func (m workspaceModel) startKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	k := msg.String()
-	if m.splitting {
-		if k == "esc" {
-			return m.cancelSplitting(), nil
-		}
-		return m, nil
+// isBurst is true for a paste or a burst of several characters in one message.
+func isBurst(msg tea.KeyMsg) bool {
+	return msg.Type == tea.KeyRunes && (msg.Paste || len(msg.Runes) > 1)
+}
+
+// insertBurst puts pasted text into the prompt as text: it is never sent and
+// never run as a command, whatever line breaks it holds.
+func (m workspaceModel) insertBurst(msg tea.KeyMsg) workspaceModel {
+	text := strings.ReplaceAll(strings.ReplaceAll(string(msg.Runes), "\r\n", "\n"), "\r", "\n")
+	m.setFocus(wsFocusPrompt)
+	m.input.InsertString(workspace.SanitizeText(text))
+	m.cmdIdx = 0
+	m.cmdPicked = false
+	m.custom = m.deps.customCommands()
+	return m
+}
+
+func (m workspaceModel) promptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if isBurst(msg) {
+		return m.insertBurst(msg), nil
 	}
+	k := msg.String()
+	empty := m.input.Value() == ""
+	open := m.paletteOpen()
+	matches := m.cmdMatches(m.input.Value())
 	switch k {
 	case "pgup":
-		m.scroll += 5
+		m.scroll += 3
 		return m, nil
 	case "pgdown":
-		m.scroll = max(m.scroll-5, 0)
+		m.scroll = max(m.scroll-3, 0)
 		return m, nil
 	case "?":
-		if m.input.Value() == "" {
+		if empty {
 			m.showHelp = true
 			return m, nil
 		}
-	}
-	if m.paletteOpen() {
-		matches := wsCmdMatches(strings.TrimSpace(m.input.Value()))
-		switch k {
-		case "up":
-			m.cmdIdx = max(m.cmdIdx-1, 0)
-			return m, nil
-		case "down":
-			m.cmdIdx = min(m.cmdIdx+1, max(len(matches)-1, 0))
-			return m, nil
-		case "tab":
+	case "tab":
+		if open {
 			if len(matches) > 0 {
 				m.input.SetValue(matches[min(m.cmdIdx, len(matches)-1)].name)
+				m.cmdIdx = 0
+				m.cmdPicked = false
 			}
 			return m, nil
-		case "esc":
+		}
+		m.setFocus(wsFocusGraph)
+		return m, nil
+	case "shift+tab":
+		m.setFocus(wsFocusGraph)
+		return m, nil
+	case "esc":
+		switch {
+		case open:
 			m.input.Reset()
 			m.cmdIdx = 0
-			return m, nil
-		case "enter":
-			if len(matches) == 0 {
-				m.transcript = append(m.transcript, wsLine{"err", fmt.Sprintf("unknown command %s", strings.TrimSpace(m.input.Value()))})
-				return m, nil
+		case m.hasNodes():
+			m.setFocus(wsFocusGraph)
+		}
+		return m, nil
+	case "up", "down":
+		if open {
+			if k == "up" {
+				m.cmdIdx = max(m.cmdIdx-1, 0)
+			} else {
+				m.cmdIdx = min(m.cmdIdx+1, max(len(matches)-1, 0))
 			}
-			name := matches[min(m.cmdIdx, len(matches)-1)].name
-			m.input.Reset()
-			m.cmdIdx = 0
-			return m.runCommand(name)
-		}
-	}
-	if k == "enter" {
-		task := strings.TrimSpace(m.input.Value())
-		if task == "" {
+			m.cmdPicked = true
 			return m, nil
 		}
-		if m.saved != nil {
-			m.pendingTask = task
-			title := m.saved.Title
-			if title == "" {
-				title = m.saved.Task
-			}
-			m.confirm = wsConfirm{kind: "replace", text: fmt.Sprintf("Replace the unfinished graph %q? y/n", title)}
-			m.overlay = wsOverlayConfirm
-			return m, nil
-		}
-		return m.startSplit(task)
+	case "enter":
+		return m.submit()
 	}
+	was := open
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.cmdIdx = 0
+	m.cmdPicked = false
+	if !was && m.paletteOpen() {
+		m.custom = m.deps.customCommands() // pick up files added while open
+	}
 	return m, cmd
 }
 
-func (m workspaceModel) startSplit(task string) (tea.Model, tea.Cmd) {
+// submit runs the prompt text as a command or sends it as a task. Text that
+// does not start with "/" is a task. So is a single line whose first word has
+// a second "/" (a path), and "//text" sends "/text".
+func (m workspaceModel) submit() (tea.Model, tea.Cmd) {
+	text := strings.TrimSpace(m.input.Value())
+	if text == "" {
+		return m, nil
+	}
+	if !strings.HasPrefix(text, "/") || strings.Contains(text, "\n") {
+		return m.sendTask(text, text)
+	}
+	if strings.HasPrefix(text, "//") {
+		return m.sendTask(text[1:], text[1:])
+	}
+	first, args, _ := strings.Cut(text, " ")
+	if strings.Contains(first[1:], "/") {
+		return m.sendTask(text, text)
+	}
+	m.custom = m.deps.customCommands()
+	name := strings.ToLower(first)
+	c, ok := m.lookup(name)
+	if !ok && m.paletteOpen() && args == "" {
+		matches := m.cmdMatches(name)
+		switch {
+		case len(matches) == 1 || (len(matches) > 1 && m.cmdPicked):
+			c, ok = matches[min(m.cmdIdx, len(matches)-1)], true
+		case len(matches) > 1:
+			names := make([]string, len(matches))
+			for i, mc := range matches {
+				names[i] = mc.name
+			}
+			sort.Strings(names)
+			list := idList(names)
+			m.say("error", fmt.Sprintf("%s matches several commands: %s — keep typing or press Tab", name, list))
+			return m, nil
+		}
+	}
+	if !ok {
+		m.say("error", fmt.Sprintf("unknown command %s — /help lists them", name))
+		return m, nil
+	}
+	m.input.Reset()
+	m.cmdIdx = 0
+	m.cmdPicked = false
+	return c.run(m, strings.TrimSpace(args))
+}
+
+// earlierContext is what the lead is told about the session so far.
+func (m workspaceModel) earlierContext() string {
+	var parts []string
+	if s := strings.TrimSpace(m.sess.snapshot().Summary); s != "" {
+		parts = append(parts, "Finished and folded into this summary:\n"+s)
+	}
+	var nodes []string
+	for _, n := range m.g.Nodes {
+		if n.Kind != workspace.KindWork {
+			continue
+		}
+		line := fmt.Sprintf("- %s %s [%s]", n.ID, n.Title, n.Status)
+		if n.Role != "" {
+			line += " by " + n.Role
+		}
+		nodes = append(nodes, line)
+	}
+	if len(nodes) > 0 {
+		parts = append(parts, "Nodes already in the graph:\n"+strings.Join(nodes, "\n"))
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// sendTask sends task to the lead; shown is what the chat displays.
+func (m workspaceModel) sendTask(task, shown string) (tea.Model, tea.Cmd) {
+	if m.running() > 0 {
+		m.setNotice("Stop the running nodes first (Tab to the graph, then S), then send the task", true)
+		return m, nil
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.splitGen++
 	gen := m.splitGen
 	m.splitting = true
-	m.splitTask = task
+	m.splitTask = shown
 	m.cancelSplit = cancel
 	m.stream = &wsStream{}
-	m.scroll = 0
-	m.transcript = append(m.transcript, wsLine{"you", task})
+	m.say("you", shown)
 	m.input.Reset()
 	m.input.Placeholder = wsSplittingHint
+	earlier := m.earlierContext()
+	var existing []string
+	next := 0
+	if m.hasNodes() {
+		for _, n := range m.g.Nodes {
+			existing = append(existing, n.ID)
+		}
+		next = max(m.sess.snapshot().NextID, nextWorkNumber(m.g))
+	}
 	split, stream := m.deps.split, m.stream
 	cmd := func() tea.Msg {
-		g, u, err := split(ctx, task, stream.add)
+		g, u, err := split(ctx, task, earlier, existing, next, stream.add)
 		return wsSplitDoneMsg{gen: gen, g: g, usage: u, err: err}
 	}
 	return m, tea.Batch(cmd, m.startTick())
@@ -693,7 +1007,7 @@ func (m workspaceModel) cancelSplitting() workspaceModel {
 	m.splitting = false
 	m.splitGen++
 	m.restoreTask()
-	m.transcript = append(m.transcript, wsLine{"err", "split cancelled. Your text is still in the box"})
+	m.say("error", "split cancelled. Your text is still in the box")
 	return m
 }
 
@@ -706,18 +1020,23 @@ func (m workspaceModel) onSplitDone(msg wsSplitDoneMsg) (tea.Model, tea.Cmd) {
 	m.input.Placeholder = wsInputHint
 	if msg.err != nil {
 		m.restoreTask()
-		m.transcript = append(m.transcript, wsLine{"err", oneLine(msg.err.Error())})
+		m.say("error", oneLine(msg.err.Error()))
 		return m, nil
 	}
 	if msg.g == nil || len(msg.g.Nodes) == 0 {
 		m.restoreTask()
-		m.transcript = append(m.transcript, wsLine{"err", "the lead returned no sub-tasks. Try describing the task differently"})
+		m.say("error", "the lead returned no sub-tasks. Try describing the task differently")
 		return m, nil
 	}
-	m.leadTokens = msg.usage.InputTokens + msg.usage.OutputTokens
-	m.transcript = append(m.transcript, wsLine{"lead", fmt.Sprintf("split into %d sub-tasks", len(msg.g.Nodes))})
+	m.sess.update(func(s *workspace.Session) {
+		s.In += msg.usage.InputTokens
+		s.Out += msg.usage.OutputTokens
+	})
 	m.input.Reset()
-	return m.openGraph(msg.g, true)
+	if m.eng == nil || !m.hasNodes() {
+		return m.openGraph(msg.g)
+	}
+	return m.appendGraph(msg.g)
 }
 
 // restoreTask puts the task being split back into the input for editing.
@@ -726,83 +1045,143 @@ func (m *workspaceModel) restoreTask() {
 	m.input.SetValue(m.splitTask)
 }
 
-// openGraph hands g to a new engine and switches to the graph screen.
-func (m workspaceModel) openGraph(g *workspace.Graph, fresh bool) (tea.Model, tea.Cmd) {
-	if fresh {
-		// The Build & test node is always there; without known commands it
-		// asks for them when it runs.
-		var cmds []string
-		if m.deps.checkCmds != nil {
-			cmds = m.deps.checkCmds()
-		}
-		if len(cmds) > 0 {
-			g.AddCheck(cmds)
-		} else {
-			g.AddCheckDeferred()
+// nextWorkNumber is one more than the highest T<number> node ID (1 for none).
+func nextWorkNumber(g *workspace.Graph) int {
+	top := 0
+	for _, n := range g.Nodes {
+		var v int
+		if _, err := fmt.Sscanf(n.ID, "T%d", &v); err == nil && v > top {
+			top = v
 		}
 	}
-	closeEngine(m.eng)
-	if err := workspace.Save(m.savePath(), g); err != nil {
-		m.setNotice("could not save the graph: "+err.Error(), true)
-	}
-	first := g.Nodes[0].ID
-	m.eng = m.deps.newEngine(g)
-	m.g = m.eng.Snapshot()
-	m.sel = first
-	m.outputs = map[string][]string{}
-	m.partial = map[string]string{}
-	m.outSize = map[string]int{}
-	m.screen = wsScreenGraph
-	m.overlay = wsOverlayNone
-	m.scroll = 0
-	m.saved = nil
-	return m, tea.Batch(wsWaitEvent(m.eng), m.startTick())
+	return top + 1
 }
 
-// ── Commands ─────────────────────────────────────────────────────────────────
+// splitNotice is the chat line after a split: "split into 1 node: T1".
+func splitNotice(ids []string) string {
+	return fmt.Sprintf("split into %d %s: %s", len(ids), pluralize(len(ids), "node", "nodes"), idList(ids))
+}
 
-func (m workspaceModel) runCommand(name string) (tea.Model, tea.Cmd) {
-	m.overlay = wsOverlayNone
-	switch name {
-	case "/help":
-		m.showHelp = true
-	case "/quit":
-		return m.requestQuit(false)
-	case "/menu":
-		return m.requestQuit(true)
-	case "/roles":
-		m.overlay = wsOverlayRoles
-		m.pickIdx = 0
-		m.pickNode = ""
-	case "/resume":
-		if m.eng != nil {
-			m.setNotice("This graph is already open", false)
-			return m, nil
-		}
-		if m.saved == nil {
-			m.report("nothing to resume: there is no unfinished graph", true)
-			return m, nil
-		}
-		return m.openGraph(m.saved, false)
+// idList is "T1, T2, T3" for at most six IDs, then "…".
+func idList(ids []string) string {
+	if len(ids) > 6 {
+		return strings.Join(ids[:6], ", ") + ", …"
 	}
+	return strings.Join(ids, ", ")
+}
+
+// openGraph starts the engine on the first graph of a session.
+func (m workspaceModel) openGraph(g *workspace.Graph) (tea.Model, tea.Cmd) {
+	// The Build & test node is always there; without known commands it asks
+	// for them when it runs.
+	var cmds []string
+	if m.deps.checkCmds != nil {
+		cmds = m.deps.checkCmds()
+	}
+	if len(cmds) > 0 {
+		g.AddCheck(cmds)
+	} else {
+		g.AddCheckDeferred()
+	}
+	var ids []string
+	for _, n := range g.Nodes {
+		if n.Kind == workspace.KindWork {
+			ids = append(ids, n.ID)
+		}
+	}
+	m.sess.update(func(s *workspace.Session) {
+		if s.Title == "" {
+			s.Title = g.Title
+		}
+		s.NextID = nextWorkNumber(g)
+	})
+	m.say("lead", splitNotice(ids))
+	m, cmd := m.attachGraph(g, true)
+	m.setFocus(wsFocusGraph)
+	m.saveSession()
+	return m, cmd
+}
+
+// appendGraph adds the nodes of a follow-up split to the live graph.
+func (m workspaceModel) appendGraph(add *workspace.Graph) (tea.Model, tea.Cmd) {
+	add.Sanitize()
+	next := m.sess.snapshot().NextID
+	var idMap map[string]string
+	err := m.eng.Replace(func(g *workspace.Graph) { next, idMap = g.Append(add, next) })
+	if err != nil {
+		m.restoreTask()
+		m.say("error", oneLine(err.Error()))
+		return m, nil
+	}
+	var ids []string
+	for _, n := range add.Nodes {
+		if id, ok := idMap[n.ID]; ok {
+			ids = append(ids, id)
+		}
+	}
+	m.sess.update(func(s *workspace.Session) { s.NextID = next })
+	m.say("lead", splitNotice(ids))
+	m.g = m.eng.Snapshot()
+	if len(ids) > 0 {
+		m.sel = ids[0]
+	}
+	m.setFocus(wsFocusGraph)
+	m.saveSession()
 	return m, nil
 }
 
-// report shows a message in the status line (graph) or the chat (start).
-func (m *workspaceModel) report(s string, isErr bool) {
-	if m.screen == wsScreenStart {
-		kind := "lead"
-		if isErr {
-			kind = "err"
-		}
-		m.transcript = append(m.transcript, wsLine{kind, s})
-		return
+// attachGraph hands g to a new engine, which saves through the session.
+func (m workspaceModel) attachGraph(g *workspace.Graph, fresh bool) (workspaceModel, tea.Cmd) {
+	closeEngine(m.eng)
+	g.Sanitize()
+	if err := m.sess.saveGraph(g); err != nil {
+		m.setNotice("could not save the session: "+oneLine(err.Error()), true)
 	}
-	m.setNotice(s, isErr)
+	sess := m.sess
+	m.eng = m.deps.newEngine(g, sess.saveGraph, func() string { return sess.snapshot().Summary })
+	m.g = m.eng.Snapshot()
+	m.sel = ""
+	if len(m.g.Nodes) > 0 {
+		m.sel = m.g.Nodes[0].ID
+	}
+	m.outputs = map[string][]string{}
+	m.partial = map[string]string{}
+	m.outSize = map[string]int{}
+	m.screen = wsScreenMain
+	m.overlay = wsOverlayNone
+	m.scroll = 0
+	return m, tea.Batch(wsWaitEvent(m.eng), m.startTick())
+}
+
+// resetSession drops the engine and the graph and starts an empty session.
+func (m workspaceModel) resetSession(s *workspace.Session) workspaceModel {
+	closeEngine(m.eng)
+	m.eng = nil
+	m.g = &workspace.Graph{}
+	m.sel = ""
+	m.sess = newWsSess(m.root, s)
+	m.outputs = map[string][]string{}
+	m.partial = map[string]string{}
+	m.outSize = map[string]int{}
+	m.screen = wsScreenMain
+	m.overlay = wsOverlayNone
+	m.scroll = 0
+	m.input.Reset()
+	m.input.Placeholder = wsInputHint
+	m.setFocus(wsFocusPrompt)
+	return m
+}
+
+// report shows a message in the chat. isErr marks it with "! ".
+func (m *workspaceModel) report(s string, isErr bool) {
+	who := "system"
+	if isErr {
+		who = "error"
+	}
+	m.say(who, s)
 }
 
 // ── Engine events ────────────────────────────────────────────────────────────
-
 func (m workspaceModel) onEvent(msg wsEventMsg) (tea.Model, tea.Cmd) {
 	if msg.eng != m.eng || m.eng == nil {
 		return m, nil
@@ -935,7 +1314,29 @@ func (m *workspaceModel) refreshOutput() {
 
 func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
-	if m.g == nil || m.eng == nil {
+	switch k {
+	case "tab", "shift+tab", "c":
+		m.setFocus(wsFocusPrompt)
+		return m, nil
+	case "/":
+		m.setFocus(wsFocusPrompt)
+		m.input.InsertString("/")
+		m.custom = m.deps.customCommands()
+		m.cmdIdx = 0
+		return m, nil
+	case "?":
+		m.showHelp = true
+		return m, nil
+	case "q":
+		return m.requestQuit(false)
+	case "i":
+		m.inspFlip = !m.inspFlip
+		return m, nil
+	case "esc":
+		m.inspFlip = m.inspFlip && m.width >= wsInspectorMin // closes the narrow inspector box
+		return m, nil
+	}
+	if m.eng == nil || !m.hasNodes() {
 		return m, nil
 	}
 	dirs := map[string]string{"up": "up", "k": "up", "down": "down", "j": "down", "left": "left", "h": "left", "right": "right", "l": "right"}
@@ -945,16 +1346,6 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	n := m.selNode()
 	switch k {
-	case "?":
-		m.showHelp = true
-	case "/":
-		m.overlay = wsOverlayCmds
-		m.cmdFilter = "/"
-		m.cmdIdx = 0
-	case "q":
-		return m.requestQuit(false)
-	case "i":
-		m.inspFlip = !m.inspFlip
 	case "a":
 		return m.openPicker(n)
 	case "A":
@@ -996,8 +1387,6 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.g = m.eng.Snapshot()
 		m.sel = id
 		m.setNotice("Added "+id+". Assign it, run it, then run Build & test again (or press R).", false)
-	case "n":
-		return m.newTask()
 	case "o", "enter":
 		if n != nil {
 			m.screen = wsScreenOutput
@@ -1077,41 +1466,12 @@ func (m workspaceModel) runAll() (tea.Model, tea.Cmd) {
 	return m, m.startTick()
 }
 
-func (m workspaceModel) newTask() (tea.Model, tea.Cmd) {
-	if m.eng.Running() > 0 {
-		m.setNotice("Stop the running nodes first (S), then press n", true)
-		return m, nil
-	}
-	_, _, done, _ := m.g.Counts()
-	if done < len(m.g.Nodes) {
-		m.confirm = wsConfirm{kind: "discard", text: "Discard this graph?"}
-		m.overlay = wsOverlayConfirm
-		return m, nil
-	}
-	return m.toStart(false), nil
-}
-
-func (m workspaceModel) toStart(discard bool) workspaceModel {
-	if discard {
-		_ = os.Remove(m.savePath())
-	}
-	closeEngine(m.eng)
-	m.eng = nil
-	m.g = nil
-	m.sel = ""
-	m.screen = wsScreenStart
-	m.overlay = wsOverlayNone
-	m.saved = nil
-	m.input.Reset()
-	return m
-}
-
 // ── Output screen ────────────────────────────────────────────────────────────
 
 func (m workspaceModel) outputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
-		m.screen = wsScreenGraph
+		m.screen = wsScreenMain
 		return m, nil
 	case "?":
 		m.showHelp = true
@@ -1134,55 +1494,7 @@ func (m workspaceModel) overlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 	switch m.overlay {
 	case wsOverlayConfirm:
-		switch k {
-		case "y", "Y":
-			c := m.confirm
-			m.overlay = wsOverlayNone
-			switch c.kind {
-			case "quit":
-				return m.quit(false)
-			case "menu":
-				return m.quit(true)
-			case "discard":
-				return m.toStart(true), nil
-			case "replace":
-				task := m.pendingTask
-				m.pendingTask = ""
-				return m.startSplit(task)
-			}
-		case "n", "N", "esc":
-			m.overlay = wsOverlayNone
-			m.pendingTask = ""
-		}
-		return m, nil
-
-	case wsOverlayCmds:
-		matches := wsCmdMatches(m.cmdFilter)
-		switch k {
-		case "esc":
-			m.overlay = wsOverlayNone
-		case "up":
-			m.cmdIdx = max(m.cmdIdx-1, 0)
-		case "down":
-			m.cmdIdx = min(m.cmdIdx+1, max(len(matches)-1, 0))
-		case "enter":
-			if len(matches) > 0 {
-				return m.runCommand(matches[min(m.cmdIdx, len(matches)-1)].name)
-			}
-		case "backspace":
-			if len(m.cmdFilter) <= 1 {
-				m.overlay = wsOverlayNone
-			} else {
-				m.cmdFilter = m.cmdFilter[:len(m.cmdFilter)-1]
-				m.cmdIdx = 0
-			}
-		default:
-			if msg.Type == tea.KeyRunes {
-				m.cmdFilter += string(msg.Runes)
-				m.cmdIdx = 0
-			}
-		}
-		return m, nil
+		return m.confirmKey(k)
 
 	case wsOverlayPicker, wsOverlayRoles:
 		var items []wsPickItem
@@ -1205,6 +1517,51 @@ func (m workspaceModel) overlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case wsOverlayForm:
 		return m.formKey(msg)
+
+	case wsOverlaySessions, wsOverlayProjects, wsOverlayProfiles:
+		return m.listKey(msg)
+
+	case wsOverlayText:
+		return m.textKey(msg)
+
+	case wsOverlayInfo:
+		switch k {
+		case "esc", "q", "enter":
+			m.overlay = wsOverlayNone
+		case "up", "k":
+			m.infoTop = max(m.infoTop-1, 0)
+		case "down", "j":
+			m.infoTop = min(m.infoTop+1, max(len(m.infoText)-1, 0))
+		case "pgup":
+			m.infoTop = max(m.infoTop-5, 0)
+		case "pgdown":
+			m.infoTop = min(m.infoTop+5, max(len(m.infoText)-1, 0))
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// confirmKey answers the y/n question in m.confirm.
+func (m workspaceModel) confirmKey(k string) (tea.Model, tea.Cmd) {
+	c := m.confirm
+	switch k {
+	case "y", "Y":
+		m.overlay = wsOverlayNone
+		switch c.kind {
+		case "quit":
+			return m.quit(false)
+		case "menu":
+			return m.quit(true)
+		case "clear":
+			return m.doClear(), nil
+		case "delsession":
+			return m.doDeleteSession(c.arg), nil
+		case "delprofile":
+			return m.doDeleteProfile(c.arg), nil
+		}
+	case "n", "N", "esc":
+		m.overlay = c.back
 	}
 	return m, nil
 }
@@ -1212,7 +1569,7 @@ func (m workspaceModel) overlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m workspaceModel) rolesItems() []wsPickItem {
 	var items []wsPickItem
 	for _, r := range workspace.Roles(m.cfg) {
-		items = append(items, wsPickItem{kind: "role", name: r.Name, desc: r.Description, meta: roleMetaShort(r.Agent)})
+		items = append(items, wsPickItem{kind: "role", name: r.Name, desc: r.Description, meta: roleMetaShort(r.Agent), skills: strings.Join(r.UserSkills, ", ")})
 	}
 	return append(items, wsPickItem{kind: "new"})
 }
@@ -1372,13 +1729,11 @@ func (m workspaceModel) View() string {
 	var v string
 	switch {
 	case m.showHelp:
-		v = renderHelp(w, h, "KEYBOARD — WORKSPACE", workspaceHelp())
+		v = renderHelp(w, h, "KEYBOARD — WORKSPACE", workspaceHelp(m.commandList()))
 	case m.screen == wsScreenOutput:
 		v = m.outputView()
-	case m.screen == wsScreenGraph:
-		v = m.graphView()
 	default:
-		v = m.startView()
+		v = m.mainView()
 	}
 	if !m.showHelp {
 		if box := m.overlayBox(); box != "" {
@@ -1417,18 +1772,8 @@ func (m workspaceModel) overlayBox() string {
 			"Read-only list. Enter on ＋ new role creates one · Esc close", w, h)
 	case wsOverlayForm:
 		pm := m.cfg.Agents["pm"]
-		inherits := fmt.Sprintf("Runner / model: inherits %s / %s — change it in /menu → Project Setup", orDash(pm.Runner), orDash(pm.Model))
+		inherits := fmt.Sprintf("Runner / model: inherits %s / %s — change it in /config → Project Setup", orDash(pm.Runner), orDash(pm.Model))
 		return renderRoleForm(m.formName.View(), m.formDesc.View(), m.formFocus, m.formCanChange, inherits, m.formErr, w)
-	case wsOverlayCmds:
-		matches := wsCmdMatches(m.cmdFilter)
-		boxW := min(60, w-2)
-		body := []string{lipgloss.NewStyle().Foreground(crt.bright).Render(m.cmdFilter + "█")}
-		if len(matches) == 0 {
-			body = append(body, lipgloss.NewStyle().Foreground(crt.warn).Render("! no such command"))
-		}
-		body = append(body, renderCmdList(matches, m.cmdIdx, boxW-4)...)
-		body = append(body, "", lipgloss.NewStyle().Foreground(crt.dim).Render("↑↓ move · Enter run · Esc close"))
-		return wsBox("Commands", boxW, body)
 	case wsOverlayConfirm:
 		boxW := min(56, w-2)
 		warn := lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
@@ -1436,10 +1781,12 @@ func (m workspaceModel) overlayBox() string {
 		for _, l := range wrapText(m.confirm.text, boxW-4) {
 			body = append(body, warn.Render(l))
 		}
-		if m.confirm.kind != "replace" { // its text already asks y/n
+		if !strings.HasSuffix(m.confirm.text, "y/n") { // otherwise the text already asks
 			body = append(body, "", keycap("y")+" yes   "+keycap("n")+" no")
 		}
 		return wsBox("Confirm", boxW, body)
+	case wsOverlaySessions, wsOverlayProjects, wsOverlayProfiles, wsOverlayText, wsOverlayInfo:
+		return m.listBox()
 	}
 	return ""
 }
@@ -1482,7 +1829,7 @@ func centerLine(s string, w int) string {
 func (m workspaceModel) statusLine() string {
 	w := m.width
 	text, isErr := m.notice, m.noticeErr
-	if text == "" && m.screen == wsScreenGraph {
+	if text == "" {
 		text, isErr = m.guidance()
 	}
 	if text == "" {
@@ -1501,8 +1848,12 @@ func (m workspaceModel) statusLine() string {
 // guidance says what is going on and which key does the next sensible thing.
 func (m workspaceModel) guidance() (string, bool) {
 	g := m.g
-	if g == nil {
+	if g == nil || len(g.Nodes) == 0 {
 		return "", false
+	}
+	via := ""
+	if m.focus == wsFocusPrompt {
+		via = "Tab to the graph, then "
 	}
 	_, running, done, failed := g.Counts()
 	if failed > 0 {
@@ -1511,13 +1862,13 @@ func (m workspaceModel) guidance() (string, bool) {
 				continue
 			}
 			if n.Kind == workspace.KindCheck {
-				return fmt.Sprintf("! %s failed. Select it: f adds a fix node, r retries", n.Title), true
+				return fmt.Sprintf("! %s failed. %sselect it: f adds a fix node, r retries", n.Title, via), true
 			}
-			return fmt.Sprintf("! %s failed: %s. Select it: r retries, a changes the agent", n.ID, truncateOneLine(oneLine(n.Error), 60)), true
+			return fmt.Sprintf("! %s failed: %s. %sselect it: r retries, a changes the agent", n.ID, truncateOneLine(oneLine(n.Error), 50), via), true
 		}
 	}
 	if running > 0 {
-		return fmt.Sprintf("%d running. o shows output, s stops the selected node", running), false
+		return fmt.Sprintf("%d running. %so shows output, s stops the selected node", running, via), false
 	}
 	unassigned := 0
 	for _, n := range g.Nodes {
@@ -1526,140 +1877,44 @@ func (m workspaceModel) guidance() (string, bool) {
 		}
 	}
 	if unassigned > 0 {
-		return fmt.Sprintf("%d nodes need an agent. A accepts the suggestions, a picks one", unassigned), false
+		return fmt.Sprintf("%d nodes need an agent. %sA accepts the suggestions, a picks one", unassigned, via), false
 	}
 	if len(g.Runnable()) > 0 {
-		return "Ready. r runs the selected node, R runs every assigned node", false
+		return fmt.Sprintf("Ready. %sr runs the selected node, R runs every assigned node", via), false
 	}
 	if done == len(g.Nodes) {
-		return "All nodes are done. n starts a new task", false
+		return "All nodes are done. Type a follow-up task, or /compact to fold them into the summary", false
 	}
 	return "Nothing can run: nodes are waiting on unfinished dependencies", false
 }
 
-func (m workspaceModel) startView() string {
-	w, h := m.width, m.height
-	head := screenHeader(w, "Workspace", m.project())
-	hints := hintBar(w, fitHints(w, []keyHint{
-		{"Enter", "send"}, {"Alt+Enter", "newline"}, {"/", "commands"}, {"Ctrl+C", "quit"}, {"?", "help"},
-	}), "")
-
-	boxStyle := lipgloss.NewStyle().Border(pixelBorder).BorderForeground(focusBorder)
-	if m.splitting {
-		boxStyle = boxStyle.BorderForeground(crt.border)
-	}
-	inputBox := strings.Split(boxStyle.Render(m.input.View()), "\n")
-
-	pal := m.startPalette()
-	bodyH := h - 1 - 1 - 1 - len(inputBox) - len(pal) // header, status, hints
-	body := m.startBody(bodyH)
-
-	parts := []string{head}
-	parts = append(parts, body...)
-	parts = append(parts, m.statusLine())
-	parts = append(parts, pal...) // directly above the input box
-	parts = append(parts, inputBox...)
-	parts = append(parts, hints)
-	return strings.Join(parts, "\n")
-}
-
-// startPalette is the "/" command list drawn right above the input box.
-func (m workspaceModel) startPalette() []string {
-	if !m.paletteOpen() {
-		return nil
-	}
-	pal := renderCmdList(wsCmdMatches(strings.TrimSpace(m.input.Value())), m.cmdIdx, m.width-2)
-	for i := range pal {
-		pal[i] = " " + pal[i]
-	}
-	if len(pal) == 0 {
-		pal = []string{" " + lipgloss.NewStyle().Foreground(crt.warn).Render("! no such command")}
-	}
-	return pal
-}
-
-// startBody lays out the intro and the transcript in exactly bodyH lines.
-func (m workspaceModel) startBody(bodyH int) []string {
-	w := m.width
-	dim := lipgloss.NewStyle().Foreground(crt.dim)
-
-	var tag []string
-	for _, l := range wrapText("Describe a task. The lead splits it into sub-tasks; you assign the agents.", w-4) {
-		tag = append(tag, centerLine(dim.Render(l), w))
-	}
-	if m.saved != nil {
-		_, _, done, _ := m.saved.Counts()
-		line := fmt.Sprintf("↺ unfinished: %q (%d/%d done) — /resume", m.saved.Title, done, len(m.saved.Nodes))
-		tag = append(tag, centerLine(lipgloss.NewStyle().Foreground(galaxyGold).Render(truncateOneLine(line, w-2)), w))
-	}
-	var logo []string
-	for _, l := range strings.Split(HomeModel{}.renderLogo(w), "\n") {
-		logo = append(logo, centerLine(l, w))
-	}
-
-	trans := m.transcriptLines(w - 2)
-	avail := bodyH
-
-	full := append(append(append([]string(nil), logo...), ""), tag...)
-	var intro []string
-	switch {
-	case len(trans) == 0 && len(full) <= avail:
-		intro = full
-	case len(full)+1+len(trans) <= avail:
-		intro = full
-	case len(tag)+1+len(trans) <= avail:
-		intro = tag
-	}
-
-	var out []string
-	if len(trans) == 0 {
-		top := max((avail-len(intro))/2, 0)
-		out = append(out, make([]string, top)...)
-		out = append(out, intro...)
-	} else {
-		room := avail - len(intro)
-		if len(intro) > 0 {
-			room--
-		}
-		end := len(trans) - min(m.scroll, max(len(trans)-1, 0))
-		start := max(end-room, 0)
-		out = append(out, intro...)
-		if len(intro) > 0 {
-			out = append(out, "")
-		}
-		if gap := avail - len(out) - (end - start); gap > 0 {
-			out = append(out, make([]string, gap)...)
-		}
-		out = append(out, trans[start:end]...)
-	}
-	for len(out) < bodyH {
-		out = append(out, "")
-	}
-	return out[:bodyH]
-}
-
-func (m workspaceModel) transcriptLines(w int) []string {
+// transcriptLines wraps the session chat into styled lines of at most w cells,
+// followed by the spinner while the lead is splitting.
+func (m workspaceModel) transcriptLines(w int, withStream bool) []string {
 	if w < 8 {
 		return nil
 	}
 	var out []string
-	for _, l := range m.transcript {
+	for _, l := range m.sess.snapshot().Transcript {
 		var prefix string
 		var body lipgloss.Style
-		switch l.kind {
+		switch l.Who {
 		case "you":
 			prefix = lipgloss.NewStyle().Foreground(crt.bright).Bold(true).Render("you ›") + " "
 			body = lipgloss.NewStyle().Foreground(crt.primary)
 		case "lead":
 			prefix = lipgloss.NewStyle().Foreground(roleColor("pm")).Bold(true).Render("lead ›") + " "
 			body = lipgloss.NewStyle().Foreground(crt.primary)
+		case "system":
+			prefix = lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render("· ")
+			body = lipgloss.NewStyle().Foreground(crt.dim)
 		default:
 			prefix = lipgloss.NewStyle().Foreground(crt.warn).Bold(true).Render("! ")
 			body = lipgloss.NewStyle().Foreground(crt.warn)
 		}
 		pw := ansi.StringWidth(prefix)
 		first := true
-		for _, para := range strings.Split(l.text, "\n") {
+		for _, para := range strings.Split(workspace.SanitizeText(l.Text), "\n") {
 			wrapped := wrapText(para, w-pw)
 			if len(wrapped) == 0 {
 				wrapped = []string{""}
@@ -1678,7 +1933,7 @@ func (m workspaceModel) transcriptLines(w int) []string {
 		spin := pixelSpinner.Frames[m.spin%len(pixelSpinner.Frames)]
 		out = append(out, " "+lipgloss.NewStyle().Foreground(roleColor("pm")).Bold(true).Render("lead ›")+" "+
 			lipgloss.NewStyle().Foreground(crt.primary).Render(spin+" splitting the task…  (Esc cancels)"))
-		if m.stream != nil {
+		if withStream && m.stream != nil {
 			if last := m.stream.lastLine(); last != "" {
 				out = append(out, "   "+lipgloss.NewStyle().Foreground(crt.dim).Render(truncateOneLine(last, w-4)))
 			}
@@ -1687,7 +1942,22 @@ func (m workspaceModel) transcriptLines(w int) []string {
 	return out
 }
 
-// graphHints returns the context-sensitive footer hints.
+// chatStrip is the last rows lines of the chat, newest at the bottom.
+func (m workspaceModel) chatStrip(rows int) []string {
+	lines := m.transcriptLines(m.width-2, rows >= 2)
+	end := len(lines) - min(m.scroll, max(len(lines)-1, 0))
+	start := max(end-rows, 0)
+	out := append([]string(nil), lines[start:end]...)
+	if m.splitting && rows == 1 && len(out) > 0 { // keep the spinner, not the stream
+		out = out[len(out)-1:]
+	}
+	for len(out) < rows {
+		out = append([]string{""}, out...)
+	}
+	return out
+}
+
+// graphHints returns the context-sensitive footer hints for graph focus.
 func (m workspaceModel) graphHints() []keyHint {
 	var hs []keyHint
 	if n := m.selNode(); n != nil && m.g != nil {
@@ -1708,42 +1978,74 @@ func (m workspaceModel) graphHints() []keyHint {
 			hs = append(hs, keyHint{"R", "run all"}, keyHint{"a", "reassign"})
 		}
 	}
-	return append(hs, keyHint{"←↑↓→", "move"}, keyHint{"n", "new task"}, keyHint{"?", "help"})
+	return append(hs, keyHint{"Tab", "prompt"}, keyHint{"←↑↓→", "move"}, keyHint{"?", "help"})
+}
+
+func (m workspaceModel) hintLine() string {
+	w := m.width
+	var hs []keyHint
+	switch {
+	case m.splitting:
+		hs = []keyHint{{"Esc", "cancel"}, {"Ctrl+C", "quit"}}
+	case m.focus == wsFocusGraph:
+		hs = m.graphHints()
+	case m.paletteOpen():
+		hs = []keyHint{{"↑↓", "choose"}, {"Tab", "complete"}, {"Enter", "run"}, {"Esc", "close"}}
+	default:
+		hs = []keyHint{{"Enter", "send"}, {"/", "commands"}, {"Tab", "graph"}}
+		if m.input.Value() == "" {
+			hs = append(hs, keyHint{"?", "help"})
+		}
+		hs = append(hs, keyHint{"Ctrl+C", "quit"})
+	}
+	return hintBar(w, fitHints(w, hs), "")
 }
 
 func (m workspaceModel) summaryLine() string {
 	w := m.width
 	g := m.g
-	title := g.Title
+	title := workspace.Sanitize(m.sess.snapshot().Title)
 	if title == "" {
-		title = g.Task
+		title = "new session"
 	}
-	_, running, done, failed := g.Counts()
-	tokens := m.leadTokens
-	for _, n := range g.Nodes {
-		tokens += n.InputTokens + n.OutputTokens
-	}
-	stats := fmt.Sprintf("%d/%d done", done, len(g.Nodes))
-	if running > 0 {
-		stats += fmt.Sprintf(" · %d running", running)
-	}
-	if failed > 0 {
-		stats += fmt.Sprintf(" · %d failed", failed)
-	}
+	s := m.sess.snapshot()
+	tokens := s.In + s.Out
 	warns := 0
 	for _, n := range g.Nodes {
+		tokens += n.InputTokens + n.OutputTokens
 		warns += len(n.Warnings)
 	}
-	switch {
-	case warns == 1:
-		stats += " · 1 warning"
-	case warns > 1:
-		stats += fmt.Sprintf(" · %d warnings", warns)
+	var stats string
+	if len(g.Nodes) == 0 {
+		stats = "no nodes"
+	} else {
+		_, running, done, failed := g.Counts()
+		stats = fmt.Sprintf("%d/%d done", done, len(g.Nodes))
+		if running > 0 {
+			stats += fmt.Sprintf(" · %d running", running)
+		}
+		if failed > 0 {
+			stats += fmt.Sprintf(" · %d failed", failed)
+		}
+		switch {
+		case warns == 1:
+			stats += " · 1 warning"
+		case warns > 1:
+			stats += fmt.Sprintf(" · %d warnings", warns)
+		}
 	}
 	stats += " · " + formatTokensCompact(tokens) + " tok"
 	right := lipgloss.NewStyle().Foreground(crt.dim).Render(stats)
+	fits := func(r string) bool { return ansi.StringWidth(r)+1+12 <= w }
 	if m.eng != nil && m.eng.Auto() {
-		right = chip("AUTO", galaxyGold) + " " + right
+		if r := chip("AUTO", galaxyGold) + " " + right; fits(r) {
+			right = r
+		}
+	}
+	if p := m.cfg.Project.Profile; p != "" {
+		if r := chip("profile: "+p, galaxyAzure) + " " + right; fits(r) {
+			right = r
+		}
 	}
 	right += " "
 	left := " " + lipgloss.NewStyle().Foreground(crt.bright).Bold(true).Render(truncateOneLine(title, max(w-ansi.StringWidth(right)-3, 4)))
@@ -1751,17 +2053,45 @@ func (m workspaceModel) summaryLine() string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
-func (m workspaceModel) graphView() string {
-	w, h := m.width, m.height
+// emptyPane is the body of the GRAPH pane before the first task.
+func (m workspaceModel) emptyPane(iw, ih int) []string {
+	dim := lipgloss.NewStyle().Foreground(crt.dim)
+	var body []string
+	for _, l := range wrapText("No nodes yet. Describe a task below — the lead splits it into nodes and you assign the agents.", max(iw-4, 8)) {
+		body = append(body, centerLine(dim.Render(l), iw))
+	}
+	if m.nSaved > 0 {
+		plural := "s"
+		if m.nSaved == 1 {
+			plural = ""
+		}
+		line := fmt.Sprintf("↺ %d saved session%s — /resume", m.nSaved, plural)
+		body = append(body, "", centerLine(lipgloss.NewStyle().Foreground(galaxyGold).Render(truncateOneLine(line, iw-2)), iw))
+	}
+	var logo []string
+	for _, l := range strings.Split(HomeModel{}.renderLogo(iw), "\n") {
+		logo = append(logo, centerLine(l, iw))
+	}
+	lines := body
+	if len(logo)+1+len(body) <= ih {
+		lines = append(append(append([]string(nil), logo...), ""), body...)
+	}
+	top := max((ih-len(lines))/2, 0)
+	return append(make([]string, top), lines...)
+}
+
+// mainPanes draws the GRAPH pane and the inspector in exactly mainH lines.
+func (m workspaceModel) mainPanes(mainH int) []string {
+	w := m.width
 	g := m.g
-	mainH := h - 4
 	models := map[string]string{}
 	for _, r := range workspace.Roles(m.cfg) {
 		models[r.Name] = shortModel(r.Agent.Runner, r.Agent.Model)
 	}
 	spin := pixelSpinner.Frames[m.spin%len(pixelSpinner.Frames)]
 
-	showInsp := (w >= wsInspectorMin) != m.inspFlip
+	wide := w >= wsInspectorMin
+	showInsp := wide && !m.inspFlip
 	n := m.selNode()
 	tail := m.outputTail(m.sel, mainH)
 	inspTitle := "INSPECTOR"
@@ -1769,19 +2099,24 @@ func (m workspaceModel) graphView() string {
 		inspTitle = n.ID
 	}
 	canvasFrame := func(cw int) string {
-		canvas := strings.Split(renderCanvas(g, canvasOpts{width: cw - 2, height: mainH - 2, selected: m.sel, models: models, spinner: spin}), "\n")
-		return wsFrame("GRAPH", galaxyAzure, true, cw, mainH, 0, canvas)
+		var canvas []string
+		if len(g.Nodes) == 0 {
+			canvas = m.emptyPane(cw-2, mainH-2)
+		} else {
+			canvas = strings.Split(renderCanvas(g, canvasOpts{width: cw - 2, height: mainH - 2, selected: m.sel, models: models, spinner: spin}), "\n")
+		}
+		return wsFrame("GRAPH", galaxyAzure, m.focus == wsFocusGraph, cw, mainH, 0, canvas)
 	}
-	inspFrame := func(iw int) string {
-		insp := strings.Split(renderInspector(g, n, m.cfg, iw-4, mainH-2, tail), "\n")
-		return wsFrame(inspTitle, galaxyAzure, false, iw, mainH, 1, insp)
+	inspFrame := func(iw, ih int) string {
+		insp := strings.Split(renderInspector(g, n, m.cfg, iw-4, ih-2, tail), "\n")
+		return wsFrame(inspTitle, galaxyAzure, false, iw, ih, 1, insp)
 	}
 	var main []string
 	switch {
-	case showInsp && w >= wsInspectorMin:
+	case showInsp:
 		cw := w - wsInspectorW
 		cl := strings.Split(canvasFrame(cw), "\n")
-		il := strings.Split(inspFrame(wsInspectorW), "\n")
+		il := strings.Split(inspFrame(wsInspectorW, mainH), "\n")
 		for i := 0; i < mainH; i++ {
 			c, p := "", ""
 			if i < len(cl) {
@@ -1792,19 +2127,62 @@ func (m workspaceModel) graphView() string {
 			}
 			main = append(main, padRight(c, cw)+padRight(p, wsInspectorW))
 		}
-	case showInsp:
-		main = strings.Split(inspFrame(w), "\n")
+	case !wide && m.inspFlip:
+		// Narrow terminal: the inspector is a box over the graph.
+		bh := max(mainH-2, min(mainH, 5))
+		box := inspFrame(min(w, 60), bh)
+		main = strings.Split(overlayCenter(canvasFrame(w), box, w, mainH), "\n")
 	default:
 		main = strings.Split(canvasFrame(w), "\n")
 	}
 	for len(main) < mainH {
 		main = append(main, "")
 	}
-	main = main[:mainH]
+	return main[:mainH]
+}
+
+func (m workspaceModel) promptBox() []string {
+	boxStyle := lipgloss.NewStyle().Border(pixelBorder).BorderForeground(crt.border)
+	if m.focus == wsFocusPrompt && !m.splitting {
+		boxStyle = boxStyle.BorderForeground(focusBorder)
+	}
+	return strings.Split(boxStyle.Render(m.input.View()), "\n")
+}
+
+// paletteLines is the "/" command list drawn right above the prompt box, at
+// most maxRows lines.
+func (m workspaceModel) paletteLines(maxRows int) []string {
+	if !m.paletteOpen() || maxRows <= 0 {
+		return nil
+	}
+	matches := m.cmdMatches(m.input.Value())
+	var pal []string
+	if len(matches) == 0 {
+		pal = []string{lipgloss.NewStyle().Foreground(crt.warn).Render("! no such command")}
+	} else {
+		pal = renderCmdList(matches, m.cmdIdx, m.width-2, maxRows)
+	}
+	for i := range pal {
+		pal[i] = " " + pal[i]
+	}
+	return pal
+}
+
+func (m workspaceModel) mainView() string {
+	w, h := m.width, m.height
+	box := m.promptBox()
+	chatRows := m.chatRows()
+	fixed := 1 + 1 + 1 + chatRows + len(box) + 1 // header, summary, status, chat, prompt, hints
+	pal := m.paletteLines(h - fixed - 6)
+	mainH := h - fixed - len(pal)
 
 	parts := []string{screenHeader(w, "Workspace", m.project()), m.summaryLine()}
-	parts = append(parts, main...)
-	parts = append(parts, m.statusLine(), hintBar(w, fitHints(w, m.graphHints()), ""))
+	parts = append(parts, m.mainPanes(mainH)...)
+	parts = append(parts, m.statusLine())
+	parts = append(parts, m.chatStrip(chatRows)...)
+	parts = append(parts, pal...) // directly above the prompt box
+	parts = append(parts, box...)
+	parts = append(parts, m.hintLine())
 	return strings.Join(parts, "\n")
 }
 

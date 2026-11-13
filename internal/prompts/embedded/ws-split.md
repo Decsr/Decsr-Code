@@ -41,7 +41,7 @@ Output exactly this, with valid JSON, no markdown fences and no other text:
 ===END===
 
 Use `[]` under NEW_ROLES when every role already exists.
-
+{{FOLLOWUP}}
 ## User task
 
 {{TASK}}

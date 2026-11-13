@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Workspace sessions: each project keeps resumable sessions in
+  `.decsr/sessions/<id>.json` (transcript, summary, graph). `decsr resume` and
+  `/resume` pick one, `/clear` starts a new one. A second task is appended to
+  the graph. An old `.decsr/workspace.json` is migrated once.
+- `/compact` folds finished nodes into the session summary without a model call.
+- Profiles: `~/.decsr/profiles/<name>.yaml` stores role settings; `/profile`
+  saves, applies and deletes them, and `profile:` is recorded in
+  `.decsr/project.yaml`.
+- `/project` switches project from inside the Workspace (recent projects or a
+  typed path). DECSR changes directory and reopens the Workspace there; the
+  starting project and switches are added to the recent projects list.
+- Custom commands (`.decsr/commands/<name>.md`, `~/.decsr/commands/`, with
+  `$ARGUMENTS`) and role skills (`.decsr/skills/<name>.md`, `~/.decsr/skills/`,
+  listed under `skills:` on a role).
+- Commands `/status`, `/cost`, `/export` (writes `.decsr/exports/<session id>.md`),
+  `/config` (alias of `/menu`) and `/exit`; `/agents` as an alias of `/roles`.
+
+### Changed
+- `/compact` keeps a finished node when an unfinished node still depends on it,
+  and says how many it kept. Workers get the session summary in their context.
+- A follow-up task may depend on nodes already in the graph; the lead is told
+  the existing IDs and the next free number, and a reused key no longer points
+  at the old node.
+- `/` palette: `Enter` runs a command only on an exact name, an arrow/`Tab`
+  choice, or a single match; otherwise it lists the matches. A first word with a
+  second `/` is a task, and `//text` sends `/text` as a task.
+- Applying a profile is refused while nodes run. Saving a profile stores each
+  role's own values, not inherited ones.
+- Under 100 columns `i` opens the inspector as a box over the graph.
+- A paste or burst of input is inserted into the prompt as text, also from
+  graph focus; it never sends or runs by itself.
+- `/project` keeps spaces in a typed path; a recent project that is a file is
+  shown as missing.
+- Fix node IDs (`F<n>`) are not reused in a session. Terminal escape sequences
+  in lead output, titles, descriptions, session files and custom commands are
+  removed; command files with NUL bytes and session files over 8 MB are skipped.
+  Placeholders such as `{{TASK}}` inside a role or skill are no longer expanded
+  in the worker and split prompts. `split into 1 node` is singular.
+- The Workspace is one screen: node graph, inspector, chat strip and prompt,
+  with `Tab` switching focus between prompt and graph. In the prompt every
+  printable key is text; single-key node actions work in graph focus only.
+- `/resume` now lists the project's saved sessions instead of reopening the
+  last graph. The `n` key is removed; use `/clear`.
+- `decsr resume` opens the Workspace with the session list showing (it used to
+  print "not implemented").
+
 ## [0.3.0] - 2026-11-13
 
 ### Added

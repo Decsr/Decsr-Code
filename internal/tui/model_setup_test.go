@@ -109,3 +109,37 @@ func TestApplyProjectSetup_KeepsCustomRoleFields(t *testing.T) {
 		t.Fatalf("qa = %+v", qa)
 	}
 }
+
+func TestApplyProjectSetup_KeepsUserSkillsAndProfile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".decsr"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	yml := "project:\n  profile: team\nagents:\n  coder:\n    skills: [style]\n  qa:\n    skills: [review]\n  docs_writer:\n    description: Writes docs\n    skills: [style, tone]\n"
+	if err := os.WriteFile(filepath.Join(root, ".decsr", "project.yaml"), []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	msg := setupDoneMsg{
+		projectName: "p",
+		agentOverrides: map[string]agentSetupOverride{
+			"coder": {model: "new-model"},
+		},
+	}
+	if _, ok := applyProjectSetup(root, msg); !ok {
+		t.Fatal("save failed")
+	}
+	proj := config.LoadProject(root)
+	if got := proj.Agents["coder"]; got.Model != "new-model" || len(got.UserSkills) != 1 || got.UserSkills[0] != "style" {
+		t.Errorf("coder = %+v", got)
+	}
+	if got := proj.Agents["qa"]; len(got.UserSkills) != 1 || got.UserSkills[0] != "review" {
+		t.Errorf("qa (built-in, no override) = %+v", got)
+	}
+	if got := proj.Agents["docs_writer"]; len(got.UserSkills) != 2 {
+		t.Errorf("docs_writer = %+v", got)
+	}
+	if proj.Project.Profile != "team" {
+		t.Errorf("profile = %q", proj.Project.Profile)
+	}
+}

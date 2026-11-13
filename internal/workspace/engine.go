@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -17,12 +18,12 @@ const stopWait = 5 * time.Second
 // Engine schedules graph nodes onto an Executor, up to maxParallel at once.
 // All graph mutation happens under its mutex; callers read snapshots.
 type Engine struct {
-	mu       sync.Mutex
-	g        *Graph
-	ex       Executor
-	max      int
-	savePath string
-	events   chan Event
+	mu     sync.Mutex
+	g      *Graph
+	ex     Executor
+	max    int
+	save   func(*Graph) error // nil disables persistence
+	events chan Event
 
 	auto    bool
 	autoCtx context.Context
@@ -48,19 +49,29 @@ type started struct {
 
 // NewEngine creates an engine over g. savePath "" disables persistence.
 func NewEngine(g *Graph, ex Executor, maxParallel int, savePath string) *Engine {
+	var save func(*Graph) error
+	if savePath != "" {
+		save = func(g *Graph) error { return Save(savePath, g) }
+	}
+	return NewEngineWithSave(g, ex, maxParallel, save)
+}
+
+// NewEngineWithSave creates an engine over g that persists the graph through
+// save after every change. A nil save disables persistence.
+func NewEngineWithSave(g *Graph, ex Executor, maxParallel int, save func(*Graph) error) *Engine {
 	if maxParallel < 1 {
 		maxParallel = 1
 	}
 	return &Engine{
-		g:        g,
-		ex:       ex,
-		max:      maxParallel,
-		savePath: savePath,
-		events:   make(chan Event, eventBuffer),
-		cancels:  make(map[string]context.CancelFunc),
-		stopped:  make(map[string]bool),
-		stopCh:   make(chan struct{}),
-		done:     make(chan struct{}),
+		g:       g,
+		ex:      ex,
+		max:     maxParallel,
+		save:    save,
+		events:  make(chan Event, eventBuffer),
+		cancels: make(map[string]context.CancelFunc),
+		stopped: make(map[string]bool),
+		stopCh:  make(chan struct{}),
+		done:    make(chan struct{}),
 	}
 }
 
@@ -132,16 +143,33 @@ func (e *Engine) emitOutput(ev Event) {
 // saveLocked persists the graph. The caller reports a non-nil error with
 // reportSave after unlocking.
 func (e *Engine) saveLocked() error {
-	if e.savePath == "" {
+	if e.save == nil {
 		return nil
 	}
-	return Save(e.savePath, e.g)
+	return e.save(e.g)
 }
 
 func (e *Engine) reportSave(err error) {
 	if err != nil {
 		e.emitOutput(Event{Type: EventOutput, Text: "workspace: save failed: " + err.Error() + "\n"})
 	}
+}
+
+// Replace runs mut on the live graph under the lock and saves it. It refuses
+// while any node is running.
+func (e *Engine) Replace(mut func(g *Graph)) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.cancels) > 0 {
+		return errors.New("stop the running nodes first")
+	}
+	for _, n := range e.g.Nodes {
+		if n.Status == StatusRunning {
+			return errors.New("stop the running nodes first")
+		}
+	}
+	mut(e.g)
+	return e.saveLocked()
 }
 
 func editable(n *Node) bool { return n.Status == StatusTodo || n.Status == StatusFailed }

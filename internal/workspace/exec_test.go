@@ -535,3 +535,104 @@ func TestSnapshotCapSkipsDetection(t *testing.T) {
 		t.Errorf("snapshot = %v %v", s, ok)
 	}
 }
+
+func writeSkill(t *testing.T, dir, name, body string) {
+	t.Helper()
+	d := filepath.Join(dir, ".decsr", "skills")
+	if err := os.MkdirAll(d, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d, name+".md"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExecWorkIncludesUserSkills(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := config.DefaultConfig()
+	cfg.Agents["docs_writer"] = config.AgentConfig{Description: "Writes friendly docs.", UserSkills: []string{"style", "tone"}}
+	cfg.Agents["coder"] = config.AgentConfig{Skills: []string{"coder"}, UserSkills: []string{"style"}}
+	f := &execFake{text: "done\n===SUMMARY===\nok"}
+	ex := newTestExec(t, cfg, f, nil)
+	writeSkill(t, ex.root, "style", "STYLE-DOC")
+	writeSkill(t, ex.root, "tone", "TONE-DOC")
+	g := &Graph{Nodes: []*Node{
+		{ID: "T1", Title: "Docs", Kind: KindWork, Role: "docs_writer"},
+		{ID: "T2", Title: "Code", Kind: KindWork, Role: "coder"},
+	}}
+	res, err := ex.Run(context.Background(), g, g.Nodes[0], func(Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := f.reqs[0].SystemPrompt
+	for _, want := range []string{"Writes friendly docs.", "<skills>", "STYLE-DOC", "TONE-DOC", "</skills>"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "skill") {
+			t.Errorf("unexpected warning %q", w)
+		}
+	}
+	// A built-in role gets its user skills too, next to the embedded skills.
+	if _, err := ex.Run(context.Background(), g, g.Nodes[1], func(Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if p := f.reqs[1].SystemPrompt; !strings.Contains(p, "STYLE-DOC") {
+		t.Errorf("builtin prompt missing user skill")
+	}
+	if got := f.reqs[1].Skills; len(got) != 1 || got[0] != "coder" {
+		t.Errorf("embedded skills = %v", got)
+	}
+}
+
+func TestExecWorkMissingUserSkillWarns(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := config.DefaultConfig()
+	cfg.Agents["docs_writer"] = config.AgentConfig{Description: "Writes docs.", UserSkills: []string{"ghost", "style"}}
+	f := &execFake{text: "done\n===SUMMARY===\nok"}
+	ex := newTestExec(t, cfg, f, nil)
+	writeSkill(t, ex.root, "style", "STYLE-DOC")
+	g := &Graph{Nodes: []*Node{{ID: "T1", Title: "Docs", Kind: KindWork, Role: "docs_writer"}}}
+	var evs []Event
+	res, err := ex.Run(context.Background(), g, g.Nodes[0], collect(&evs))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, w := range res.Warnings {
+		if w == `skill "ghost" not found` {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %v", res.Warnings)
+	}
+	warned := false
+	for _, e := range evs {
+		if e.Type == EventOutput && strings.Contains(e.Text, `skill "ghost" not found`) {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Error("warning not emitted as output")
+	}
+	if !strings.Contains(f.reqs[0].SystemPrompt, "STYLE-DOC") {
+		t.Error("remaining skill missing from prompt")
+	}
+}
+
+func TestRolesCarryUserSkills(t *testing.T) {
+	cfg := config.DefaultConfig()
+	ac := cfg.Agents["qa"]
+	ac.UserSkills = []string{"review"}
+	cfg.Agents["qa"] = ac
+	cfg.Agents["custom"] = config.AgentConfig{UserSkills: []string{"a"}}
+	for _, name := range []string{"qa", "custom"} {
+		r, ok := FindRole(cfg, name)
+		if !ok || len(r.UserSkills) != 1 {
+			t.Errorf("%s: %+v", name, r)
+		}
+	}
+}
