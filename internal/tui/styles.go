@@ -178,6 +178,15 @@ var styleGateBanner = lipgloss.NewStyle().
 // so it also reads without color.
 var styleWsGhost = lipgloss.NewStyle().Foreground(crt.dim).Italic(true)
 
+// Skills of a node (inspector, picker) and the plugin dialogs. The state is
+// always spelled out in the text; the style only supports it.
+var (
+	styleWsSkill     = lipgloss.NewStyle().Foreground(crt.primary)
+	styleWsSkillNote = lipgloss.NewStyle().Foreground(crt.dim)
+	styleWsSkillWarn = lipgloss.NewStyle().Foreground(crt.warn)
+	styleWsPickRow   = lipgloss.NewStyle().Background(surfaceRaised)
+)
+
 // Conversation line.
 var styleConvTimestamp = lipgloss.NewStyle().Foreground(crt.dim)
 

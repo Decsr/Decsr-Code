@@ -132,7 +132,7 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	case !role.Builtin:
 		rolePrompt = role.Description
 	}
-	skillBlock, skillWarnings := x.userSkills(role.UserSkills)
+	skillBlock, skillWarnings := x.userSkills(unionSkills(role.UserSkills, n.Skills))
 	if skillBlock != "" {
 		if rolePrompt != "" {
 			rolePrompt += "\n\n"
@@ -174,6 +174,20 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 		emit(Event{NodeID: n.ID, Type: EventOutput, Text: "\u26a0 " + w + "\n"})
 	}
 	return out, nil
+}
+
+// unionSkills is the role's own skills followed by the skills the lead chose
+// for the node, each once.
+func unionSkills(role, node []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, name := range append(append([]string(nil), role...), node...) {
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // userSkills loads the file-based skills of a role and returns them as a

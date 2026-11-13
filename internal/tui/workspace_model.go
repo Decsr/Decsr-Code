@@ -73,6 +73,8 @@ type wsDeps struct {
 	recent         func() []RecentProject
 	customCommands func() []workspace.CustomCommand
 	loadPlugins    func() plugins.Set
+	// installPlugin installs a catalog plugin (plugins.Install by default).
+	installPlugin func(ctx context.Context, e plugins.CatalogEntry) error
 }
 
 func (d *wsDeps) fillDefaults(root string) {
@@ -101,6 +103,9 @@ func (d *wsDeps) fillDefaults(root string) {
 	}
 	if d.loadPlugins == nil {
 		d.loadPlugins = func() plugins.Set { return plugins.Load(root) }
+	}
+	if d.installPlugin == nil {
+		d.installPlugin = plugins.Install
 	}
 }
 
@@ -206,7 +211,8 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 				pc += "\n\n## Earlier in this session\n" + earlier
 			}
 			var raw strings.Builder
-			g, u, err := workspace.SplitNext(ctx, r, pm.Model, task, workspace.Roles(c), pc, existing, next, func(s string) {
+			opts := workspace.SplitOptions{Plugins: plugins.Load(root), Catalog: plugins.Catalog()}
+			g, u, err := workspace.SplitOpts(ctx, r, pm.Model, task, workspace.Roles(c), pc, existing, next, opts, func(s string) {
 				raw.WriteString(s)
 				if onToken != nil {
 					onToken(s)
@@ -300,13 +306,16 @@ const (
 	wsOverlayProfiles
 	wsOverlayText
 	wsOverlayInfo
+	wsOverlaySkills
 )
 
 // wsConfirm is a pending y/n question. kind: quit | menu | clear | delsession
-// | delprofile. back is the list overlay to return to on "no".
+// | delprofile | plugin. back is the list overlay to return to on "no". A
+// plugin question (arg is the plugin name) is answered y, n or a; verb is
+// "install" or "enable".
 type wsConfirm struct {
-	kind, text, arg string
-	back            wsOverlay
+	kind, text, arg, verb string
+	back                  wsOverlay
 }
 
 // wsStream carries streamed split text from the split goroutine to the UI. It
@@ -497,6 +506,11 @@ type workspaceModel struct {
 	cancelSplit  context.CancelFunc
 	stream       *wsStream
 
+	// plugin install started from the dialog
+	installing    string // plugin being installed; "" for none
+	installGen    int
+	cancelInstall context.CancelFunc
+
 	// graph
 	eng       *workspace.Engine
 	g         *workspace.Graph
@@ -535,6 +549,12 @@ type workspaceModel struct {
 	infoName string
 	infoText []string
 	infoTop  int
+
+	// skill picker (K)
+	skillNode  string
+	skillIdx   int
+	skillItems []wsSkillItem
+	skillSel   map[string]bool
 }
 
 func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...WorkspaceOptions) workspaceModel {
@@ -718,6 +738,8 @@ func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onSplitDone(msg)
 	case wsEventMsg:
 		return m.onEvent(msg)
+	case wsInstallMsg:
+		return m.onInstalled(msg)
 	case wsStoppedMsg:
 		if m.eng != nil {
 			m.g = m.eng.Snapshot()
@@ -728,7 +750,7 @@ func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == wsScreenOutput && len(m.outputs[m.outNode]) == 0 {
 			m.refreshOutput() // keeps the waiting timer moving
 		}
-		if m.splitting || m.running() > 0 {
+		if m.splitting || m.running() > 0 || m.installing != "" {
 			return m, wsTick()
 		}
 		m.ticking = false
@@ -1067,10 +1089,21 @@ func (m workspaceModel) onSplitDone(msg wsSplitDoneMsg) (tea.Model, tea.Cmd) {
 		s.Out += msg.usage.OutputTokens
 	})
 	m.input.Reset()
+	var next tea.Model
+	var cmd tea.Cmd
 	if m.eng == nil || !m.hasNodes() {
-		return m.openGraph(msg.g)
+		next, cmd = m.openGraph(msg.g)
+	} else {
+		next, cmd = m.appendGraph(msg.g)
 	}
-	return m.appendGraph(msg.g)
+	m, ok := next.(workspaceModel)
+	if !ok {
+		return next, cmd
+	}
+	for _, w := range msg.g.SplitWarnings {
+		m.say("system", workspace.Sanitize(w))
+	}
+	return m.askPlugins(), cmd
 }
 
 // restoreTask puts the task being split back into the input for editing.
@@ -1384,8 +1417,14 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openPicker(n)
 	case "A":
 		return m.acceptAll()
+	case "K":
+		return m.openSkillPicker(n)
 	case "r":
 		if n == nil {
+			return m, nil
+		}
+		if m.installing != "" {
+			m.setNotice("Wait for the plugin install to finish, then run the node", true)
 			return m, nil
 		}
 		if err := m.eng.Run(m.runCtx, n.ID); err != nil {
@@ -1474,6 +1513,10 @@ func (m workspaceModel) acceptAll() (tea.Model, tea.Cmd) {
 }
 
 func (m workspaceModel) runAll() (tea.Model, tea.Cmd) {
+	if m.installing != "" {
+		m.setNotice("Wait for the plugin install to finish, then run the nodes", true)
+		return m, nil
+	}
 	g := m.eng.Snapshot()
 	unassigned := 0
 	for _, n := range g.Nodes {
@@ -1552,6 +1595,9 @@ func (m workspaceModel) overlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case wsOverlayForm:
 		return m.formKey(msg)
 
+	case wsOverlaySkills:
+		return m.skillKey(k)
+
 	case wsOverlaySessions, wsOverlayProjects, wsOverlayProfiles:
 		return m.listKey(msg)
 
@@ -1579,6 +1625,9 @@ func (m workspaceModel) overlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // confirmKey answers the y/n question in m.confirm.
 func (m workspaceModel) confirmKey(k string) (tea.Model, tea.Cmd) {
 	c := m.confirm
+	if c.kind == "plugin" {
+		return m.pluginAnswer(k)
+	}
 	switch k {
 	case "y", "Y":
 		m.overlay = wsOverlayNone
@@ -1815,10 +1864,19 @@ func (m workspaceModel) overlayBox() string {
 		for _, l := range wrapText(m.confirm.text, boxW-4) {
 			body = append(body, warn.Render(l))
 		}
-		if !strings.HasSuffix(m.confirm.text, "y/n") { // otherwise the text already asks
+		switch {
+		case m.confirm.kind == "plugin":
+			body = append(body, "", keycap("y")+" "+m.confirm.verb+"   "+keycap("n")+" skip   "+keycap("a")+" skip all")
+		case !strings.HasSuffix(m.confirm.text, "y/n"): // otherwise the text already asks
 			body = append(body, "", keycap("y")+" yes   "+keycap("n")+" no")
 		}
 		return wsBox("Confirm", boxW, body)
+	case wsOverlaySkills:
+		n := m.g.Node(m.skillNode)
+		if n == nil {
+			return ""
+		}
+		return renderSkillPicker("Skills for "+n.ID+" · "+n.Title, m.skillItems, m.skillSel, m.skillIdx, w, h)
 	case wsOverlaySessions, wsOverlayProjects, wsOverlayProfiles, wsOverlayText, wsOverlayInfo:
 		return m.listBox()
 	}
@@ -1863,6 +1921,9 @@ func centerLine(s string, w int) string {
 func (m workspaceModel) statusLine() string {
 	w := m.width
 	text, isErr := m.notice, m.noticeErr
+	if text == "" && m.installing != "" {
+		text = m.installLine()
+	}
 	if text == "" {
 		text, isErr = m.guidance()
 	}
@@ -2012,6 +2073,9 @@ func (m workspaceModel) graphHints() []keyHint {
 			hs = append(hs, keyHint{"R", "run all"}, keyHint{"a", "reassign"})
 		}
 	}
+	if n := m.selNode(); n != nil && n.Kind == workspace.KindWork && (n.Status == workspace.StatusTodo || n.Status == workspace.StatusFailed) {
+		hs = append(hs, keyHint{"K", "skills"})
+	}
 	return append(hs, keyHint{"Tab", "prompt"}, keyHint{"←↑↓→", "move"}, keyHint{"?", "help"})
 }
 
@@ -2145,7 +2209,7 @@ func (m workspaceModel) mainPanes(mainH int) []string {
 		return wsFrame("GRAPH", galaxyAzure, m.focus == wsFocusGraph, cw, mainH, 0, canvas)
 	}
 	inspFrame := func(iw, ih int) string {
-		insp := strings.Split(renderInspector(g, n, m.cfg, iw-4, ih-2, tail), "\n")
+		insp := strings.Split(renderInspector(g, n, m.cfg, m.plug, iw-4, ih-2, tail), "\n")
 		return wsFrame(inspTitle, galaxyAzure, false, iw, ih, 1, insp)
 	}
 	var main []string

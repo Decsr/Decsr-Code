@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Decsr/Decsr-Code/internal/config"
+	"github.com/Decsr/Decsr-Code/internal/plugins"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -26,7 +27,7 @@ const (
 // number of rows and DESCRIPTION takes all the height that remains (at least
 // 4 rows, never fewer than 3). When the pane is too short, TOKENS, OUTPUT (when
 // the node is not running), FILES and SUMMARY are dropped, in that order.
-func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, w, h int, outputTail []string) string {
+func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, plug plugins.Set, w, h int, outputTail []string) string {
 	if w < 8 || h <= 0 {
 		return ""
 	}
@@ -102,6 +103,17 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, w
 		add(lipgloss.NewStyle().Foreground(galaxyGold).Render("unassigned — press a to assign"))
 	}
 	add("")
+
+	// Skills.
+	if n.Kind == workspace.KindWork {
+		if rows := nodeSkillRows(n, cfg, plug); len(rows) > 0 {
+			section("SKILLS")
+			for _, r := range rows {
+				add(r)
+			}
+			add("")
+		}
+	}
 
 	// Dependencies.
 	if len(n.DependsOn) > 0 {
@@ -286,6 +298,57 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, w
 		lines = lines[:len(lines)-1]
 	}
 	return strings.Join(clipLines(lines, h), "\n")
+}
+
+// inspSkillRows is the most skill rows the inspector shows; the last one says
+// how many more there are.
+const inspSkillRows = 5
+
+// nodeSkillRows lists the skills a node gets: the role's own first, marked
+// "(role)", then the ones the lead chose, marked "(lead)". An id that no
+// enabled plugin provides gets "(not installed)". A plain name (a skill file)
+// is taken as present.
+func nodeSkillRows(n *workspace.Node, cfg config.Config, plug plugins.Set) []string {
+	type row struct {
+		id, from string
+	}
+	var rows []row
+	seen := map[string]bool{}
+	if r, ok := workspace.FindRole(cfg, n.Role); ok {
+		for _, id := range r.UserSkills {
+			if !seen[id] {
+				seen[id] = true
+				rows = append(rows, row{id, "role"})
+			}
+		}
+	}
+	for _, id := range n.Skills {
+		if !seen[id] {
+			seen[id] = true
+			rows = append(rows, row{id, "lead"})
+		}
+	}
+	have := map[string]bool{}
+	for _, p := range plug.Plugins {
+		if p.Enabled {
+			for _, s := range p.Skills {
+				have[s.ID] = true
+			}
+		}
+	}
+	var out []string
+	for i, r := range rows {
+		if i >= inspSkillRows-1 && len(rows) > inspSkillRows {
+			out = append(out, styleWsSkillNote.Render(fmt.Sprintf("… +%d more", len(rows)-i)))
+			break
+		}
+		line := styleWsSkill.Render(workspace.Sanitize(r.id)) + styleWsSkillNote.Render(" ("+r.from+")")
+		if strings.Contains(r.id, ":") && !have[r.id] {
+			line += styleWsSkillWarn.Render(" (not installed)")
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 func clipLines(lines []string, h int) []string {
@@ -637,6 +700,7 @@ func workspaceHelp(cmds []wsCommand) []helpSection {
 			{"Enter / o", "open the full output of the node"},
 			{"i", "show or hide the inspector (under 100 columns it opens over the graph; i or Esc closes it)"},
 			{"a / A", "pick the agent / accept all suggestions"},
+			{"K", "choose the plugin skills of the node"},
 			{"r / R", "run the node / run every assigned node"},
 			{"s / S", "stop the node / stop all nodes"},
 			{"f", "add a fix node after a failed Build & test"},

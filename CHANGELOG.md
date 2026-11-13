@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The lead picks plugin skills per sub-task: it sees the skills of the enabled
+  plugins and a built-in catalog of installable plugins, lists only the skills
+  each sub-task needs (`skills` in the split) and may ask for plugins that are
+  not installed or disabled. Unknown skills and plugins are dropped.
+- Nodes keep their skills: they are added to the role's own skills when the
+  node runs, shown in the inspector as `(role)`, `(lead)` or `(not installed)`,
+  and editable with `K` on a todo or failed node.
+- Plugin requests: after a split the Workspace asks, per plugin, whether to
+  install (or enable) it (`y`, `n`, `a` skips all). `/plugin available` lists
+  the catalog and `/plugin install <name>` installs a catalog plugin after the
+  same confirmation. Installs use git (shallow clone into
+  `~/.decsr/plugin-src`) and only ever come from the built-in catalog.
+
 ## [0.5.0] - 2026-11-13
 
 ### Added

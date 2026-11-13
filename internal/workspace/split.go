@@ -29,7 +29,7 @@ var reservedKeyRe = regexp.MustCompile(`^(CHECK|F[0-9]+)$`)
 
 // BuildSplitPrompt assembles the lead's system prompt.
 func BuildSplitPrompt(task string, roles []Role, projectContext string) string {
-	return buildSplitPrompt(task, roles, projectContext, nil, 0)
+	return buildSplitPrompt(task, roles, projectContext, nil, 0, SplitOptions{})
 }
 
 // followUpRules is added to the prompt when the graph already has nodes.
@@ -60,7 +60,7 @@ func nextAfter(ids []string) int {
 	return top + 1
 }
 
-func buildSplitPrompt(task string, roles []Role, projectContext string, existing []string, next int) string {
+func buildSplitPrompt(task string, roles []Role, projectContext string, existing []string, next int, opts SplitOptions) string {
 	var sb strings.Builder
 	for _, r := range roles {
 		if r.ReadOnly {
@@ -73,6 +73,8 @@ func buildSplitPrompt(task string, roles []Role, projectContext string, existing
 	// One pass, so placeholder text inside a value is never substituted.
 	return strings.NewReplacer(
 		"{{ROLES}}", strings.TrimRight(sb.String(), "\n"),
+		"{{SKILLS}}", skillsSection(opts.Plugins),
+		"{{CATALOG}}", catalogSection(opts.Plugins, opts.Catalog),
 		"{{FOLLOWUP}}", followUpRules(existing, next),
 		"{{TASK}}", task,
 		"{{PROJECT_CONTEXT}}", projectContext,
@@ -85,6 +87,7 @@ type splitTask struct {
 	Description string   `json:"description"`
 	Role        string   `json:"role"`
 	DependsOn   []string `json:"depends_on"`
+	Skills      []string `json:"skills"`
 }
 
 // UnmarshalJSON accepts the common alternative key names the lead uses; an
@@ -105,6 +108,7 @@ func (t *splitTask) UnmarshalJSON(data []byte) error {
 		Dependencies []string `json:"dependencies"`
 		DependsOnC   []string `json:"dependsOn"`
 		Deps         []string `json:"deps"`
+		Skills       idList   `json:"skills"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -122,6 +126,7 @@ func (t *splitTask) UnmarshalJSON(data []byte) error {
 	t.Description = raw.Description
 	t.Role = first(raw.Role, raw.Agent, raw.Assignee, raw.Owner)
 	t.DependsOn = raw.DependsOn
+	t.Skills = raw.Skills
 	for _, alt := range [][]string{raw.Depends, raw.Dependencies, raw.DependsOnC, raw.Deps} {
 		if t.DependsOn == nil {
 			t.DependsOn = alt
@@ -140,6 +145,15 @@ func ParseSplit(task, output string, roles []Role) (*Graph, error) {
 // one of the existing node IDs (and not one of the new tasks' own keys) is
 // kept as an external dependency and passes validation.
 func ParseSplitWith(task, output string, roles []Role, existing []string) (*Graph, error) {
+	return ParseSplitOpts(task, output, roles, existing, SplitOptions{})
+}
+
+// ParseSplitOpts is ParseSplitWith with the plugins the lead knew about. The
+// skills of a node are kept when they belong to an enabled plugin or to a
+// catalog plugin the lead asked for under PLUGINS; the others are dropped and
+// reported in Graph.SplitWarnings. PLUGINS entries outside the catalog are
+// dropped too.
+func ParseSplitOpts(task, output string, roles []Role, existing []string, opts SplitOptions) (*Graph, error) {
 	tasksRaw, ok := section(output, markerTasks)
 	if !ok {
 		return nil, fmt.Errorf("split: no %s section in the lead's answer", markerTasks)
@@ -190,6 +204,8 @@ func ParseSplitWith(task, output string, roles []Role, existing []string) (*Grap
 	}
 
 	ids := splitIDs(tasks)
+	reqs, warns := parsePluginRequests(output, opts)
+	allowed := allowedSkills(opts, reqs)
 
 	proposed := map[string]bool{}
 	var proposedOrder []string
@@ -215,6 +231,11 @@ func ParseSplitWith(task, output string, roles []Role, existing []string) (*Grap
 			}
 			nd.DependsOn = append(nd.DependsOn, d)
 		}
+		var dropped []string
+		nd.Skills, dropped = filterSkills(t.Skills, allowed)
+		if len(dropped) > 0 {
+			warns = append(warns, fmt.Sprintf("%s: skill %s is not installed or suggested, dropped", nd.ID, strings.Join(dropped, ", ")))
+		}
 		if role := splitRole(t.Role, known); role != "" {
 			nd.SuggestedRole = role
 			if !known[role] && !proposed[role] {
@@ -239,6 +260,9 @@ func ParseSplitWith(task, output string, roles []Role, existing []string) (*Grap
 			g.NewRoles = append(g.NewRoles, NewRole{Name: name})
 		}
 	}
+
+	g.PluginRequests = reqs
+	g.SplitWarnings = warns
 
 	// External dependencies are checked apart: Validate only knows g's nodes.
 	own := make(map[string]bool, len(g.Nodes))
@@ -291,8 +315,13 @@ func SplitWith(ctx context.Context, r runner.LLMRunner, model string, task strin
 // SplitNext is SplitWith with an explicit first number for the new sub-tasks
 // (0 = after the highest existing T number).
 func SplitNext(ctx context.Context, r runner.LLMRunner, model string, task string, roles []Role, projectContext string, existing []string, next int, onToken func(string)) (*Graph, runner.TokenUsage, error) {
+	return SplitOpts(ctx, r, model, task, roles, projectContext, existing, next, SplitOptions{}, onToken)
+}
+
+// SplitOpts is SplitNext with the plugins the lead may use or suggest.
+func SplitOpts(ctx context.Context, r runner.LLMRunner, model string, task string, roles []Role, projectContext string, existing []string, next int, opts SplitOptions, onToken func(string)) (*Graph, runner.TokenUsage, error) {
 	req := runner.CompletionRequest{
-		SystemPrompt: buildSplitPrompt(task, roles, projectContext, existing, next),
+		SystemPrompt: buildSplitPrompt(task, roles, projectContext, existing, next, opts),
 		Model:        model,
 		Messages:     []runner.ConvMessage{{Role: "user", Content: task}},
 	}
@@ -300,7 +329,7 @@ func SplitNext(ctx context.Context, r runner.LLMRunner, model string, task strin
 	if err != nil {
 		return nil, usage, err
 	}
-	g, err := ParseSplitWith(task, raw, roles, existing)
+	g, err := ParseSplitOpts(task, raw, roles, existing, opts)
 	if err != nil {
 		return nil, usage, err
 	}
@@ -320,7 +349,7 @@ func SplitNext(ctx context.Context, r runner.LLMRunner, model string, task strin
 		}
 		return g, usage, nil
 	}
-	if g2, err := ParseSplitWith(task, raw2, roles, existing); err == nil && anySuggestedRole(g2) {
+	if g2, err := ParseSplitOpts(task, raw2, roles, existing, opts); err == nil && anySuggestedRole(g2) {
 		return g2, usage, nil
 	}
 	return g, usage, nil
@@ -374,7 +403,7 @@ func section(s, marker string) (string, bool) {
 	}
 	rest := s[i+len(marker):]
 	end := len(rest)
-	for _, m := range []string{markerTitle, markerTasks, markerNewRoles, markerEnd} {
+	for _, m := range []string{markerTitle, markerTasks, markerNewRoles, markerPlugins, markerEnd} {
 		if j := strings.Index(rest, m); j >= 0 && j < end {
 			end = j
 		}

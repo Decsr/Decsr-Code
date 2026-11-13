@@ -1,0 +1,398 @@
+[
+  {
+    "name": "superpowers",
+    "repo": "obra/superpowers",
+    "path": "",
+    "description": "Disciplined workflows for planning, test-driven development, debugging and verifying work before calling it done.",
+    "skills": [
+      "brainstorming",
+      "diagnosing-superpowers",
+      "dispatching-parallel-agents",
+      "executing-plans",
+      "finishing-a-development-branch",
+      "receiving-code-review",
+      "requesting-code-review",
+      "subagent-driven-development",
+      "systematic-debugging",
+      "test-driven-development",
+      "using-git-worktrees",
+      "using-superpowers",
+      "verification-before-completion",
+      "writing-plans",
+      "writing-skills"
+    ],
+    "agents": [],
+    "tags": [
+      "cpp",
+      "csharp",
+      "docs",
+      "go",
+      "java",
+      "python",
+      "review",
+      "testing"
+    ]
+  },
+  {
+    "name": "ui-ux-pro-max",
+    "repo": "nextlevelbuilder/ui-ux-pro-max-skill",
+    "path": "",
+    "description": "UI and UX design knowledge: styles, palettes, typography, layout and accessibility for web and desktop interfaces.",
+    "skills": [
+      "banner-design",
+      "brand",
+      "design",
+      "design-system",
+      "slides",
+      "ui-styling",
+      "ui-ux-pro-max"
+    ],
+    "agents": [],
+    "tags": [
+      "ui"
+    ]
+  },
+  {
+    "name": "modern-cpp",
+    "repo": "trailofbits/skills",
+    "path": "plugins/modern-cpp",
+    "description": "Modern C++ (C++20 and later) practices for new code and for modernizing old code.",
+    "skills": [
+      "modern-cpp"
+    ],
+    "agents": [],
+    "tags": [
+      "cpp"
+    ]
+  },
+  {
+    "name": "modern-python",
+    "repo": "trailofbits/skills",
+    "path": "plugins/modern-python",
+    "description": "Modern Python practices: project layout, tooling and typing.",
+    "skills": [
+      "modern-python"
+    ],
+    "agents": [],
+    "tags": [
+      "python"
+    ]
+  },
+  {
+    "name": "insecure-defaults",
+    "repo": "trailofbits/skills",
+    "path": "plugins/insecure-defaults",
+    "description": "Finds insecure defaults such as hardcoded credentials, fallback secrets and weak authentication settings.",
+    "skills": [],
+    "agents": [],
+    "tags": [
+      "security"
+    ]
+  },
+  {
+    "name": "differential-review",
+    "repo": "trailofbits/skills",
+    "path": "plugins/differential-review",
+    "description": "Security review of a code change with git history analysis and blast radius estimation.",
+    "skills": [
+      "differential-review"
+    ],
+    "agents": [
+      "adversarial-modeler"
+    ],
+    "tags": [
+      "review",
+      "security"
+    ]
+  },
+  {
+    "name": "feature-dev",
+    "repo": "anthropics/claude-plugins-official",
+    "path": "plugins/feature-dev",
+    "description": "Feature development workflow with agents for code exploration, architecture design and review.",
+    "skills": [],
+    "agents": [
+      "code-architect",
+      "code-explorer",
+      "code-reviewer"
+    ],
+    "tags": [
+      "cpp",
+      "csharp",
+      "go",
+      "java",
+      "python",
+      "review"
+    ]
+  },
+  {
+    "name": "pr-review-toolkit",
+    "repo": "anthropics/claude-plugins-official",
+    "path": "plugins/pr-review-toolkit",
+    "description": "Review agents for comments, tests, error handling, type design and code simplification.",
+    "skills": [],
+    "agents": [
+      "code-reviewer",
+      "code-simplifier",
+      "comment-analyzer",
+      "pr-test-analyzer",
+      "silent-failure-hunter",
+      "type-design-analyzer"
+    ],
+    "tags": [
+      "review",
+      "testing"
+    ]
+  },
+  {
+    "name": "audit-context-building",
+    "repo": "trailofbits/skills",
+    "path": "plugins/audit-context-building",
+    "description": "Builds a function-by-function understanding of a codebase before looking for bugs.",
+    "skills": [
+      "audit-context-building"
+    ],
+    "agents": [
+      "function-analyzer"
+    ],
+    "tags": [
+      "review",
+      "security"
+    ]
+  },
+  {
+    "name": "c-review",
+    "repo": "trailofbits/skills",
+    "path": "plugins/c-review",
+    "description": "Security review of C and C++ code with coverage checked against a parse of the source.",
+    "skills": [
+      "c-review"
+    ],
+    "agents": [
+      "c-review-worker"
+    ],
+    "tags": [
+      "cpp",
+      "review",
+      "security"
+    ]
+  },
+  {
+    "name": "code-improver",
+    "repo": "trailofbits/skills",
+    "path": "plugins/code-improver",
+    "description": "Autonomous review-and-fix passes over a branch's changes.",
+    "skills": [
+      "code-improver",
+      "pr-improver",
+      "skill-improver"
+    ],
+    "agents": [
+      "fixer"
+    ],
+    "tags": [
+      "review"
+    ]
+  },
+  {
+    "name": "sharp-edges",
+    "repo": "trailofbits/skills",
+    "path": "plugins/sharp-edges",
+    "description": "Spots error-prone APIs, dangerous configurations and footgun designs.",
+    "skills": [
+      "sharp-edges"
+    ],
+    "agents": [
+      "sharp-edges-analyzer"
+    ],
+    "tags": [
+      "review",
+      "security"
+    ]
+  },
+  {
+    "name": "static-analysis",
+    "repo": "trailofbits/skills",
+    "path": "plugins/static-analysis",
+    "description": "CodeQL, Semgrep and SARIF parsing for finding vulnerabilities.",
+    "skills": [
+      "codeql",
+      "sarif-parsing",
+      "semgrep"
+    ],
+    "agents": [],
+    "tags": [
+      "cpp",
+      "csharp",
+      "go",
+      "java",
+      "python",
+      "security"
+    ]
+  },
+  {
+    "name": "property-based-testing",
+    "repo": "trailofbits/skills",
+    "path": "plugins/property-based-testing",
+    "description": "Writes and reviews property-based tests (Hypothesis, fast-check, proptest).",
+    "skills": [
+      "property-based-testing"
+    ],
+    "agents": [],
+    "tags": [
+      "python",
+      "testing"
+    ]
+  },
+  {
+    "name": "mutation-testing",
+    "repo": "trailofbits/skills",
+    "path": "plugins/mutation-testing",
+    "description": "Sets up mutation testing campaigns and analyzes surviving mutants.",
+    "skills": [
+      "mutation-testing"
+    ],
+    "agents": [],
+    "tags": [
+      "testing"
+    ]
+  },
+  {
+    "name": "variant-analysis",
+    "repo": "trailofbits/skills",
+    "path": "plugins/variant-analysis",
+    "description": "Finds similar bugs across a codebase from a known vulnerability pattern.",
+    "skills": [
+      "variant-analysis"
+    ],
+    "agents": [],
+    "tags": [
+      "review",
+      "security"
+    ]
+  },
+  {
+    "name": "testing-handbook-skills",
+    "repo": "trailofbits/skills",
+    "path": "plugins/testing-handbook-skills",
+    "description": "Fuzzing, sanitizer and coverage guides from the Trail of Bits testing handbook.",
+    "skills": [
+      "address-sanitizer",
+      "aflpp",
+      "atheris",
+      "cargo-fuzz",
+      "constant-time-testing",
+      "coverage-analysis",
+      "fuzzing-dictionary",
+      "fuzzing-obstacles",
+      "harness-writing",
+      "libafl",
+      "libfuzzer",
+      "ossfuzz",
+      "ruzzy",
+      "testing-handbook-generator",
+      "wycheproof"
+    ],
+    "agents": [],
+    "tags": [
+      "cpp",
+      "security",
+      "testing"
+    ]
+  },
+  {
+    "name": "spec-to-code-compliance",
+    "repo": "trailofbits/skills",
+    "path": "plugins/spec-to-code-compliance",
+    "description": "Checks code against the documentation that specifies it, one agent per requirement.",
+    "skills": [
+      "spec-to-code-compliance"
+    ],
+    "agents": [
+      "spec-compliance-checker"
+    ],
+    "tags": [
+      "docs",
+      "review"
+    ]
+  },
+  {
+    "name": "supply-chain-risk-auditor",
+    "repo": "trailofbits/skills",
+    "path": "plugins/supply-chain-risk-auditor",
+    "description": "Audits npm, PyPI and Go dependencies for supply-chain risk.",
+    "skills": [
+      "supply-chain-risk-auditor"
+    ],
+    "agents": [],
+    "tags": [
+      "go",
+      "python",
+      "security"
+    ]
+  },
+  {
+    "name": "post-patch-validation",
+    "repo": "trailofbits/skills",
+    "path": "plugins/post-patch-validation",
+    "description": "Validates a security patch against the reported bug and its root-cause variants.",
+    "skills": [
+      "post-patch-validation"
+    ],
+    "agents": [],
+    "tags": [
+      "security",
+      "testing"
+    ]
+  },
+  {
+    "name": "frontend-design",
+    "repo": "anthropics/claude-plugins-official",
+    "path": "plugins/frontend-design",
+    "description": "Guidance for distinctive, well-built frontend interfaces.",
+    "skills": [
+      "frontend-design"
+    ],
+    "agents": [],
+    "tags": [
+      "ui"
+    ]
+  },
+  {
+    "name": "code-simplifier",
+    "repo": "anthropics/claude-plugins-official",
+    "path": "plugins/code-simplifier",
+    "description": "Agent that simplifies code for clarity while keeping behavior.",
+    "skills": [],
+    "agents": [
+      "code-simplifier"
+    ],
+    "tags": [
+      "review"
+    ]
+  },
+  {
+    "name": "code-modernization",
+    "repo": "anthropics/claude-plugins-official",
+    "path": "plugins/code-modernization",
+    "description": "Guided modernization of legacy code: assessment, business rules, migration and tests.",
+    "skills": [],
+    "agents": [
+      "architecture-critic",
+      "business-rules-extractor",
+      "legacy-analyst",
+      "scaffolder",
+      "security-auditor",
+      "test-engineer",
+      "uplift-migrator",
+      "version-delta-analyst"
+    ],
+    "tags": [
+      "cpp",
+      "csharp",
+      "java",
+      "review",
+      "testing"
+    ]
+  }
+]

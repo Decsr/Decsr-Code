@@ -126,6 +126,7 @@ it. It stays hidden until the graph or the saved sessions change.
 | `i` | Show or hide the inspector. Under 100 columns it opens as a box over the graph; `i` or `Esc` closes it |
 | `a` | Pick the role for the selected node |
 | `A` | Accept all suggestions that are defined roles |
+| `K` | Choose the plugin skills of the selected node (see [How the lead picks skills](#how-the-lead-picks-skills)) |
 | `r` | Run the selected node |
 | `R` | Run every assigned node as dependencies finish |
 | `s` | Stop the selected node |
@@ -170,7 +171,7 @@ prompt and lands there.
 | `/project` | Switch to another project (see [Switching project](#switching-project)) |
 | `/profile` | Save or apply a profile of role settings (see [Profiles](#profiles)) |
 | `/roles` (`/agents`) | List all roles, with their skills, and create a new one |
-| `/plugin` (`/plugins`) | List plugins; `/plugin enable <name>`, `/plugin disable <name>` and `/plugin reload` (see [Plugins](#plugins)) |
+| `/plugin` (`/plugins`) | List plugins; `/plugin available`, `/plugin install <name>`, `/plugin enable <name>`, `/plugin disable <name>` and `/plugin reload` (see [Plugins](#plugins)) |
 | `/status` | Project path, language, profile, session, node counts, roles with runner/model/effort, parallel limit, custom commands and skills found |
 | `/cost` | Tokens in and out per node and per role, the lead's usage, and the total |
 | `/export` | Write the session to `.decsr/exports/<session id>.md` (title, transcript, summary, each node with role, status, files and summary) |
@@ -361,6 +362,54 @@ hooks and MCP servers are not used by decsr. `/plugin disable <name>` and
 `/plugin enable <name>` change `~/.decsr/plugins/disabled` (one name per line)
 and reload; `/plugin reload` rescans the folders. These are refused while nodes
 are running, and a node assigned a role that is gone loses that assignment.
+### How the lead picks skills
+
+When the lead splits a task it is told which skills the enabled plugins offer
+(`- <plugin>:<skill>: <description>`, descriptions cut to about 120
+characters, at most 60 lines) and which catalog plugins are not installed or
+are disabled. For each sub-task it lists in `skills` only the skill ids that
+agent really needs, often none, and never a skill for another language or
+stack than the sub-task touches. Ids that are not an enabled plugin's skill
+(or a skill of a plugin the lead asked for, see below) are dropped and the chat
+says so.
+
+The skills a node gets are the role's own `skills:` followed by the ones the
+lead chose, each once. A skill that does not resolve shows the usual
+`skill "..." not found` warning. The inspector lists them under SKILLS, each
+marked `(role)` or `(lead)`, and `(not installed)` when no enabled plugin
+provides it. On a todo or failed work node `K` opens a checklist of the
+installed skills to change the lead's choice (the role's skills are shown but
+fixed; `Space` toggles, `Enter` saves, `Esc` cancels). It is refused while the
+node runs or after it is done. The choice is saved with the session.
+
+### Installing a plugin the lead asks for
+
+The lead can also name plugins that would help but are not installed (or are
+installed and disabled) under PLUGINS, with a one-sentence reason (at most 5,
+only plugins of the built-in catalog; anything else is ignored). After the
+split a dialog asks about each one:
+
+```
+The lead wants plugin modern-cpp: <reason>. Install from github.com/trailofbits/skills?
+  y install   n skip   a skip all
+```
+
+For a disabled plugin the text says it is installed but disabled and `y`
+enables it. Nodes do not run while a question is open or an install runs.
+`y` clones the repository (depth 1) into `~/.decsr/plugin-src/<owner>-<repo>`
+(or updates the clone), copies the plugin folder without `.git` to
+`~/.decsr/plugins/<name>` and reloads plugins and roles; an existing copy is
+replaced only once the new one is complete. A failure is shown in the chat and
+the plugin stays uninstalled. Each request ends up `installed` or `declined`
+in the session; a declined plugin is not asked about again in that session,
+and the nodes keep the skill id (the inspector shows `(not installed)`). A
+request left pending (for example in a resumed session) shows as the ghost
+prompt `/plugin install <name>`.
+
+`/plugin available` lists the catalog (name, installed or disabled or not
+installed, description, skills, agents). `/plugin install <name>` asks the same
+question and installs one; a name outside the catalog is refused.
+
 ### Recommended set
 
 `scripts/install-plugins.sh` (needs git; `--dry-run` previews, `--uninstall`

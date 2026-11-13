@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Decsr/Decsr-Code/internal/config"
+	"github.com/Decsr/Decsr-Code/internal/plugins"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -29,7 +30,7 @@ func inspectorGraph() (*workspace.Graph, *workspace.Node) {
 
 func TestInspectorShowsDepsAndError(t *testing.T) {
 	g, n := inspectorGraph()
-	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), 36, 30, []string{"tail one", "tail two"}))
+	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, 36, 30, []string{"tail one", "tail two"}))
 	flat := strings.Join(strings.Fields(out), " ")
 	for _, want := range []string{"T3 · Storage tests", "failed", "ROLE", "qa", "DEPENDS ON", "✓ T1 Data model",
 		"DESCRIPTION", "FILES", "store_test.go", "ERROR", "TestStorage expected 3 got 2", "TOKENS", "in 1.2k", "OUTPUT", "tail two"} {
@@ -42,7 +43,7 @@ func TestInspectorShowsDepsAndError(t *testing.T) {
 func TestInspectorShowsBlockers(t *testing.T) {
 	g := wsFixtureGraph()
 	g.Node("T4").Role = "coder"
-	out := ansi.Strip(renderInspector(g, g.Node("T4"), config.DefaultConfig(), 36, 20, nil))
+	out := ansi.Strip(renderInspector(g, g.Node("T4"), config.DefaultConfig(), plugins.Set{}, 36, 20, nil))
 	if !strings.Contains(out, "blocked by T2, T3") {
 		t.Fatalf("no blockers:\n%s", out)
 	}
@@ -50,7 +51,7 @@ func TestInspectorShowsBlockers(t *testing.T) {
 
 func TestInspectorSuggestedUndefinedRole(t *testing.T) {
 	g := wsFixtureGraph()
-	out := ansi.Strip(renderInspector(g, g.Node("T2"), config.DefaultConfig(), 46, 20, nil))
+	out := ansi.Strip(renderInspector(g, g.Node("T2"), config.DefaultConfig(), plugins.Set{}, 46, 20, nil))
 	if !strings.Contains(out, "suggested: docs_writer (not defined yet)") {
 		t.Fatalf("missing suggestion:\n%s", out)
 	}
@@ -64,10 +65,10 @@ func TestInspectorFitsEveryBox(t *testing.T) {
 		tail[i] = strings.Repeat("output ", 10)
 	}
 	for _, sz := range [][2]int{{8, 1}, {20, 3}, {36, 8}, {36, 12}, {36, 30}, {80, 40}} {
-		out := renderInspector(g, n, config.DefaultConfig(), sz[0], sz[1], tail)
+		out := renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, sz[0], sz[1], tail)
 		assertFits(t, "inspector", out, sz[0], sz[1])
 	}
-	if out := renderInspector(g, nil, config.DefaultConfig(), 30, 5, nil); !strings.Contains(ansi.Strip(out), "No node selected") {
+	if out := renderInspector(g, nil, config.DefaultConfig(), plugins.Set{}, 30, 5, nil); !strings.Contains(ansi.Strip(out), "No node selected") {
 		t.Fatalf("nil node: %q", out)
 	}
 }
@@ -138,7 +139,7 @@ func TestInspectorLayoutByHeight(t *testing.T) {
 	g, n, tail := inspectorLongNode()
 	cfg := config.DefaultConfig()
 
-	out14 := ansi.Strip(renderInspector(g, n, cfg, 40, 14, tail))
+	out14 := ansi.Strip(renderInspector(g, n, cfg, plugins.Set{}, 40, 14, tail))
 	r := sectionRows(out14)
 	assertFits(t, "h14", out14, 40, 14)
 	if r["DESCRIPTION"] < 3 {
@@ -150,7 +151,7 @@ func TestInspectorLayoutByHeight(t *testing.T) {
 		}
 	}
 
-	out22 := ansi.Strip(renderInspector(g, n, cfg, 40, 22, tail))
+	out22 := ansi.Strip(renderInspector(g, n, cfg, plugins.Set{}, 40, 22, tail))
 	r = sectionRows(out22)
 	assertFits(t, "h22", out22, 40, 22)
 	if r["DESCRIPTION"] < 4 {
@@ -160,7 +161,7 @@ func TestInspectorLayoutByHeight(t *testing.T) {
 		t.Errorf("h22 should drop TOKENS first:\n%s", out22)
 	}
 
-	out32 := ansi.Strip(renderInspector(g, n, cfg, 40, 32, tail))
+	out32 := ansi.Strip(renderInspector(g, n, cfg, plugins.Set{}, 40, 32, tail))
 	r = sectionRows(out32)
 	assertFits(t, "h32", out32, 40, 32)
 	for _, sec := range []string{"DESCRIPTION", "FILES", "SUMMARY", "OUTPUT"} {
@@ -171,7 +172,7 @@ func TestInspectorLayoutByHeight(t *testing.T) {
 	if _, ok := r["TOKENS"]; ok {
 		t.Errorf("h32 keeps TOKENS although the description would drop below 4 rows:\n%s", out32)
 	}
-	out40 := ansi.Strip(renderInspector(g, n, cfg, 40, 40, tail))
+	out40 := ansi.Strip(renderInspector(g, n, cfg, plugins.Set{}, 40, 40, tail))
 	if _, ok := sectionRows(out40)["TOKENS"]; !ok {
 		t.Errorf("h40 lacks TOKENS:\n%s", out40)
 	}
@@ -194,7 +195,7 @@ func TestInspectorDescriptionAbsorbsLeftover(t *testing.T) {
 	g, n, _ := inspectorLongNode()
 	n.Summary, n.Files = "", nil
 	n.InputTokens, n.OutputTokens = 0, 0
-	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), 40, 30, nil))
+	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, 40, 30, nil))
 	if r := sectionRows(out)["DESCRIPTION"]; r < 15 {
 		t.Errorf("description rows = %d:\n%s", r, out)
 	}
@@ -204,7 +205,7 @@ func TestInspectorShowsObservedFiles(t *testing.T) {
 	g, n, _ := inspectorLongNode()
 	n.Files = []string{"a.go"}
 	n.Observed = []string{"todo.py"}
-	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), 60, 30, nil))
+	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, 60, 30, nil))
 	if !strings.Contains(out, "todo.py (by the agent's own tools)") || strings.Index(out, "a.go") > strings.Index(out, "todo.py") {
 		t.Errorf("observed files:\n%s", out)
 	}
@@ -215,7 +216,7 @@ func TestInspectorWarningsAndErrorShownUpToSixRows(t *testing.T) {
 	n.Status = workspace.StatusFailed
 	n.Error = strings.Repeat("boom ", 100)
 	n.Warnings = []string{"first warning", "second warning"}
-	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), 40, 50, nil))
+	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, 40, 50, nil))
 	r := sectionRows(out)
 	if r["ERROR"] != 6 || r["WARNINGS"] != 2 {
 		t.Errorf("error=%d warnings=%d:\n%s", r["ERROR"], r["WARNINGS"], out)

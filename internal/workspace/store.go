@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/Decsr/Decsr-Code/internal/config"
 )
 
 // FileName is the graph file inside .decsr.
@@ -109,5 +112,36 @@ func (g *Graph) Sanitize() {
 	g.Title = Sanitize(g.Title)
 	for _, n := range g.Nodes {
 		n.Title, n.Description = Sanitize(n.Title), SanitizeText(n.Description)
+		n.Skills = validSkillIDs(n.Skills)
 	}
+	var reqs []PluginRequest
+	for _, r := range g.PluginRequests {
+		switch r.Status {
+		case PluginPending, PluginInstalled, PluginDeclined:
+		default:
+			continue
+		}
+		if !config.ValidName(r.Name) {
+			continue
+		}
+		r.Reason = Sanitize(r.Reason)
+		reqs = append(reqs, r)
+	}
+	g.PluginRequests = reqs
+}
+
+// validSkillIDs keeps the well-formed "<plugin>:<skill>" ids of ids, once
+// each, in order.
+func validSkillIDs(ids []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if seen[id] || !config.ValidQualifiedName(id) {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
 }
