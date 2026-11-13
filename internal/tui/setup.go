@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/artifacts"
 	"github.com/Decsr/Decsr-Code/internal/config"
+	"github.com/Decsr/Decsr-Code/internal/lang"
 	"github.com/Decsr/Decsr-Code/internal/prompts"
 	"github.com/Decsr/Decsr-Code/internal/runner"
 )
@@ -297,7 +299,7 @@ func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs 
 		lmstudioModels:        nil,
 		lmstudioModelsLoading: true,
 		providerAvailability:  make(map[providerKind]error),
-		progLanguages:         config.SupportedProgrammingLanguages,
+		progLanguages:         append([]string{progLangAuto}, config.SupportedProgrammingLanguages...),
 		projectNameInput:      nameInput,
 		agentRoles:            setupAgentRoles,
 		agentOverrides:        make(map[string]agentSetupOverride),
@@ -351,6 +353,16 @@ func NewSetupModelWithOverrides(currentRunner, currentModel, currentEffort, curr
 			}
 		}
 	}
+	// Custom workspace roles are listed after the built-ins.
+	var custom []string
+	for role := range projectAgents {
+		// "pr" is the pull-request agent, not a workspace role.
+		if !config.IsBuiltinRole(role) && role != "pr" {
+			custom = append(custom, role)
+		}
+	}
+	sort.Strings(custom)
+	m.agentRoles = append(append([]string(nil), setupAgentRoles...), custom...)
 	for role, ac := range projectAgents {
 		ov := agentSetupOverride{}
 		if ac.Runner != "" {
@@ -1217,7 +1229,7 @@ func (m SetupModel) currentPayload() setupDoneMsg {
 		overrides[k] = v
 	}
 	progLang := ""
-	if m.progLangIdx < len(m.progLanguages) {
+	if m.progLangIdx < len(m.progLanguages) && m.progLanguages[m.progLangIdx] != progLangAuto {
 		progLang = m.progLanguages[m.progLangIdx]
 	}
 
@@ -1593,6 +1605,30 @@ func (m SetupModel) renderProjectNameCard(contentWidth int, label, focusLabel, d
 	return setupCard("Project Name", isFocused, contentWidth, lines)
 }
 
+// progLangAuto is the setup-list entry that saves an empty language so the
+// language is detected from the project files.
+const progLangAuto = "auto"
+
+// progLangLabels returns the list rows; the auto row shows what is detected.
+func (m SetupModel) progLangLabels() []string {
+	labels := append([]string(nil), m.progLanguages...)
+	for i, l := range labels {
+		if l != progLangAuto {
+			continue
+		}
+		detected := ""
+		if m.root != "" {
+			detected = lang.Detect(m.root)
+		}
+		if detected == "" {
+			labels[i] = "auto (not detected)"
+		} else {
+			labels[i] = "auto (" + detected + ")"
+		}
+	}
+	return labels
+}
+
 func (m SetupModel) renderProgLangCard(contentWidth int, label, focusLabel, active, inactive, dim lipgloss.Style) string {
 	isFocused := m.section == sectionProgLang
 
@@ -1600,7 +1636,7 @@ func (m SetupModel) renderProgLangCard(contentWidth int, label, focusLabel, acti
 	lines = append(lines, dim.Render("  Primary language for generated code (overrides auto-detection):"))
 	lines = append(lines, "")
 
-	lines = append(lines, renderWindowedList(m.progLanguages, m.progLangIdx, isFocused, active, inactive, dim)...)
+	lines = append(lines, renderWindowedList(m.progLangLabels(), m.progLangIdx, isFocused, active, inactive, dim)...)
 
 	return setupCard("Programming Language", isFocused, contentWidth, lines)
 }

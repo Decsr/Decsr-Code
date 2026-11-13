@@ -67,3 +67,45 @@ func TestSetupModel_EffortDefaultsAndOverrides(t *testing.T) {
 		t.Fatal("xhigh should not be found")
 	}
 }
+
+func TestApplyProjectSetup_KeepsCustomRoleFields(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".decsr"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	yml := "agents:\n  docs_writer:\n    description: Writes docs\n    read_only: true\n  qa:\n    description: custom qa\n    read_only: true\n    model: old\n"
+	if err := os.WriteFile(filepath.Join(root, ".decsr", "project.yaml"), []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newModelSetupModel(root, config.LoadProject(root))
+	if _, ok := m.setup.agentOverrides["qa"]; !ok {
+		t.Fatal("setup model should load the qa override")
+	}
+	msg := setupDoneMsg{
+		projectName: "p",
+		agentOverrides: map[string]agentSetupOverride{
+			"coder":       {runner: "opencode", model: "new-model"},
+			"docs_writer": {model: "writer-model"},
+		},
+	}
+	if _, ok := applyProjectSetup(root, msg); !ok {
+		t.Fatal("save failed")
+	}
+	proj := config.LoadProject(root)
+	dw, ok := proj.Agents["docs_writer"]
+	if !ok || dw.Description != "Writes docs" || !dw.ReadOnly || dw.Model != "writer-model" {
+		t.Fatalf("docs_writer = %+v", dw)
+	}
+	if proj.Agents["coder"].Model != "new-model" {
+		t.Fatalf("coder = %+v", proj.Agents["coder"])
+	}
+	// Built-in entries keep description and read-only too.
+	msg.agentOverrides["qa"] = agentSetupOverride{model: "q2"}
+	if _, ok := applyProjectSetup(root, msg); !ok {
+		t.Fatal("save failed")
+	}
+	qa := config.LoadProject(root).Agents["qa"]
+	if qa.Description != "custom qa" || !qa.ReadOnly || qa.Model != "q2" {
+		t.Fatalf("qa = %+v", qa)
+	}
+}

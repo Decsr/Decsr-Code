@@ -212,19 +212,17 @@ func (m modelMemoryModel) result() config.ModelMemoryConfig {
 
 func (m modelMemoryModel) View() string {
 	dimStyle := lipgloss.NewStyle().Foreground(homePalette.dim)
-	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(homePalette.green)
 
 	var b strings.Builder
-	b.WriteString(dimStyle.Render("Cap how much memory local models may use. Choose RAM (auto-converted\nto a per-agent context window) OR a fixed context size. ←/→ toggle mode."))
+	b.WriteString(dimStyle.Render("Cap how much memory local models may use. Choose RAM (auto-converted to a per-agent context window) OR a fixed context size."))
 	b.WriteString("\n\n")
 
-	// Mode toggle row.
-	b.WriteString("  Mode:  ")
+	// Mode toggle row; the marker column doubles as the indent.
 	for i, label := range mmModeLabels {
 		if i == m.mode {
-			b.WriteString(activeStyle.Render("[" + label + "]"))
+			b.WriteString("▸ " + chip(label, galaxyAzure))
 		} else {
-			b.WriteString(dimStyle.Render(" " + label + " "))
+			b.WriteString(dimStyle.Render("   " + label + " "))
 		}
 		if i < len(mmModeLabels)-1 {
 			b.WriteString("  ")
@@ -250,10 +248,17 @@ func (m modelMemoryModel) View() string {
 		b.WriteString(dimStyle.Render("  Applied verbatim to every agent."))
 	}
 
-	b.WriteString("\n\n")
-	body := lipgloss.NewStyle().Padding(1, 2).Render(b.String())
-	return screenHeader(m.width, "Model Memory", "") + "\n" + body + "\n" +
-		hintBar(m.width, []keyHint{{"Enter", "save"}, {"Ctrl+S", "save"}, {"Esc", "cancel"}}, "")
+	panelW := min(m.width-4, 96)
+	if panelW < 20 {
+		panelW = 20
+	}
+	panel := pixelPanel("◆ MODEL MEMORY", homePalette.accent, true,
+		lipgloss.NewStyle().Width(panelW).Padding(0, 1), b.String())
+	if m.width > 100 {
+		panel = lipgloss.PlaceHorizontal(m.width, lipgloss.Center, panel)
+	}
+	return screenHeader(m.width, "Model Memory", "") + "\n" + panel + "\n" +
+		hintBar(m.width, []keyHint{{"←→", "mode"}, {"Enter", "save"}, {"Esc", "cancel"}}, "")
 }
 
 // renderPreview lists the estimated context window the RAM limit yields for

@@ -113,6 +113,8 @@ type CockpitModel struct {
 	width  int
 	height int
 
+	showHelp bool // keyboard help overlay is open
+
 	taskTitle string
 	pipeline  string
 	phase     string
@@ -310,6 +312,12 @@ func (c *CockpitModel) SetGate(filename string) {
 func (c *CockpitModel) ClearGate() {
 	c.gate = ""
 }
+
+// HelpOpen reports whether the keyboard help overlay is showing.
+func (c *CockpitModel) HelpOpen() bool { return c.showHelp }
+
+// CloseHelp hides the keyboard help overlay, e.g. when another overlay opens.
+func (c *CockpitModel) CloseHelp() { c.showHelp = false }
 
 func (c *CockpitModel) ToggleInspector() {
 	c.inspector = !c.inspector
@@ -1076,6 +1084,9 @@ func (c *CockpitModel) View() string {
 			Foreground(crt.warn).
 			Render(fmt.Sprintf("Terminal too small: %dx%d (minimum 60x12)", c.width, c.height))
 	}
+	if c.showHelp {
+		return renderHelpPane(c.width, c.height, "KEYBOARD — RUN", cockpitHelp())
+	}
 	header := c.renderTaskHeader() + "\n" + c.renderAgentStrip(c.width)
 	bodyH := c.height - 3
 	if bodyH < 5 {
@@ -1316,18 +1327,29 @@ func (c *CockpitModel) centerHeader(w int) string {
 func (c *CockpitModel) renderTabs(w int) string {
 	short := []string{"Act", "Plan", "Agt", "Tok", "Files", "Test", "Out"}
 	line := ""
-	// Try the spaced labels first, then drop the space inside each label.
-	for _, format := range []string{"%d %s", "%d%s"} {
+	// Try full labels first, then short spaced, then short tight. The active
+	// tab carries a ▸ marker so it is identifiable without color.
+	for _, set := range []struct {
+		format string
+		sep    string
+		full   bool
+	}{{"%d %s", " ", true}, {"%d %s", "", false}, {"%d%s", "", false}} {
 		parts := make([]string, 0, len(cockpitTabs))
 		for i := range cockpitTabs {
-			label := fmt.Sprintf(format, i+1, short[i])
+			name := short[i]
+			if set.full {
+				name = cockpitTabs[i]
+			}
 			if i == c.tab {
-				parts = append(parts, lipgloss.NewStyle().Background(galaxyMint).Foreground(crt.bg).Bold(true).Render(label))
+				parts = append(parts, lipgloss.NewStyle().Background(galaxyAzure).Foreground(crt.bg).Bold(true).
+					Render("▸"+fmt.Sprintf(set.format, i+1, name)))
 			} else {
-				parts = append(parts, lipgloss.NewStyle().Foreground(crt.dim).Render(label))
+				parts = append(parts, " "+
+					lipgloss.NewStyle().Foreground(crt.primary).Render(fmt.Sprintf("%d", i+1))+
+					lipgloss.NewStyle().Foreground(crt.dim).Render(strings.TrimPrefix(fmt.Sprintf(set.format, i+1, name), fmt.Sprintf("%d", i+1))))
 			}
 		}
-		line = strings.Join(parts, " ")
+		line = strings.Join(parts, set.sep)
 		if ansi.StringWidth(line) <= w-2 {
 			break
 		}
@@ -1688,29 +1710,44 @@ func (c *CockpitModel) renderInspector(w, h int) string {
 }
 
 func (c *CockpitModel) renderFooter() string {
-	hints := "tab focus  j/k move  1-7 view  i inspector  enter inspect  Ctrl+A approve  q quit"
-	if c.width < 100 {
-		hints = "tab focus  j/k  1-7 view  i inspector  q quit"
+	var head, middle []keyHint
+	if c.gate != "" {
+		head = []keyHint{{"Ctrl+A", "approve"}, {"Ctrl+O", "open"}}
 	}
-	left := lipgloss.NewStyle().Foreground(crt.dim).Render(hints)
+	middle = []keyHint{{"Tab", "focus"}, {"↑↓", "move"}, {"1-7", "view"}, {"i", "inspector"}}
+	tail := []keyHint{{"?", "help"}, {"q", "quit"}}
+
+	bar := lipgloss.NewStyle().Background(crt.panelBg).Foreground(crt.muted)
 	right := ""
 	if c.width < 110 {
 		total := c.totalUsage.InputTokens + c.totalUsage.OutputTokens
-		right = lipgloss.NewStyle().Foreground(crt.muted).Render(fmt.Sprintf("tok %s · tests %s", formatTokensCompact(total), c.tests.status))
+		right = bar.Render(fmt.Sprintf("tok %s · tests %s", formatTokensCompact(total), c.tests.status))
 	} else if c.lastEvent != "" {
-		right = lipgloss.NewStyle().Foreground(crt.muted).Render(truncateOneLine(c.lastEvent, max(8, c.width/3)))
+		right = bar.Render(truncateOneLine(c.lastEvent, max(8, c.width/3)))
 	}
-	line := left
-	if right != "" {
-		gap := c.width - ansi.StringWidth(left) - ansi.StringWidth(right)
-		if gap > 1 {
-			line = left + strings.Repeat(" ", gap) + right
+
+	hintsWidth := func(hints []keyHint) int {
+		n := 1
+		for i, h := range hints {
+			if i > 0 {
+				n += 2
+			}
+			n += ansi.StringWidth(keycap(h.key)) + 1 + ansi.StringWidth(h.label)
 		}
+		return n
 	}
-	if ansi.StringWidth(line) > c.width {
-		line = ansi.Truncate(line, c.width, "…")
+	build := func() []keyHint {
+		return append(append(append([]keyHint{}, head...), middle...), tail...)
 	}
-	return line
+	// Drop middle hints from the end until the line fits; the right segment
+	// goes only when the essential hints and it no longer fit together.
+	for len(middle) > 0 && hintsWidth(build())+ansi.StringWidth(right)+3 > c.width {
+		middle = middle[:len(middle)-1]
+	}
+	if hintsWidth(build())+ansi.StringWidth(right)+3 > c.width {
+		right = ""
+	}
+	return hintBar(c.width, build(), right)
 }
 
 func cockpitPane(title string, w, h int, lines []string, focused bool, accent lipgloss.Color) string {
@@ -1860,7 +1897,16 @@ func wrapText(s string, w int) []string {
 
 // Update handles cockpit-local keys. Global keys are handled by Model.
 func (c CockpitModel) Update(msg tea.KeyMsg) (CockpitModel, tea.Cmd) {
+	if c.showHelp {
+		switch msg.String() {
+		case "?", "esc", "q", "Q":
+			c.showHelp = false
+		}
+		return c, nil
+	}
 	switch msg.String() {
+	case "?":
+		c.showHelp = true
 	case "tab":
 		c.CycleFocus(1)
 	case "shift+tab":

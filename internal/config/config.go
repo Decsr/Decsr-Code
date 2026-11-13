@@ -2,8 +2,10 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
 
@@ -27,6 +29,12 @@ type Config struct {
 	PromptLanguage string                 `yaml:"prompt_language,omitempty"`
 	ModelMemory    ModelMemoryConfig      `yaml:"model_memory,omitempty"`
 	Notifications  NotifyConfig           `yaml:"notifications,omitempty"`
+	Workspace      WorkspaceConfig        `yaml:"workspace,omitempty"`
+}
+
+// WorkspaceConfig controls the node workspace.
+type WorkspaceConfig struct {
+	MaxParallel int `yaml:"max_parallel,omitempty"` // 0 = default (3)
 }
 
 // NotifyConfig controls external notifications (e.g. cmux alerts on approval
@@ -55,17 +63,17 @@ type ModelMemoryConfig struct {
 
 // SupportedProgrammingLanguages lists selectable project programming languages.
 var SupportedProgrammingLanguages = []string{
-	"go",
-	"rust",
 	"python",
+	"java",
+	"csharp",
+	"cpp",
+	"c",
+	"go",
 	"javascript",
 	"typescript",
-	"java",
+	"rust",
 	"ruby",
 	"elixir",
-	"c",
-	"cpp",
-	"csharp",
 	"swift",
 	"kotlin",
 	"scala",
@@ -151,8 +159,10 @@ type MemoryConfig struct {
 type AgentConfig struct {
 	Runner           string   `yaml:"runner,omitempty"`
 	Model            string   `yaml:"model,omitempty"`
+	Description      string   `yaml:"description,omitempty"`        // role description (custom workspace roles)
 	Effort           string   `yaml:"effort,omitempty"`             // "" = unset, "default" = provider default
 	MaxContextTokens int      `yaml:"max_context_tokens,omitempty"` // 0 = no limit (for local models)
+	ReadOnly         bool     `yaml:"read_only,omitempty"`          // workspace role that reports only and never writes files
 	Skills           []string `yaml:"-"`                            // always from defaults, never persisted
 }
 
@@ -440,6 +450,10 @@ func merge(dst *Config, src Config) {
 		dst.Notifications.DisableCMux = true
 	}
 
+	if src.Workspace.MaxParallel > 0 {
+		dst.Workspace.MaxParallel = src.Workspace.MaxParallel
+	}
+
 	if src.Agents != nil {
 		if dst.Agents == nil {
 			dst.Agents = make(map[string]AgentConfig)
@@ -459,10 +473,58 @@ func merge(dst *Config, src Config) {
 			if ac.Effort != "" {
 				existing.Effort = ac.Effort
 			}
+			if ac.Description != "" {
+				existing.Description = ac.Description
+			}
 			if ac.MaxContextTokens > 0 {
 				existing.MaxContextTokens = ac.MaxContextTokens
+			}
+			if ac.ReadOnly {
+				existing.ReadOnly = true
 			}
 			dst.Agents[role] = existing
 		}
 	}
+}
+
+// BuiltinRoles are the agent roles shipped with DECSR, in display order.
+var BuiltinRoles = []string{"pm", "coder", "coder_fixer", "qa", "ux_reviewer", "security"}
+
+// IsBuiltinRole reports whether name is one of the built-in roles.
+func IsBuiltinRole(name string) bool {
+	for _, r := range BuiltinRoles {
+		if r == name {
+			return true
+		}
+	}
+	return false
+}
+
+var roleNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]{1,31}$`)
+
+// ValidRoleName reports whether name is a valid custom role name.
+func ValidRoleName(name string) bool {
+	return roleNameRe.MatchString(name)
+}
+
+// SaveProjectRole sets agents[name] in <root>/.decsr/project.yaml, keeping the
+// rest of the project settings.
+// It fails without touching the file when project.yaml exists but cannot be
+// parsed.
+func SaveProjectRole(root, name string, ac AgentConfig) error {
+	cfg, err := loadFile(filepath.Join(root, GlobalDir), ProjectFilename)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", ProjectFilename, err)
+	}
+	if cfg.Agents == nil {
+		cfg.Agents = make(map[string]AgentConfig)
+	}
+	existing := cfg.Agents[name]
+	existing.Description = ac.Description
+	existing.Runner = ac.Runner
+	existing.Model = ac.Model
+	existing.Effort = ac.Effort
+	existing.ReadOnly = ac.ReadOnly
+	cfg.Agents[name] = existing
+	return Save(root, cfg)
 }

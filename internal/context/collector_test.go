@@ -259,3 +259,17 @@ func TestFilterInternalPaths_ExcludePatterns(t *testing.T) {
 		t.Errorf("expected only src/api.go, got %v", got)
 	}
 }
+
+func TestCollect_EmptyLanguageIsDetected(t *testing.T) {
+	root := initGitRepo(t)
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pc, err := Collect(root, config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pc.ProgrammingLanguage != "go" {
+		t.Fatalf("ProgrammingLanguage = %q, want go", pc.ProgrammingLanguage)
+	}
+}

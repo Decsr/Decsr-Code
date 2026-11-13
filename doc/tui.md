@@ -4,6 +4,10 @@ DECSR ships with a full-screen terminal interface built around the **Workflow
 Cockpit**. It is designed for one question: *what is the pipeline doing, and
 what needs me now?*
 
+> **Default screen:** `decsr` with no arguments opens the [Workspace](workspace.md)
+> (chat, split into nodes, assign agents). This reference covers the classic
+> pipeline cockpit, reached from the Home menu with `/menu` in the Workspace.
+
 The run header is two lines. Line 1 is the task title, an optional pipeline
 tag, a 7-segment phase strip, an optional state label (`FAILED`, `GATE`,
 `DONE`), the elapsed time, and total tokens. In the strip, `▰` is a finished
@@ -70,8 +74,10 @@ The left pane is the run's navigation:
 | `7` | Output | Raw agent output for the selected/active agent. |
 
 Activity is the default. Raw output is one key away rather than the main view.
-On narrow panes the tab labels compact to `1Act 2Plan …`. The focused pane's
-title shows a `▌` marker.
+The tab row shows full labels (`1 Activity  2 Plan …`) when there is room and
+compacts to `1 Act 2 Plan …`, then `1Act 2Plan …`, on narrow panes. The active
+tab is highlighted and carries a `▸` marker, so it is visible without color.
+The focused pane's title shows a `▌` marker.
 
 ## Run inspector
 
@@ -170,6 +176,7 @@ the agent that made the call.
 | `Ctrl+X` | Cancel the run. |
 | `Ctrl+P` | Pause to change the model. |
 | `Ctrl+E` | Resume the build-fix loop after a failure. |
+| `?` | Open or close the help overlay (also on the home screen). |
 | `q` | Quit. |
 | `Esc` | Cancel / return; when the run is done, return to the menu. |
 
@@ -189,6 +196,37 @@ At 80 columns the inspector collapses. The workflow rail and center stay
 visible, the footer shows a compact token/test summary, and the same keys work.
 At 60×12 or smaller the cockpit asks for a larger terminal.
 
+## Languages
+
+DECSR detects the project language from marker files in the project root, in
+this order (first match wins), unless `project.language` is set. Build, test
+and dependency commands follow the language:
+
+| Language | Marker files | Build | Test |
+|---|---|---|---|
+| `go` | `go.mod` | `go build -o <null device> ./...` | `go test -count=1 ./...` |
+| `rust` | `Cargo.toml` | `cargo build` | `cargo test` |
+| `cpp` / `c` | `CMakeLists.txt` | `cmake -S . -B build && cmake --build build` | `ctest --test-dir build --output-on-failure` |
+| `csharp` | `*.sln`, `*.csproj` | `dotnet build --nologo` | `dotnet test --nologo` |
+| `java` | `pom.xml`, `build.gradle`, `build.gradle.kts` | `mvn -q compile` / `gradle compileJava -q` | `mvn -q test` / `gradle test` |
+| `python` | `pyproject.toml`, `requirements.txt`, `setup.py` | none | `python -m pytest` when pytest is installed, otherwise `python -m unittest` (`python3` when `python` is not on PATH) |
+| `ruby` | `Gemfile` | none | none |
+| `elixir` | `mix.exs` | none | none |
+| `typescript` / `javascript` | `package.json` (`tsconfig.json` selects TypeScript) | `npm run build --if-present` | `npm test` |
+
+`package.json` is checked last because compiled-language repositories often
+carry one for tooling.
+
+When no marker file matches, DECSR counts the source files directly in the
+project root and in `src/` (non-recursive) by extension and picks the most
+common language: `.go`, `.py`, `.cs`, `.java`, `.cpp`/`.cc`/`.cxx`, `.c`, `.rs`,
+`.ts`, `.js`, `.rb`. Ties go to the first language in that list. An empty
+directory has no language until one is chosen.
+
+In Project Setup the language list starts with `auto`, which shows what is
+detected (for example `auto (cpp)`). Choosing `auto` saves no language, so
+detection stays in effect.
+
 ## Setup screens
 
 **Global Settings** and **Project Setup** choose each agent's runner, model, and
@@ -206,7 +244,8 @@ Project Setup edits per-agent overrides in three steps:
 3. **Effort** — the levels supported by that model, or provider default.
 
 Saving the effort step writes that agent's override and returns to the agent
-list. Project Setup shows only project-level settings; global provider/model/
+list. Custom Workspace roles (see [workspace.md](workspace.md)) are listed after
+the built-in agents and keep their description when saved. Project Setup shows only project-level settings; global provider/model/
 effort are configured from **Global Settings** (`g`).
 
 The chosen effort is stored as `agents.<role>.effort` in

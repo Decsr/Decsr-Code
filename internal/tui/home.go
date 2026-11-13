@@ -14,6 +14,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/decsr"
+	"github.com/Decsr/Decsr-Code/internal/lang"
 )
 
 // ── Actions ──────────────────────────────────────────────────────────────────
@@ -32,6 +33,7 @@ const (
 	homeActionSetup
 	homeActionClean
 	homeActionQuit
+	homeActionWorkspace
 )
 
 type homeSelectedMsg struct{ action homeAction }
@@ -92,6 +94,7 @@ type HomeModel struct {
 	// Recent projects from ~/.decsr/projects.json.
 	recentProjects []RecentProject
 
+	showHelp      bool        // true while the keyboard help overlay is open
 	confirmQuit   bool        // true when showing quit confirmation
 	confirmAction *homeAction // destructive action awaiting y/Enter confirmation
 	status        string      // transient message, cleared on the next keypress
@@ -130,7 +133,8 @@ func NewHomeModel(cfg config.Config, root string) HomeModel {
 	overrides := resolveOverrides(cfg.Agents, runnerName, modelName, effortName)
 
 	items := []homeMenuItem{
-		{icon: "▶", label: "New Task", desc: "Start a PM chat to define a task — attach existing .md with Ctrl+F", action: homeActionNewTask, key: "Enter"},
+		{icon: "◉", label: "Workspace", desc: "Chat, split into nodes, assign agents", action: homeActionWorkspace, key: "w"},
+		{icon: "▶", label: "Classic Pipeline", desc: "Start a PM chat to define a task — attach existing .md with Ctrl+F", action: homeActionNewTask, key: "1"},
 		{icon: "■", label: "Open Project", desc: "Switch to another project directory", action: homeActionOpenProject, key: "o"},
 		{icon: "◆", label: "Global Settings", desc: "Default provider, model & effort (~/.decsr/config.yaml)", action: homeActionGlobalSettings, key: "g"},
 		{icon: "◈", label: "Model Memory", desc: "Cap local-model RAM or context size (auto RAM→context per agent)", action: homeActionModelMemory, key: "m"},
@@ -239,9 +243,18 @@ func (m HomeModel) Update(msg tea.Msg) (HomeModel, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.showHelp {
+			switch msg.String() {
+			case "?", "esc", "q", "Q":
+				m.showHelp = false
+			}
+			return m, nil
+		}
 		m.status = ""
 
 		switch msg.String() {
+		case "?":
+			m.showHelp = true
 		case "home":
 			m.cursor = 0
 		case "end":
@@ -276,6 +289,11 @@ func (m HomeModel) Update(msg tea.Msg) (HomeModel, tea.Cmd) {
 			} else {
 				return m.requestAction(selected)
 			}
+		case "w", "W":
+			if !m.projectValid {
+				return m, m.selectAction(homeActionOpenProject)
+			}
+			return m, m.selectAction(homeActionWorkspace)
 		case "s", "S":
 			if !m.projectValid {
 				return m, m.selectAction(homeActionOpenProject)
@@ -365,6 +383,9 @@ func (m HomeModel) selectAction(action homeAction) tea.Cmd {
 // ── View ─────────────────────────────────────────────────────────────────────
 
 func (m HomeModel) View() string {
+	if m.showHelp {
+		return renderHelp(m.width, m.height, "KEYBOARD — HOME", homeHelp())
+	}
 	header := screenHeader(m.width, "Home", m.cachedProjectLabel())
 	footer := m.renderFooter()
 
@@ -440,7 +461,7 @@ func (m HomeModel) renderContent() string {
 
 	// Bottom sections.
 	var bottomParts []string
-	if hist := m.renderHistory(); hist != "" {
+	if hist := m.renderHistory(contentWidth); hist != "" {
 		bottomParts = append(bottomParts, hist)
 	}
 	if ws := m.workspaceStatus(); ws != "" {
@@ -683,7 +704,8 @@ func (m HomeModel) renderLogo(maxW int) string {
 	lines = append(lines, renderStars(logoStarsBottom))
 	lines = append(lines, tagStyle.Render("       AI-powered multi-agent coding pipeline"))
 
-	return strings.Join(lines, "\n")
+	block := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	return lipgloss.PlaceHorizontal(maxW, lipgloss.Center, block)
 }
 
 // ── Pipeline visualisation ───────────────────────────────────────────────────
@@ -748,14 +770,20 @@ func (m HomeModel) renderInfoCard(contentWidth int) string {
 	}
 
 	var lines []string
+	valueW := cardW - 2 - 11
 	row := func(label, value string) {
-		lines = append(lines, fmt.Sprintf("%s %s", labelStyle.Render(label), value))
+		lines = append(lines, fmt.Sprintf("%s %s", labelStyle.Render(label), truncateOneLine(value, valueW)))
 	}
 	inherits := dimStyle.Render("inherits global")
 	const unset = "(not set)"
 
 	row("NAME", valueStyle.Render(m.cachedProject))
-	if m.cachedLanguage != "" {
+	switch {
+	case m.cachedLanguage == "":
+		row("LANG", dimStyle.Render("not detected"))
+	case m.cfg.Project.Language == "":
+		row("LANG", valueStyle.Render(m.cachedLanguage)+dimStyle.Render(" auto"))
+	default:
 		row("LANG", valueStyle.Render(m.cachedLanguage))
 	}
 	if m.cachedBranch != "" {
@@ -782,35 +810,68 @@ func (m HomeModel) renderInfoCard(contentWidth int) string {
 
 	if len(m.cachedOverrides) > 0 {
 		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render("AGENTS"))
-		for _, ov := range m.cachedOverrides {
-			var info string
-			switch {
-			case ov.runner == unset && ov.model == unset:
-				info = inherits
-			default:
-				r, mdl := valueStyle.Render(ov.runner), valueStyle.Render(ov.model)
-				if ov.runner == unset {
-					r = inherits
-				}
-				if ov.model == unset {
-					mdl = inherits
-				}
-				info = r + dimStyle.Render(" / ") + mdl
-				if ov.effort != "" && ov.effort != "default" {
-					info += dimStyle.Render(" · ") + valueStyle.Render(ov.effort)
-				}
+		if m.agentsUniform() {
+			first := m.cachedOverrides[0]
+			if first.runner == unset && first.model == unset {
+				row("AGENTS", fmt.Sprintf("all %d · inherits global", len(m.cachedOverrides)))
+			} else {
+				row("AGENTS", fmt.Sprintf("all %d · %s / %s", len(m.cachedOverrides), first.runner, first.model))
 			}
-			rc := lipgloss.NewStyle().Foreground(roleColor(ov.role))
-			lines = append(lines, fmt.Sprintf("%s %s %s",
-				rc.Render("■"),
-				rc.Render(fmt.Sprintf("%-12s", strings.ToUpper(ov.role))),
-				info,
-			))
+			shortRole := map[string]string{"pm": "PM", "coder": "Coder", "coder_fixer": "Fixer", "qa": "QA", "ux_reviewer": "UX", "security": "Sec"}
+			var legend []string
+			for _, ov := range m.cachedOverrides {
+				label := shortRole[ov.role]
+				if label == "" {
+					label = strings.ToUpper(ov.role)
+				}
+				legend = append(legend, lipgloss.NewStyle().Foreground(roleColor(ov.role)).Render("■ "+label))
+			}
+			lines = append(lines, truncateOneLine(strings.Repeat(" ", 11)+strings.Join(legend, "  "), cardW-2))
+		} else {
+			lines = append(lines, dimStyle.Render("AGENTS"))
+			for _, ov := range m.cachedOverrides {
+				var info string
+				switch {
+				case ov.runner == unset && ov.model == unset:
+					info = inherits
+				default:
+					r, mdl := valueStyle.Render(ov.runner), valueStyle.Render(ov.model)
+					if ov.runner == unset {
+						r = inherits
+					}
+					if ov.model == unset {
+						mdl = inherits
+					}
+					info = r + dimStyle.Render(" / ") + mdl
+					if ov.effort != "" && ov.effort != "default" {
+						info += dimStyle.Render(" · ") + valueStyle.Render(ov.effort)
+					}
+				}
+				rc := lipgloss.NewStyle().Foreground(roleColor(ov.role))
+				lines = append(lines, truncateOneLine(fmt.Sprintf("%s %s %s",
+					rc.Render("■"),
+					rc.Render(fmt.Sprintf("%-12s", strings.ToUpper(ov.role))),
+					info,
+				), cardW-2))
+			}
 		}
 	}
 
 	return pixelPanel("◆ PROJECT", p.accent, false, card, strings.Join(lines, "\n"))
+}
+
+// agentsUniform reports whether every agent shares one runner, model and effort.
+func (m HomeModel) agentsUniform() bool {
+	if len(m.cachedOverrides) == 0 {
+		return false
+	}
+	for _, ov := range m.cachedOverrides[1:] {
+		first := m.cachedOverrides[0]
+		if ov.runner != first.runner || ov.model != first.model || ov.effort != first.effort {
+			return false
+		}
+	}
+	return true
 }
 
 // ── Menu ─────────────────────────────────────────────────────────────────────
@@ -823,7 +884,7 @@ func (m HomeModel) renderMenu(contentWidth int) string {
 	// the dim description color.
 	itemColorFor := func(action homeAction) lipgloss.Color {
 		switch action {
-		case homeActionNewTask, homeActionResume:
+		case homeActionNewTask, homeActionResume, homeActionWorkspace:
 			return p.green
 		case homeActionOpenProject, homeActionResumeProject:
 			return p.accent
@@ -907,7 +968,7 @@ func (m HomeModel) renderMenu(contentWidth int) string {
 
 // ── Recent Projects ──────────────────────────────────────────────────────────
 
-func (m HomeModel) renderHistory() string {
+func (m HomeModel) renderHistory(width int) string {
 	p := homePalette
 	dimStyle := lipgloss.NewStyle().Foreground(p.dim)
 	titleStyle := lipgloss.NewStyle().Foreground(p.accent).Bold(true)
@@ -944,7 +1005,7 @@ func (m HomeModel) renderHistory() string {
 		name := nameStyle.Render(proj.Name)
 		short := m.shortenProjectPath(proj.Path)
 		line := fmt.Sprintf("    %s %s  %s", marker, name, pathStyle.Render(short))
-		lines = append(lines, line)
+		lines = append(lines, truncateOneLine(line, width))
 	}
 	if len(filtered) > maxShow {
 		lines = append(lines, dimStyle.Render(fmt.Sprintf("    … and %d more", len(filtered)-maxShow)))
@@ -987,10 +1048,12 @@ func (m HomeModel) renderFooter() string {
 		}
 	}
 	hints = append(hints,
+		keyHint{"w", "workspace"},
 		keyHint{"o", "project"},
 		keyHint{"g", "global"},
 		keyHint{"s", "setup"},
 		keyHint{"c", "reset"},
+		keyHint{"?", "help"},
 		keyHint{"q", "quit"},
 	)
 
@@ -999,16 +1062,36 @@ func (m HomeModel) renderFooter() string {
 	if m.status != "" {
 		right = bar.Foreground(p.green).Bold(true).Render(m.status) + bar.Render("  ")
 	}
-	if m.ready && m.viewport.TotalLineCount() > m.viewport.Height {
-		pct := m.viewport.ScrollPercent() * 100
-		right += bar.Foreground(p.dim).Render(fmt.Sprintf("%.0f%%", pct)) + bar.Render("  ")
-	}
 	right += bar.Foreground(p.gold).Bold(true).Render("v" + Version)
 	if m.status != "" {
 		// The status replaces the key hints so it is never truncated away.
 		hints = nil
 	}
+	// When the hints do not fit, drop from the middle so help and quit stay.
+	for _, drop := range []string{"c", "s", "g", "o", "w", "r", "←→", "Enter", "↑↓"} {
+		if hintsWidth(hints)+ansi.StringWidth(right)+2 <= m.width {
+			break
+		}
+		for i, h := range hints {
+			if h.key == drop {
+				hints = append(hints[:i:i], hints[i+1:]...)
+				break
+			}
+		}
+	}
 	return hintBar(m.width, hints, right)
+}
+
+// hintsWidth is the width hintBar needs for the hints alone.
+func hintsWidth(hints []keyHint) int {
+	w := 1
+	for i, h := range hints {
+		if i > 0 {
+			w += 2
+		}
+		w += ansi.StringWidth(keycap(h.key)) + 1 + ansi.StringWidth(h.label)
+	}
+	return w
 }
 
 // ── Data resolution helpers ──────────────────────────────────────────────────
@@ -1022,29 +1105,7 @@ type agentOverride struct {
 
 // resolveLanguageFromRoot detects project language from config or filesystem markers.
 func resolveLanguageFromRoot(root string, cfg config.Config) string {
-	lang := cfg.Project.Language
-	if lang != "" {
-		return lang
-	}
-	indicators := []struct {
-		file string
-		lang string
-	}{
-		{"go.mod", "go"},
-		{"package.json", "javascript/typescript"},
-		{"Cargo.toml", "rust"},
-		{"setup.py", "python"},
-		{"pyproject.toml", "python"},
-		{"pom.xml", "java"},
-		{"build.gradle", "java"},
-		{"Gemfile", "ruby"},
-	}
-	for _, ind := range indicators {
-		if _, err := os.Stat(filepath.Join(root, ind.file)); err == nil {
-			return ind.lang
-		}
-	}
-	return ""
+	return lang.Resolve(cfg.Project.Language, root)
 }
 
 // resolveOverrides returns all agents with their effective runner/model and
@@ -1138,7 +1199,7 @@ func isValidProjectRoot(root string) bool {
 // requiresProject returns true for actions that need a valid project directory.
 func requiresProject(action homeAction) bool {
 	switch action {
-	case homeActionNewTask, homeActionRunPipeline, homeActionResume, homeActionResumeProject, homeActionSetup, homeActionClean:
+	case homeActionWorkspace, homeActionNewTask, homeActionRunPipeline, homeActionResume, homeActionResumeProject, homeActionSetup, homeActionClean:
 		return true
 	case homeActionOpenProject, homeActionGlobalSettings, homeActionModelMemory, homeActionDoneTasks, homeActionQuit:
 		return false

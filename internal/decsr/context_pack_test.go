@@ -3,6 +3,7 @@ package decsr
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -107,7 +108,7 @@ func TestBuildCompactionInput_IncludesSourceAndCommands(t *testing.T) {
 	input := buildCompactionInput(pc, config.Config{Project: config.ProjectConfig{
 		TestCmd: "go test ./...",
 		LintCmd: "go vet ./...",
-	}})
+	}}, t.TempDir())
 
 	for _, want := range []string{"go test ./...", "go vet ./...", "main.go", "package main", "README.md", "hello"} {
 		if !strings.Contains(input, want) {
@@ -301,5 +302,35 @@ func TestNegotiateSpec_RegenerateRunsFreshNegotiation(t *testing.T) {
 	}
 	if len(mock.Requests) != 2 {
 		t.Errorf("PM runner calls = %d, want 2", len(mock.Requests))
+	}
+}
+
+func TestContextPack_EmptyConfigUsesDetectedLanguageCommands(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{}
+	pc := appctx.ProjectContext{Files: []string{"main.go"}}
+
+	input := buildCompactionInput(pc, cfg, root)
+	if !strings.Contains(input, "`go test -count=1 ./...`") {
+		t.Errorf("compaction input missing detected test command:\n%s", input)
+	}
+	if strings.Contains(input, "None configured") {
+		t.Errorf("compaction input claims no commands:\n%s", input)
+	}
+
+	pack := buildFallbackContextPack(pc, cfg, root)
+	for _, want := range []string{"- Language: go", "`go test -count=1 ./...`"} {
+		if !strings.Contains(pack, want) {
+			t.Errorf("fallback pack missing %q:\n%s", want, pack)
+		}
+	}
+
+	tr := &TaskRunner{cfg: cfg, root: root, contextPack: "pack"}
+	frag := tr.buildContextFragment(pc)
+	if !strings.Contains(frag, "`go test -count=1 ./...`") {
+		t.Errorf("fragment missing test command:\n%s", frag)
 	}
 }

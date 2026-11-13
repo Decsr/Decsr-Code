@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/Decsr/Decsr-Code/internal/artifacts"
+	"github.com/Decsr/Decsr-Code/internal/config"
 )
 
 func createProjectMarkers(root string) error {
@@ -181,5 +182,33 @@ func TestCleanWorkspacePreservesMemory(t *testing.T) {
 	}
 	if _, err := os.Stat(dailyFile); err != nil {
 		t.Errorf("expected memory/daily/* preserved, got err=%v", err)
+	}
+}
+
+func TestNeedsModulePathOnlyForGo(t *testing.T) {
+	write := func(root, name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := config.DefaultConfig()
+	if NeedsModulePath(t.TempDir(), cfg) {
+		t.Error("empty dir with default config should not need a module path")
+	}
+	cmake := t.TempDir()
+	write(cmake, "CMakeLists.txt", "")
+	if NeedsModulePath(cmake, cfg) {
+		t.Error("CMake project should not need a module path")
+	}
+	goMod := t.TempDir()
+	write(goMod, "go.mod", "go 1.21\n")
+	if !NeedsModulePath(goMod, cfg) {
+		t.Error("go.mod without module line should need a module path")
+	}
+	goCfg := config.DefaultConfig()
+	goCfg.Project.Language = "go"
+	if !NeedsModulePath(t.TempDir(), goCfg) {
+		t.Error("empty dir with language go should need a module path")
 	}
 }

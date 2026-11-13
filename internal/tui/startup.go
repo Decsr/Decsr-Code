@@ -15,6 +15,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/decsr"
 	"github.com/Decsr/Decsr-Code/internal/gitclient"
+	"github.com/Decsr/Decsr-Code/internal/lang"
 	"github.com/Decsr/Decsr-Code/internal/safefile"
 )
 
@@ -55,6 +56,7 @@ type startupModel struct {
 	chatMode      bool       // result — true when PM chat-based requirements gathering was selected
 	resume        bool       // result — true when the user chose to resume an interrupted task
 	reviewProject bool       // result — true when the user chose "Resume Project" (PM review)
+	workspace     bool       // result — true when the user chose the Workspace
 	pendingAction homeAction // action to resume after module path input
 	width         int
 	height        int
@@ -114,6 +116,9 @@ func (m startupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case homeSelectedMsg:
 			switch msg.action {
 			case homeActionQuit:
+				return m, tea.Quit
+			case homeActionWorkspace:
+				m.workspace = true
 				return m, tea.Quit
 			case homeActionNewTask:
 				// PM chat-based requirements gathering — skip file picker.
@@ -721,8 +726,7 @@ func hasContent(path string) bool {
 // NeedsModulePath returns true if the project looks like Go, has no module path
 // configured, and no go.mod exists in root.
 func NeedsModulePath(root string, cfg config.Config) bool {
-	lang := cfg.Project.Language
-	if lang != "" && lang != "go" {
+	if lang.Resolve(cfg.Project.Language, root) != "go" {
 		return false
 	}
 	if cfg.Project.ModulePath != "" {
@@ -801,6 +805,7 @@ type StartupResult struct {
 	ChatMode      bool          // true when PM chat-based requirements gathering was selected
 	Resume        bool          // true when the user chose to resume an interrupted task
 	ReviewProject bool          // true when the user chose "Resume Project" (PM reviews .decsr)
+	Workspace     bool          // true when the user chose the Workspace
 	Cfg           config.Config // possibly updated config
 }
 
@@ -822,6 +827,7 @@ func RunStartup(root, wsReqPath string, cfg config.Config) (StartupResult, error
 		ChatMode:      final.chatMode,
 		Resume:        final.resume,
 		ReviewProject: final.reviewProject,
+		Workspace:     final.workspace,
 		Cfg:           final.cfg,
 	}, nil
 }

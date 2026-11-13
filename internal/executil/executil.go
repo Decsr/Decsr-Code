@@ -53,11 +53,17 @@ func (r *Runner) WithTimeout(d time.Duration) *Runner {
 // contain embedded newlines, control characters, or exceed the length limit.
 // Commands are killed after the configured timeout (default 120s).
 func (r *Runner) Run(command string) Result {
+	return r.RunContext(context.Background(), command)
+}
+
+// RunContext is Run that also stops the command (and its process group) when
+// parent is cancelled.
+func (r *Runner) RunContext(parent context.Context, command string) Result {
 	if err := Sanitize(command); err != nil {
 		return Result{Command: command, ExitCode: 1, Stderr: "rejected: " + err.Error()}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), r.timeout)
+	ctx, cancel := context.WithTimeout(parent, r.timeout)
 	defer cancel()
 
 	cmd := CommandContext(ctx, "sh", "-c", command)

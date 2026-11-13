@@ -3,12 +3,15 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/Decsr/Decsr-Code/internal/artifacts"
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/Decsr/Decsr-Code/internal/config"
 )
 
@@ -117,11 +120,12 @@ func TestNewHomeModel_MenuItems(t *testing.T) {
 	root := t.TempDir()
 	m := NewHomeModel(newTestConfig(), root)
 
-	if len(m.items) != 7 {
-		t.Fatalf("expected 7 menu items, got %d", len(m.items))
+	if len(m.items) != 8 {
+		t.Fatalf("expected 8 menu items, got %d", len(m.items))
 	}
 
 	expectedActions := []homeAction{
+		homeActionWorkspace,
 		homeActionNewTask,
 		homeActionOpenProject,
 		homeActionGlobalSettings,
@@ -244,7 +248,7 @@ func TestResolveLanguageFromRoot_DetectsFromFilesystem(t *testing.T) {
 		expected string
 	}{
 		{"go.mod", "go"},
-		{"package.json", "javascript/typescript"},
+		{"package.json", "javascript"},
 		{"Cargo.toml", "rust"},
 		{"setup.py", "python"},
 		{"pyproject.toml", "python"},
@@ -560,7 +564,7 @@ func TestHomeModel_RenderHistory_Empty(t *testing.T) {
 	m := NewHomeModel(newTestConfig(), root)
 	m.recentProjects = nil
 
-	hist := m.renderHistory()
+	hist := m.renderHistory(100)
 	if hist != "" {
 		t.Errorf("expected empty history, got %q", hist)
 	}
@@ -579,7 +583,7 @@ func TestHomeModel_RenderHistory_WithEntries(t *testing.T) {
 		{Path: "/home/user/project-g", Name: "project-g"},
 	}
 
-	hist := m.renderHistory()
+	hist := m.renderHistory(100)
 	if !containsText(hist, "project-a") {
 		t.Error("history should contain first entry")
 	}
@@ -786,5 +790,287 @@ func TestBlockGlyphs_IncludesLogoWord(t *testing.T) {
 		if _, ok := blockGlyphs[ch]; !ok {
 			t.Errorf("blockGlyphs is missing %q; the TUI logo would drop a letter", ch)
 		}
+	}
+}
+
+func TestResolveLanguageFromRootDetects(t *testing.T) {
+	tests := []struct {
+		file string
+		want string
+	}{
+		{"CMakeLists.txt", "cpp"},
+		{"App.sln", "csharp"},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		root := t.TempDir()
+		if tc.file != "" {
+			if err := os.WriteFile(filepath.Join(root, tc.file), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got := resolveLanguageFromRoot(root, config.DefaultConfig()); got != tc.want {
+			t.Errorf("%q: got %q, want %q", tc.file, got, tc.want)
+		}
+	}
+}
+
+// uniformAgentsConfig puts all six agents on one runner, model and effort.
+func uniformAgentsConfig(model string) config.Config {
+	agents := map[string]config.AgentConfig{}
+	for _, role := range []string{"pm", "coder", "coder_fixer", "qa", "ux_reviewer", "security"} {
+		agents[role] = config.AgentConfig{Runner: "opencode", Model: model, Effort: "max"}
+	}
+	return config.Config{Project: config.ProjectConfig{Name: "card"}, Agents: agents}
+}
+
+func cardTestModel(t *testing.T, cfg config.Config) HomeModel {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".decsr"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := NewHomeModel(cfg, root)
+	m.width, m.height = 120, 40
+	return m
+}
+
+func TestInfoCardCollapsesUniformAgents(t *testing.T) {
+	m := cardTestModel(t, uniformAgentsConfig("opencode-go/deepseek-v4.1-flash"))
+	card := stripAnsi(m.renderInfoCard(100))
+	if strings.Contains(card, "CODER_FIXER") {
+		t.Error("uniform agents should not be listed one per row")
+	}
+	found := false
+	for _, l := range strings.Split(card, "\n") {
+		if strings.Contains(l, "AGENTS") && strings.Contains(l, "all 6") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected one AGENTS row with 'all 6':\n%s", card)
+	}
+}
+
+func TestInfoCardListsDifferingAgents(t *testing.T) {
+	cfg := uniformAgentsConfig("opencode-go/deepseek-v4.1-flash")
+	cfg.Agents["coder"] = config.AgentConfig{Runner: "claude", Model: "sonnet", Effort: "max"}
+	m := cardTestModel(t, cfg)
+	card := stripAnsi(m.renderInfoCard(100))
+	if strings.Contains(card, "all 6") {
+		t.Error("differing agents must not be collapsed")
+	}
+	for _, role := range []string{"PM", "CODER ", "CODER_FIXER", "QA", "UX_REVIEWER", "SECURITY"} {
+		n := 0
+		for _, l := range strings.Split(card, "\n") {
+			if strings.Contains(l, "■ "+role) {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("role %q: want one row, got %d", role, n)
+		}
+	}
+}
+
+func TestInfoCardNeverWraps(t *testing.T) {
+	long := strings.Repeat("m", 60)
+	cfg := uniformAgentsConfig(long)
+	cfg.Agents["coder"] = config.AgentConfig{Runner: "claude", Model: long, Effort: "max"}
+	for _, uniform := range []bool{false, true} {
+		c := cfg
+		if uniform {
+			c = uniformAgentsConfig(long)
+		}
+		m := cardTestModel(t, c)
+		rows := len(strings.Split(m.renderInfoCard(1000), "\n")) // nothing wraps this wide
+		for _, cw := range []int{60, 80, 100, 120} {
+			cardW := cw/2 - 2
+			if cw < 90 {
+				cardW = cw - 4
+			}
+			lines := strings.Split(m.renderInfoCard(cw), "\n")
+			if len(lines) != rows {
+				t.Errorf("uniform=%v cw=%d: %d lines, want %d", uniform, cw, len(lines), rows)
+			}
+			for _, l := range lines {
+				if ansi.StringWidth(l) > cardW+2 {
+					t.Errorf("uniform=%v cw=%d: line width %d > %d", uniform, cw, ansi.StringWidth(l), cardW+2)
+				}
+			}
+			if cw == 60 && !strings.Contains(stripAnsi(m.renderInfoCard(cw)), "…") {
+				t.Errorf("uniform=%v: long values should end with an ellipsis", uniform)
+			}
+		}
+	}
+}
+
+func TestInfoCardLanguageLabel(t *testing.T) {
+	langRow := func(m HomeModel) string {
+		for _, l := range strings.Split(stripAnsi(m.renderInfoCard(100)), "\n") {
+			if strings.Contains(l, "LANG") {
+				return l
+			}
+		}
+		return ""
+	}
+	cfg := uniformAgentsConfig("x")
+
+	m := cardTestModel(t, cfg)
+	if err := os.WriteFile(filepath.Join(m.root, "CMakeLists.txt"), []byte("project(x)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = NewHomeModel(cfg, m.root)
+	if l := langRow(m); !strings.Contains(l, "cpp") || !strings.Contains(l, "auto") {
+		t.Errorf("detected: %q", l)
+	}
+
+	cfg.Project.Language = "java"
+	m = NewHomeModel(cfg, m.root)
+	if l := langRow(m); !strings.Contains(l, "java") || strings.Contains(l, "auto") {
+		t.Errorf("configured: %q", l)
+	}
+
+	cfg.Project.Language = ""
+	m = cardTestModel(t, cfg)
+	if l := langRow(m); !strings.Contains(l, "not detected") {
+		t.Errorf("empty dir: %q", l)
+	}
+}
+
+func TestHomeFooterHasNoScrollPercent(t *testing.T) {
+	m := cardTestModel(t, uniformAgentsConfig("x"))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 10})
+	if pct := regexp.MustCompile(`\d+%`); pct.MatchString(stripAnsi(m.renderFooter())) {
+		t.Errorf("footer shows a scroll percent: %q", stripAnsi(m.renderFooter()))
+	}
+}
+
+func TestHomeModel_RenderHistory_TruncatesToWidth(t *testing.T) {
+	m := NewHomeModel(newTestConfig(), t.TempDir())
+	m.recentProjects = []RecentProject{
+		{Path: "/very/long/" + strings.Repeat("segment/", 30), Name: "long-project"},
+	}
+	for _, w := range []int{60, 80} {
+		for _, l := range strings.Split(m.renderHistory(w), "\n") {
+			if ansi.StringWidth(l) > w {
+				t.Errorf("width %d: line is %d wide", w, ansi.StringWidth(l))
+			}
+		}
+	}
+	m.width, m.height = 100, 40
+	m.syncViewport()
+	for _, l := range strings.Split(m.renderContent(), "\n") {
+		if ansi.StringWidth(l) > m.width {
+			t.Fatalf("content line is %d wide, wider than the %d terminal", ansi.StringWidth(l), m.width)
+		}
+	}
+}
+
+func TestHomeModel_RenderLogo_CenteredAndAligned(t *testing.T) {
+	m := NewHomeModel(newTestConfig(), t.TempDir())
+	lines := strings.Split(m.renderLogo(100), "\n")
+	for _, l := range lines {
+		if got := ansi.StringWidth(l); got != 100 {
+			t.Fatalf("logo line is %d wide, want 100: %q", got, stripAnsi(l))
+		}
+	}
+	first := stripAnsi(lines[0])
+	if strings.TrimLeft(first, " ") == first {
+		t.Error("logo block should be indented to the centre")
+	}
+}
+
+func TestHomeModel_RenderFooter_KeepsHelpAndQuit(t *testing.T) {
+	for _, w := range []int{60, 80, 120} {
+		m := NewHomeModel(newTestConfig(), t.TempDir())
+		m.width = w
+		out := stripAnsi(m.renderFooter())
+		if ansi.StringWidth(out) > w {
+			t.Errorf("width %d: footer is %d wide", w, ansi.StringWidth(out))
+		}
+		for _, want := range []string{"help", "quit"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("width %d: footer lost %q: %q", w, want, out)
+			}
+		}
+	}
+	m := NewHomeModel(newTestConfig(), t.TempDir())
+	m.width = 120
+	if out := stripAnsi(m.renderFooter()); !strings.Contains(out, "reset") || !strings.Contains(out, "setup") {
+		t.Errorf("wide footer should keep every hint: %q", out)
+	}
+	m.width = 60
+	if out := stripAnsi(m.renderFooter()); strings.Contains(out, "reset") {
+		t.Errorf("narrow footer should drop reset first: %q", out)
+	}
+}
+
+func TestHomeModel_InfoCard_UniformUnsetAgents(t *testing.T) {
+	root := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(root, ".decsr"), 0o755)
+	m := NewHomeModel(config.Config{}, root)
+	m.cachedOverrides = []agentOverride{{role: "pm", runner: "(not set)", model: "(not set)"}, {role: "coder", runner: "(not set)", model: "(not set)"}}
+	out := stripAnsi(m.renderInfoCard(60))
+	if !strings.Contains(out, "all 2 · inherits global") || strings.Contains(out, "(not set) / (not set)") {
+		t.Errorf("unexpected AGENTS row:\n%s", out)
+	}
+}
+
+func TestHomeMenuHasWorkspaceFirst(t *testing.T) {
+	m := NewHomeModel(newTestConfig(), t.TempDir())
+	if len(m.items) < 2 {
+		t.Fatalf("too few items: %d", len(m.items))
+	}
+	first, second := m.items[0], m.items[1]
+	if first.label != "Workspace" || first.key != "w" || first.desc != "Chat, split into nodes, assign agents" {
+		t.Fatalf("first item = %+v", first)
+	}
+	if first.action != homeActionWorkspace {
+		t.Fatalf("first action = %d", first.action)
+	}
+	if strings.ToUpper(second.label) != "CLASSIC PIPELINE" || second.action != homeActionNewTask {
+		t.Fatalf("second item = %+v", second)
+	}
+}
+
+func TestStartupHomeWorkspaceSetsResult(t *testing.T) {
+	root := t.TempDir()
+	t.Cleanup(func() { _ = RemoveRecentProject(root) })
+	m := newStartupModel(root, filepath.Join(root, ".decsr", "requirements.md"), newTestConfig())
+	updated, cmd := m.Update(homeSelectedMsg{action: homeActionWorkspace})
+	if cmd == nil {
+		t.Fatal("expected quit command")
+	}
+	s := updated.(startupModel)
+	if !s.workspace || s.chatMode || s.reqPath != "" {
+		t.Fatalf("workspace=%v chat=%v req=%q", s.workspace, s.chatMode, s.reqPath)
+	}
+}
+
+func TestHomeWorkspaceKey(t *testing.T) {
+	root := t.TempDir()
+	_ = createProjectMarkers(root)
+	m := NewHomeModel(newTestConfig(), root)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+	if cmd == nil {
+		t.Fatal("expected a command")
+	}
+	if msg, ok := cmd().(homeSelectedMsg); !ok || msg.action != homeActionWorkspace {
+		t.Fatalf("msg = %#v", cmd())
+	}
+}
+
+func TestHomeHelpListsWorkspaceKey(t *testing.T) {
+	var found bool
+	for _, s := range homeHelp() {
+		for _, k := range s.keys {
+			if k.key == "w" && strings.Contains(strings.ToLower(k.label), "workspace") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("home help does not list the w key for the workspace")
 	}
 }

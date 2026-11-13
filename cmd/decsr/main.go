@@ -160,31 +160,50 @@ func runCmd(args []string) {
 		cfg.Project.ModulePath = chosen
 	}
 
-	// No requirements given — open the TUI home/picker (unless plain/dry-run mode).
+	// No requirements given — open the Workspace (unless plain/dry-run mode).
+	// "/menu" in the Workspace opens the classic home/picker; choosing the
+	// WORKSPACE item there returns to the Workspace, so loop until the user
+	// picks something else or quits.
 	if *reqPath == "" && !*dryRun && *ui != "plain" {
-		result, err := tui.RunStartup(root, ws.Path(artifacts.RequirementsFile), cfg)
-		if err != nil {
-			fatal(fmt.Errorf("picker: %w", err))
-		}
-		cfg = result.Cfg
-		if *noContextPack {
-			cfg.Project.Context.Pack.Disable = true
-		}
+		var result tui.StartupResult
+		for {
+			wsResult, err := tui.RunWorkspace(root, cfg)
+			if err != nil {
+				fatal(fmt.Errorf("workspace: %w", err))
+			}
+			if !wsResult.OpenMenu {
+				return // user quit the Workspace
+			}
+			cfg = wsResult.Cfg
 
-		// Project may have changed via project picker (os.Chdir).
-		// Refresh root, config, and workspace to match the selected project.
-		newRoot, err := os.Getwd()
-		if err == nil && newRoot != root {
-			root = newRoot
-			if reloadedCfg, loadErr := config.Load(root); loadErr == nil {
-				cfg = reloadedCfg
-				if *noContextPack {
-					cfg.Project.Context.Pack.Disable = true
+			result, err = tui.RunStartup(root, ws.Path(artifacts.RequirementsFile), cfg)
+			if err != nil {
+				fatal(fmt.Errorf("picker: %w", err))
+			}
+			cfg = result.Cfg
+			if *noContextPack {
+				cfg.Project.Context.Pack.Disable = true
+			}
+
+			// Project may have changed via project picker (os.Chdir).
+			// Refresh root, config, and workspace to match the selected project.
+			newRoot, err := os.Getwd()
+			if err == nil && newRoot != root {
+				root = newRoot
+				if reloadedCfg, loadErr := config.Load(root); loadErr == nil {
+					cfg = reloadedCfg
+					if *noContextPack {
+						cfg.Project.Context.Pack.Disable = true
+					}
+				}
+				ws, err = artifacts.EnsureWorkspace(root)
+				if err != nil {
+					fatal(err)
 				}
 			}
-			ws, err = artifacts.EnsureWorkspace(root)
-			if err != nil {
-				fatal(err)
+
+			if !returnsToWorkspace(result) {
+				break
 			}
 		}
 
@@ -232,6 +251,12 @@ func runCmd(args []string) {
 		fatal(fmt.Errorf("read requirements: %w", err))
 	}
 	runTaskFlow(root, string(reqs), *branch, *ui, cfg, ws, false)
+}
+
+// returnsToWorkspace reports whether the classic menu result asks to go back
+// to the Workspace. A concrete pipeline choice always wins over it.
+func returnsToWorkspace(r tui.StartupResult) bool {
+	return r.Workspace && r.ReqPath == "" && !r.Resume && !r.ReviewProject && !r.ChatMode
 }
 
 // runTaskFlow launches the task runner with the given description. When resume
@@ -351,6 +376,16 @@ func runTaskFlow(root, taskInput, branch, uiMode string, cfg config.Config, ws a
 		}
 	}
 
+	if returnsToWorkspace(startupResult) {
+		// Re-enter the default entry point, which opens the Workspace in the
+		// current (possibly switched) project.
+		args := []string{"--ui", uiMode}
+		if cfg.Project.Context.Pack.Disable {
+			args = append(args, "--no-context-pack")
+		}
+		runCmd(args)
+		return
+	}
 	if startupResult.ReqPath != "" {
 		args := []string{"--requirements", startupResult.ReqPath, "--ui", uiMode}
 		if cfg.Project.Context.Pack.Disable {

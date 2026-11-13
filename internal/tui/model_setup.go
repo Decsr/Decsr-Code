@@ -32,14 +32,24 @@ func applyProjectSetupWithError(root string, msg setupDoneMsg) (config.Config, e
 	}
 
 	projectCfg := config.LoadProject(root)
+	// Keep each role's description and read-only flag, and keep custom roles even when they have
+	// no runner/model/effort override, so saving never deletes them.
+	for role, old := range projectCfg.Agents {
+		if ac, ok := projectAgents[role]; ok {
+			ac.Description = old.Description
+			ac.ReadOnly = old.ReadOnly
+			projectAgents[role] = ac
+		} else if (!config.IsBuiltinRole(role) && role != "pr") || old.Description != "" || old.ReadOnly {
+			projectAgents[role] = config.AgentConfig{Description: old.Description, ReadOnly: old.ReadOnly}
+		}
+	}
 	if len(projectAgents) > 0 {
 		projectCfg.Agents = projectAgents
 	} else {
 		projectCfg.Agents = nil
 	}
-	if msg.progLanguage != "" {
-		projectCfg.Project.Language = msg.progLanguage
-	}
+	// An empty language means auto-detect, so it also clears a saved value.
+	projectCfg.Project.Language = msg.progLanguage
 	projectCfg.Project.Name = msg.projectName
 	if err := config.Save(root, projectCfg); err != nil {
 		return config.Config{}, err

@@ -361,8 +361,10 @@ func TestTokensTabFitsPane(t *testing.T) {
 		if !strings.Contains(view, "~") {
 			t.Errorf("%v: no ~ in view", sz)
 		}
-		for _, l := range strings.Split(view, "\n") {
-			if strings.Contains(l, "…") {
+		vlines := strings.Split(view, "\n")
+		for i, l := range vlines {
+			// The footer may shorten the last event with an ellipsis.
+			if i < len(vlines)-1 && strings.Contains(l, "…") {
 				t.Errorf("%v: truncated line %q", sz, l)
 			}
 		}
@@ -448,8 +450,10 @@ func TestInspectorFitsPane(t *testing.T) {
 		}
 		view := ansi.Strip(c.View())
 		spark := false
-		for _, l := range strings.Split(view, "\n") {
-			if strings.Contains(l, "…") {
+		vlines := strings.Split(view, "\n")
+		for i, l := range vlines {
+			// The footer may shorten the last event with an ellipsis.
+			if i < len(vlines)-1 && strings.Contains(l, "…") {
 				t.Errorf("%v: truncated line %q", sz, l)
 			}
 			if strings.ContainsAny(ansi.Cut(l, sz[0]-rightW, sz[0]), "▁▂▃▄▅▆▇") {
@@ -540,4 +544,61 @@ func TestInspectorMiniBarMinimumCell(t *testing.T) {
 		}
 	}
 	t.Error("PM row not found")
+}
+
+func TestCockpitTabsUseFullLabelsWhenWide(t *testing.T) {
+	c, _ := cockpitFixture(t)
+	row := stripANSI(c.renderTabs(80))
+	for _, want := range []string{"1 Activity", "4 Tokens", "7 Output"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("wide tab row missing %q: %q", want, row)
+		}
+	}
+}
+
+func TestCockpitTabsCompactWhenNarrow(t *testing.T) {
+	c, _ := cockpitFixture(t)
+	raw := c.renderTabs(34)
+	if !strings.Contains(stripANSI(raw), "1Act") {
+		t.Errorf("narrow tab row missing 1Act: %q", stripANSI(raw))
+	}
+	if w := ansi.StringWidth(raw); w > 32 {
+		t.Errorf("narrow tab row is %d columns, want <= 32", w)
+	}
+}
+
+func TestCockpitTabsMarkActiveWithoutColor(t *testing.T) {
+	c, _ := cockpitFixture(t)
+	c.SetTab(3)
+	row := stripANSI(c.renderTabs(80))
+	if !strings.Contains(row, "▸4 Tokens") {
+		t.Errorf("active tab not marked: %q", row)
+	}
+	if n := strings.Count(row, "▸"); n != 1 {
+		t.Errorf("want exactly one marker, got %d in %q", n, row)
+	}
+}
+
+func TestCockpitFooterIsHintBar(t *testing.T) {
+	c, _ := cockpitFixture(t)
+	c.SetSize(120, 30)
+	f := stripANSI(c.renderFooter())
+	for _, want := range []string{"Tab", "focus", "1-7", "view", "?", "help", "q", "quit"} {
+		if !strings.Contains(f, want) {
+			t.Errorf("footer at 120 missing %q: %q", want, f)
+		}
+	}
+	c.SetSize(70, 30)
+	raw := c.renderFooter()
+	if f := stripANSI(raw); !helpHint.MatchString(f) {
+		t.Errorf("footer at 70 lacks help hint: %q", f)
+	}
+	if w := ansi.StringWidth(raw); w > 70 {
+		t.Errorf("footer at 70 is %d columns", w)
+	}
+	c.SetGate("task_spec.md")
+	f = stripANSI(c.renderFooter())
+	if !strings.HasPrefix(strings.TrimSpace(f), "Ctrl+A  approve") {
+		t.Errorf("gate footer should start with Ctrl+A approve: %q", f)
+	}
 }
