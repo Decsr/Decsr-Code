@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-13
+
 ### Added
 - Workspace: a chat-first, node-based screen. A lead agent splits a task into
   nodes, you assign a role to each, and assigned nodes run in parallel
