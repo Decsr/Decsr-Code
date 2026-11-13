@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-13
+
 ### Added
 - The lead picks plugin skills per sub-task: it sees the skills of the enabled
   plugins and a built-in catalog of installable plugins, lists only the skills
