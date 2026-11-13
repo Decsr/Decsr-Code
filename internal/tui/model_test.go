@@ -597,3 +597,81 @@ func TestModel_OverlayCloseDoesNotRearmBusWaiter(t *testing.T) {
 		t.Fatal("closing an overlay started another bus waiter")
 	}
 }
+
+func helpOpenModel(t *testing.T) Model {
+	t.Helper()
+	root := setupTreeRoot(t)
+	m := New(nil, root, filepath.Join(root, ".decsr"), nil, config.Config{})
+	m.width, m.height = 160, 40
+	m.layout()
+	m.taskRunner = decsr.NewTaskRunner(nil, nil, config.Config{}, artifacts.Workspace{}, "")
+	m.gateArtifact = "plan.md"
+	m, _ = mustUpdate(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	if !m.cockpit.HelpOpen() {
+		t.Fatal("? should open cockpit help")
+	}
+	return m
+}
+
+func TestModel_HelpSwallowsCtrlShortcutsAndQuit(t *testing.T) {
+	m := helpOpenModel(t)
+	inspector := m.cockpit.inspector
+
+	m, _ = mustUpdate(t, m, tea.KeyMsg{Type: tea.KeyCtrlA})
+	if m.approvedGates["plan.md"] || m.gateArtifact == "" {
+		t.Error("Ctrl+A must not approve while help is open")
+	}
+	m, _ = mustUpdate(t, m, tea.KeyMsg{Type: tea.KeyCtrlX})
+	if m.cancelConfirm {
+		t.Error("Ctrl+X must not open the cancel confirm while help is open")
+	}
+	m, _ = mustUpdate(t, m, tea.KeyMsg{Type: tea.KeyCtrlT})
+	if m.cockpit.inspector != inspector {
+		t.Error("Ctrl+T must not toggle the inspector while help is open")
+	}
+	m, _ = mustUpdate(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if m.confirmQuit {
+		t.Error("q must not open the quit confirm while help is open")
+	}
+	if m.cockpit.HelpOpen() {
+		t.Error("q closes the help overlay")
+	}
+}
+
+func TestModel_GateOverlayClosesHelp(t *testing.T) {
+	m := helpOpenModel(t)
+	m.openCurrentGate()
+	if m.overlay != overlayArtifact {
+		t.Fatalf("overlay = %v, want artifact viewer", m.overlay)
+	}
+	if m.cockpit.HelpOpen() {
+		t.Error("opening the artifact viewer must close the cockpit help")
+	}
+}
+
+func TestModel_NegotiateOverlayClosesHelp(t *testing.T) {
+	m := helpOpenModel(t)
+	msg := BusMessageMsg{Msg: bus.NewMessage(bus.RolePM, "", bus.MsgConversation,
+		bus.ConversationPayload{From: "pm", Content: "hello"})}
+	m, _ = mustUpdate(t, m, msg)
+	if m.overlay != overlayNegotiate {
+		t.Fatalf("overlay = %v, want negotiate", m.overlay)
+	}
+	if m.cockpit.HelpOpen() {
+		t.Error("opening negotiate must close the cockpit help")
+	}
+}
+
+func TestStatusBar_OmitsHintsTheCockpitFooterShows(t *testing.T) {
+	out := stripANSI(NewStatusBar(200).View())
+	for _, dup := range []string{"move", "focus", "views", "quit"} {
+		if strings.Contains(out, dup) {
+			t.Errorf("status bar repeats cockpit hint %q: %q", dup, out)
+		}
+	}
+	for _, want := range []string{"Ctrl+A approve", "Ctrl+C chat", "Ctrl+G git", "Ctrl+T inspect", "Ctrl+X cancel"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status bar missing %q: %q", want, out)
+		}
+	}
+}

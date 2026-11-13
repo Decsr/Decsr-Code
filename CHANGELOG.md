@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Workspace: a chat-first, node-based screen. A lead agent splits a task into
+  nodes, you assign a role to each, and assigned nodes run in parallel
+  (`workspace.max_parallel`, default 3). A Build & test node closes the graph,
+  and `f` adds a fix node when it fails. State is kept in `.decsr/workspace.json`.
+  See `doc/workspace.md`.
+- Custom roles: any extra key under `agents:` in `.decsr/project.yaml`, with a
+  `description` field. They are listed in Project Setup after the built-ins and
+  are kept, with their description and `read_only` flag, when saved there.
+- Read-only roles (`read_only: true`): their node reports and never changes
+  files. The role form has a "Can change files" toggle; the picker and the
+  inspector mark read-only roles.
+- Node warnings (`⚠` on the node, a WARNINGS section in the inspector, a count
+  in the summary line) for refused or missing writes and for parallel writes to
+  the same file.
+- The Build & test node is always added after a split. Its commands are
+  resolved at split time when known, otherwise when the node runs.
+- Agent writes in the Workspace refuse `.git/` and `.decsr/` and enforce
+  `project.scope.allow` / `project.scope.deny`.
+- Later nodes are shown the current content of the files written by the nodes
+  they depend on.
+- Home menu item `WORKSPACE` (`w`).
+- Language auto-detection from marker files, with build, test and dependency
+  commands for Go, C/C++ (CMake), C#/.NET, Java (Maven/Gradle), Python, Rust,
+  JavaScript/TypeScript, Ruby and Elixir.
+- Without marker files, the language is detected from the most common source
+  file extension in the project root and `src/`.
+- Project Setup language list starts with `auto`, which clears the saved
+  language so it is detected from the project.
+- `?` opens a keyboard help overlay on the home screen and in the cockpit.
+
+### Changed
+- `decsr` opens the Workspace instead of the Home menu. `/menu` opens the Home
+  menu; the old `NEW TASK` item is now `CLASSIC PIPELINE`. `decsr task`,
+  `decsr run`, `--ui plain` and `--dry-run` are unchanged.
+- The config no longer defaults the project language to Go; the language
+  picker lists python, java, csharp, cpp and c first.
+- Home project card: one-line rows that never wrap, a collapsed AGENTS row
+  when all agents share a runner and model, an always-visible LANG row.
+- Cockpit tabs use full labels when wide and mark the active tab with `▸`; the
+  footer is a key-hint bar that always ends with `? help`.
+- Model Memory is drawn as a panel with mode chips.
+
+### Fixed
+- Non-Go projects are no longer asked for a Go module path.
+- A user-set `test_cmd` on a non-Go project is no longer prefixed with
+  `go build`.
+
 ## [0.2.1] - 2026-11-10
 
 ### Changed

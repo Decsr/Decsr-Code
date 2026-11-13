@@ -13,6 +13,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/agent"
 	"github.com/Decsr/Decsr-Code/internal/artifacts"
 	"github.com/Decsr/Decsr-Code/internal/bus"
+	"github.com/Decsr/Decsr-Code/internal/lang"
 )
 
 // collectProjectFilesFromRoot merges existing files with source files found in root.
@@ -397,16 +398,7 @@ func inferBrownfieldScope(inputs ...string) string {
 // project manifest. Used to decide if a standalone tester step can produce
 // meaningful tests, or whether the coder must scaffold the project first.
 func isProjectScaffolded(root string) bool {
-	for _, marker := range []string{
-		"go.mod", "package.json", "Cargo.toml",
-		"pyproject.toml", "requirements.txt",
-		"Gemfile", "pom.xml", "build.gradle",
-	} {
-		if _, err := os.Stat(filepath.Join(root, marker)); err == nil {
-			return true
-		}
-	}
-	return false
+	return lang.DetectMarkers(root) != ""
 }
 
 // bootstrapGoModule creates a minimal go.mod for greenfield Go projects so
@@ -454,8 +446,8 @@ func specImpliesGo(spec agent.TaskSpec, configuredLang string) bool {
 	if !strings.EqualFold(configuredLang, "go") {
 		return false
 	}
-	// The configured language defaults to "go", so it only counts when the
-	// spec does not explicitly target another language.
+	// The configured language is "go", so it only counts when the spec does
+	// not explicitly target another language.
 	for _, kw := range []string{"python", "javascript", "typescript", "node.js", "nodejs", "rust", "java ", "ruby", "c#", "php", "kotlin", "swift"} {
 		if strings.Contains(joined, kw) {
 			return false

@@ -58,6 +58,16 @@ Manual back-and-forth with AI coding assistants is slow, error-prone, and hard t
 | ![UX Reviewer](https://img.shields.io/badge/UX%20Reviewer-bfe3ff?style=flat-square&labelColor=0b1426) | UX/UI heuristic review |
 | ![Security](https://img.shields.io/badge/Security-ffd166?style=flat-square&labelColor=0b1426) | Security audit and vulnerability scanning |
 
+### Workspace
+
+`decsr` opens a chat box. Describe a task, a lead agent splits it into
+sub-tasks shown as a node graph, you assign a role to each node, and assigned
+nodes run in parallel (3 at a time by default). A final **Build & test** node
+checks the result. Nothing runs until you press `r` or `R`. Roles are plain
+data (a name, a description and a model), so you can add your own under
+`agents:` in `.decsr/project.yaml`. The classic pipeline stays available from
+the Home menu (`/menu`). See [`doc/workspace.md`](doc/workspace.md).
+
 ### Interactive TUI
 
 Terminal user interface built around a **Workflow Cockpit**: a phase
@@ -108,7 +118,7 @@ You can review, revise via chat, and approve — all from the TUI.
 
 Three-layer config with sensible defaults:
 
-1. **Built-in defaults** — works out of the box for Go projects
+1. **Built-in defaults** — the language is auto-detected from marker files (Go, C/C++ with CMake, C#/.NET, Java, Python, Rust, JS/TS, Ruby, Elixir) and can be overridden with `project.language`
 2. **Global user config** (`~/.decsr/config.yaml`) — your preferred models, runners, and reasoning effort
 3. **Project config** (`.decsr/project.yaml`) — project-specific overrides (language, test commands, scoping)
 
@@ -239,7 +249,7 @@ decsr help
 
 ## Usage
 
-**Interactive mode** — launch the TUI and start a new task or pick a requirements file:
+**Interactive mode** — launch the Workspace: type a task, assign agents to the nodes, run them (`/menu` opens the classic pipeline and requirements picker):
 
 ```bash
 cd /path/to/your/project
@@ -298,6 +308,7 @@ A deep-space navy base with starlight text and azure, comet and star-gold accent
 
 ## Docs
 
+- [`doc/workspace.md`](doc/workspace.md) — Workspace: chat, node graph, roles, keys, and parallel runs
 - [`doc/tui.md`](doc/tui.md) — workflow cockpit: panes, tabs, gates, keyboard shortcuts, and token notation
 - [`doc/memory.md`](doc/memory.md) — project memory details
 - [`doc/context-pack.md`](doc/context-pack.md) — context pack format, editing flow, and configuration

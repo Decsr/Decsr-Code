@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Decsr/Decsr-Code/internal/config"
 )
@@ -96,5 +98,44 @@ func TestModelMemory_ModeSwitchReplacesPrefill(t *testing.T) {
 	m, _ = m.Update(key("9"))
 	if got := m.value.Value(); got != "9" {
 		t.Fatalf("digit after mode switch: want 9, got %q", got)
+	}
+}
+
+func TestModelMemoryViewIsPanelled(t *testing.T) {
+	for _, sz := range [][2]int{{100, 30}, {60, 20}} {
+		m := newModelMemoryModel(config.Config{})
+		m, _ = m.Update(tea.WindowSizeMsg{Width: sz[0], Height: sz[1]})
+		out := m.View()
+		plain := stripANSI(out)
+		for _, want := range []string{"MODEL MEMORY", "┌", "└", mmModeLabels[0], mmModeLabels[1], mmModeLabels[2]} {
+			if !strings.Contains(plain, want) {
+				t.Errorf("%dx%d: view missing %q", sz[0], sz[1], want)
+			}
+		}
+		for _, l := range strings.Split(out, "\n") {
+			if ansi.StringWidth(l) > sz[0] {
+				t.Errorf("%dx%d: line width %d", sz[0], sz[1], ansi.StringWidth(l))
+			}
+		}
+	}
+}
+
+func TestModelMemory_ActiveModeMarkedWithoutColor(t *testing.T) {
+	m := newModelMemoryModel(config.Config{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	var row string
+	for _, l := range strings.Split(stripANSI(m.View()), "\n") {
+		if strings.Contains(l, mmModeLabels[0]) && strings.Contains(l, mmModeLabels[1]) {
+			row = l
+		}
+	}
+	if row == "" {
+		t.Fatal("mode row not found")
+	}
+	if got := strings.Count(row, "▸"); got != 1 {
+		t.Fatalf("want exactly one marker, got %d in %q", got, row)
+	}
+	if !strings.Contains(row, "▸  "+mmModeLabels[m.mode]) {
+		t.Fatalf("marker not on active mode %q: %q", mmModeLabels[m.mode], row)
 	}
 }

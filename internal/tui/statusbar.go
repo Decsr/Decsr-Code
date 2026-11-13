@@ -105,15 +105,11 @@ type statusBarShortcut struct {
 
 // statusBarShortcuts defines the shortcut hints with per-action accent colors.
 var statusBarShortcuts = []statusBarShortcut{
-	{"↑↓", "move", galaxyBlue},          // nebula blue — navigation
-	{"Tab", "focus", galaxyAzure},       // azure — pane focus
-	{"1-7", "views", galaxyCyan},        // comet cyan — cockpit tabs
 	{"Ctrl+A", "approve", galaxyMint},   // aurora mint — approve
 	{"Ctrl+C", "chat", galaxyCyan},      // comet cyan — chat
 	{"Ctrl+G", "git", galaxyCyan},       // comet cyan — git
 	{"Ctrl+T", "inspect", galaxyOrange}, // solar orange — inspector
 	{"Ctrl+X", "cancel", galaxyRed},     // pulsar red — cancel
-	{"q", "quit", crt.dim},              // dim — quit
 }
 
 func (m StatusBarModel) View() string {

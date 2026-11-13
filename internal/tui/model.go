@@ -482,6 +482,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							}
 							m.overlayNegotiate = neg
 							m.overlay = overlayNegotiate
+							m.cockpit.CloseHelp()
 						}
 						// Pipeline left the negotiation phase — auto-close
 						// the negotiate overlay so the user sees subsequent
@@ -537,6 +538,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					neg.SeedContext(m.negotiateSeed())
 					m.overlayNegotiate = neg
 					m.overlay = overlayNegotiate
+					m.cockpit.CloseHelp()
 				}
 				// Only render a non-empty PM message; an empty response would
 				// otherwise leave a blank "pm ›" line and strand the user.
@@ -579,7 +581,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Ctrl+T toggles the cockpit inspector from any context (including overlays).
-	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "ctrl+t" {
+	if km, ok := msg.(tea.KeyMsg); ok && km.String() == "ctrl+t" && !m.cockpit.HelpOpen() {
 		m.cockpit.ToggleInspector()
 		m.layout()
 		return m, m.resizeActiveOverlay()
@@ -649,6 +651,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pauseConfirm = false
 			}
 			return m, nil
+		}
+
+		// The help overlay swallows every key, including the Ctrl shortcuts.
+		if m.cockpit.HelpOpen() {
+			var cmd tea.Cmd
+			m.cockpit, cmd = m.cockpit.Update(msg)
+			return m, cmd
 		}
 
 		// Tree-browsing mode: navigate the System Monitor file tree and preview
@@ -1084,6 +1093,7 @@ func (m *Model) openCurrentGate() {
 	var reviseFn func(string, string) error
 	m.overlayArtifact = newArtifactViewer(m.wsPath, m.gateArtifact, m.contentWidth(), m.height-2, reviseFn)
 	m.overlay = overlayArtifact
+	m.cockpit.CloseHelp()
 }
 
 func (m *Model) approveCurrentGate(source string) {

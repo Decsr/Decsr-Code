@@ -14,10 +14,10 @@ func TestLoad_NoFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Project.Language != "go" {
-		t.Errorf("expected language=go, got %q", cfg.Project.Language)
+	if cfg.Project.Language != "" {
+		t.Errorf("expected empty language, got %q", cfg.Project.Language)
 	}
-	if cfg.Project.TestCmd != "go test -count=1 ./..." {
+	if cfg.Project.TestCmd != "" {
 		t.Errorf("unexpected test_cmd: %q", cfg.Project.TestCmd)
 	}
 	if cfg.Agents["planner"].Runner != "" {
@@ -50,8 +50,8 @@ project:
 	if cfg.Project.TestCmd != "make test" {
 		t.Errorf("expected test_cmd='make test', got %q", cfg.Project.TestCmd)
 	}
-	if cfg.Project.Language != "go" {
-		t.Errorf("expected language=go (default), got %q", cfg.Project.Language)
+	if cfg.Project.Language != "" {
+		t.Errorf("expected empty language (default), got %q", cfg.Project.Language)
 	}
 
 	// Legacy file should be removed after migration.
@@ -517,5 +517,129 @@ func TestSaveGlobal_UnparseableConfigNotClobbered(t *testing.T) {
 	got, _ := os.ReadFile(path)
 	if string(got) != string(bad) {
 		t.Errorf("global config was overwritten: %q", got)
+	}
+}
+
+func TestDefaultConfigHasNoLanguageAssumption(t *testing.T) {
+	p := DefaultConfig().Project
+	if p.Language != "" || p.TestCmd != "" || p.LintCmd != "" {
+		t.Errorf("defaults assume a language: %+v", p)
+	}
+}
+
+func TestSupportedLanguagesOwnerStackFirst(t *testing.T) {
+	langs := SupportedProgrammingLanguages
+	want := []string{"python", "java", "csharp", "cpp", "c"}
+	for i, w := range want {
+		if langs[i] != w {
+			t.Fatalf("langs[%d] = %q, want %q", i, langs[i], w)
+		}
+	}
+	if len(langs) != 14 {
+		t.Errorf("len = %d, want 14", len(langs))
+	}
+	seen := map[string]bool{}
+	for _, l := range langs {
+		if seen[l] {
+			t.Errorf("duplicate %q", l)
+		}
+		seen[l] = true
+	}
+}
+
+func TestCustomRoleSurvivesLoad(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	dir := filepath.Join(root, GlobalDir)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	yml := "agents:\n  docs_writer:\n    description: Writes docs\n    model: x\n"
+	if err := os.WriteFile(filepath.Join(dir, ProjectFilename), []byte(yml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ac, ok := cfg.Agents["docs_writer"]
+	if !ok || ac.Description != "Writes docs" || ac.Model != "x" {
+		t.Fatalf("custom role lost: %+v", ac)
+	}
+}
+
+func TestSaveProjectRole(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	if err := Save(root, Config{Project: ProjectConfig{Name: "demo"}}); err != nil {
+		t.Fatal(err)
+	}
+	err := SaveProjectRole(root, "docs_writer", AgentConfig{Description: "Writes docs", Runner: "claude", Model: "m", Effort: "low"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Project.Name != "demo" {
+		t.Errorf("project name lost: %q", cfg.Project.Name)
+	}
+	ac := cfg.Agents["docs_writer"]
+	if ac.Description != "Writes docs" || ac.Runner != "claude" || ac.Model != "m" || ac.Effort != "low" {
+		t.Errorf("round trip: %+v", ac)
+	}
+}
+
+func TestValidRoleName(t *testing.T) {
+	for _, n := range []string{"docs_writer", "qa2"} {
+		if !ValidRoleName(n) {
+			t.Errorf("%q should be valid", n)
+		}
+	}
+	long := "a"
+	for len(long) < 33 {
+		long += "b"
+	}
+	for _, n := range []string{"", "A", "1abc", "has space", "x", long} {
+		if ValidRoleName(n) {
+			t.Errorf("%q should be invalid", n)
+		}
+	}
+}
+
+func TestSaveProjectRoleKeepsReadOnly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	if err := SaveProjectRole(root, "auditor", AgentConfig{Description: "Audits", ReadOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Agents["auditor"].ReadOnly {
+		t.Errorf("read_only lost: %+v", cfg.Agents["auditor"])
+	}
+}
+
+func TestSaveProjectRoleBrokenFileUntouched(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	dir := filepath.Join(root, GlobalDir)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ProjectFilename)
+	broken := "project:\n  name: [unterminated\n"
+	if err := os.WriteFile(path, []byte(broken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveProjectRole(root, "docs_writer", AgentConfig{Description: "x"}); err == nil {
+		t.Fatal("expected an error for an unparseable project.yaml")
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != broken {
+		t.Errorf("file was modified: %q", got)
 	}
 }

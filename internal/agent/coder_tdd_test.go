@@ -23,6 +23,22 @@ func TestFilterTestCommands_RemovesBuildCommands(t *testing.T) {
 	}
 }
 
+func TestFilterTestCommands_RemovesPersonalStackBuildCommands(t *testing.T) {
+	cmds := []string{
+		"mvn -q compile",
+		"cmake -S . -B build && cmake --build build",
+		"dotnet build --nologo",
+		"ctest --test-dir build --output-on-failure",
+		"dotnet test --nologo",
+	}
+
+	got := filterTestCommands(cmds, "")
+	want := []string{"ctest --test-dir build --output-on-failure", "dotnet test --nologo"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filterTestCommands() = %#v, want %#v", got, want)
+	}
+}
+
 func TestValidationSummary_IncludesBuildAndTests(t *testing.T) {
 	a := &CoderAgent{}
 	summary := a.validationSummary("go build ./...", []string{"go test ./...", "go test -race ./..."})

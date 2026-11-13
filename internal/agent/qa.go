@@ -12,6 +12,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/bus"
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/executil"
+	"github.com/Decsr/Decsr-Code/internal/lang"
 	"github.com/Decsr/Decsr-Code/internal/prompts"
 	"github.com/Decsr/Decsr-Code/internal/runner"
 	"github.com/Decsr/Decsr-Code/internal/safefile"
@@ -404,28 +405,7 @@ func (a *QAAgent) writeTestBlocks(output string) []string {
 }
 
 func (a *QAAgent) installDeps() *executil.Result {
-	lang := a.detectLanguage()
-	var depCmd string
-	switch lang {
-	case "go":
-		depCmd = "go mod tidy"
-	case "node", "javascript", "typescript":
-		if fileExists(filepath.Join(a.root, "yarn.lock")) {
-			depCmd = "yarn install"
-		} else if fileExists(filepath.Join(a.root, "pnpm-lock.yaml")) {
-			depCmd = "pnpm install"
-		} else {
-			depCmd = "npm install"
-		}
-	case "python":
-		if fileExists(filepath.Join(a.root, "requirements.txt")) {
-			depCmd = "pip install -r requirements.txt"
-		} else if fileExists(filepath.Join(a.root, "pyproject.toml")) {
-			depCmd = "pip install -e ."
-		}
-	case "rust":
-		depCmd = "cargo fetch"
-	}
+	depCmd := lang.CommandsFor(a.detectLanguage(), a.root).Deps
 
 	if depCmd == "" {
 		return nil
@@ -440,44 +420,29 @@ func (a *QAAgent) installDeps() *executil.Result {
 }
 
 func (a *QAAgent) detectLanguage() string {
-	if a.cfg.Project.Language != "" {
-		return a.cfg.Project.Language
-	}
-	markers := map[string]string{
-		"go.mod":           "go",
-		"package.json":     "node",
-		"Cargo.toml":       "rust",
-		"requirements.txt": "python",
-		"pyproject.toml":   "python",
-		"Gemfile":          "ruby",
-		"pom.xml":          "java",
-		"build.gradle":     "java",
-	}
-	for file, lang := range markers {
-		if fileExists(filepath.Join(a.root, file)) {
-			return lang
-		}
-	}
-	return ""
+	return lang.Resolve(a.cfg.Project.Language, a.root)
 }
 
 func (a *QAAgent) fallbackTestCmds() []string {
-	if a.cfg.Project.TestCmd != "" {
-		return []string{goBuildCmd, a.cfg.Project.TestCmd}
+	language := a.detectLanguage()
+	cmds := lang.CommandsFor(language, a.root)
+	build := cmds.Build
+	if language == "go" {
+		build = goBuildCmd
 	}
-	lang := a.detectLanguage()
-	switch lang {
-	case "go":
-		return []string{goBuildCmd, "go test -count=1 ./..."}
-	case "node", "javascript", "typescript":
-		return []string{"npm test"}
-	case "python":
-		return []string{"python -m pytest"}
-	case "rust":
-		return []string{"cargo build", "cargo test"}
-	default:
+	tests := cmds.Test
+	if a.cfg.Project.TestCmd != "" {
+		tests = []string{a.cfg.Project.TestCmd}
+	}
+	var out []string
+	if build != "" {
+		out = append(out, build)
+	}
+	out = append(out, tests...)
+	if len(out) == 0 {
 		return []string{"echo 'no test commands available'"}
 	}
+	return out
 }
 
 func parseQAReview(text string) QAReviewResult {

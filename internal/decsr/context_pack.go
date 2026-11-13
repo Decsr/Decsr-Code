@@ -14,6 +14,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/config"
 	appctx "github.com/Decsr/Decsr-Code/internal/context"
 	"github.com/Decsr/Decsr-Code/internal/contextpack"
+	"github.com/Decsr/Decsr-Code/internal/lang"
 	"github.com/Decsr/Decsr-Code/internal/tokenutil"
 )
 
@@ -65,7 +66,7 @@ func (tr *TaskRunner) runContextPackGate(ctx context.Context, pc appctx.ProjectC
 			existingBlock, _ = contextpack.ExtractUserBlock(string(data))
 		}
 
-		input := buildCompactionInput(pc, tr.cfg)
+		input := buildCompactionInput(pc, tr.cfg, tr.root)
 		if existingBlock != "" {
 			input += "\n\n### Existing user context (preserve its intent)\n\n" + existingBlock + "\n"
 		}
@@ -187,8 +188,8 @@ func (tr *TaskRunner) buildContextFragment(pc appctx.ProjectContext) string {
 	if pc.IsBrownfield {
 		sb.WriteString("- Existing codebase: yes — modify existing structures; do not scaffold a parallel project\n")
 	}
-	if tr.cfg.Project.TestCmd != "" {
-		fmt.Fprintf(&sb, "- Test command: `%s`\n", tr.cfg.Project.TestCmd)
+	if test := resolvedTestCmd(tr.cfg, tr.root); test != "" {
+		fmt.Fprintf(&sb, "- Test command: `%s`\n", test)
 	}
 	if tr.cfg.Project.LintCmd != "" {
 		fmt.Fprintf(&sb, "- Lint command: `%s`\n", tr.cfg.Project.LintCmd)
@@ -208,21 +209,37 @@ func (tr *TaskRunner) buildContextFragment(pc appctx.ProjectContext) string {
 	return sb.String()
 }
 
+// resolvedTestCmd returns the configured test command, or the first default
+// test command of the resolved language when none is configured.
+func resolvedTestCmd(cfg config.Config, root string) string {
+	if cfg.Project.TestCmd != "" {
+		return cfg.Project.TestCmd
+	}
+	if tests := lang.CommandsFor(lang.Resolve(cfg.Project.Language, root), root).Test; len(tests) > 0 {
+		return tests[0]
+	}
+	return ""
+}
+
 // buildCompactionInput assembles the repository material sent to the PM for
 // compaction. It deliberately prefers a compact profile plus key source files
 // over the full raw context, keeping the prompt within local-model budgets.
-func buildCompactionInput(pc appctx.ProjectContext, cfg config.Config) string {
+func buildCompactionInput(pc appctx.ProjectContext, cfg config.Config, root string) string {
 	var sb strings.Builder
 	sb.WriteString(pc.SystemPromptFragment(appctx.ProfileCompact))
 
 	sb.WriteString("\n### Build / Test / Lint Commands\n\n")
-	if cfg.Project.TestCmd != "" {
-		fmt.Fprintf(&sb, "- Test: `%s`\n", cfg.Project.TestCmd)
+	test := resolvedTestCmd(cfg, root)
+	if build := lang.CommandsFor(lang.Resolve(cfg.Project.Language, root), root).Build; build != "" {
+		fmt.Fprintf(&sb, "- Build: `%s`\n", build)
+	}
+	if test != "" {
+		fmt.Fprintf(&sb, "- Test: `%s`\n", test)
 	}
 	if cfg.Project.LintCmd != "" {
 		fmt.Fprintf(&sb, "- Lint: `%s`\n", cfg.Project.LintCmd)
 	}
-	if cfg.Project.TestCmd == "" && cfg.Project.LintCmd == "" {
+	if test == "" && cfg.Project.LintCmd == "" {
 		sb.WriteString("- None configured\n")
 	}
 
@@ -290,8 +307,8 @@ func buildFallbackContextPack(pc appctx.ProjectContext, cfg config.Config, root 
 
 	sb.WriteString("## 1. Project Snapshot\n\n")
 	fmt.Fprintf(&sb, "- Name: %s\n", name)
-	if cfg.Project.Language != "" {
-		fmt.Fprintf(&sb, "- Language: %s\n", cfg.Project.Language)
+	if l := lang.Resolve(cfg.Project.Language, root); l != "" {
+		fmt.Fprintf(&sb, "- Language: %s\n", l)
 	}
 	if pc.ProjectType != "" {
 		fmt.Fprintf(&sb, "- Project type: %s\n", pc.ProjectType)
@@ -299,8 +316,8 @@ func buildFallbackContextPack(pc appctx.ProjectContext, cfg config.Config, root 
 	if pc.IsBrownfield {
 		sb.WriteString("- Existing codebase: yes\n")
 	}
-	if cfg.Project.TestCmd != "" {
-		fmt.Fprintf(&sb, "- Test command: `%s`\n", cfg.Project.TestCmd)
+	if test := resolvedTestCmd(cfg, root); test != "" {
+		fmt.Fprintf(&sb, "- Test command: `%s`\n", test)
 	}
 	if cfg.Project.LintCmd != "" {
 		fmt.Fprintf(&sb, "- Lint command: `%s`\n", cfg.Project.LintCmd)

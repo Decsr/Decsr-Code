@@ -5,9 +5,6 @@ func DefaultConfig() Config {
 		PromptLanguage: "English",
 		Project: ProjectConfig{
 			Name:           "",
-			Language:       "go",
-			TestCmd:        "go test -count=1 ./...",
-			LintCmd:        "golangci-lint run",
 			MaxFixAttempts: 3,
 			Context: ContextConfig{
 				Pack: ContextPackConfig{

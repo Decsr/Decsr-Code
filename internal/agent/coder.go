@@ -13,6 +13,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/bus"
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/executil"
+	"github.com/Decsr/Decsr-Code/internal/lang"
 	"github.com/Decsr/Decsr-Code/internal/prompts"
 	"github.com/Decsr/Decsr-Code/internal/runner"
 	"github.com/Decsr/Decsr-Code/internal/safefile"
@@ -513,24 +514,132 @@ func (a *CoderAgent) streamAndWriteFiles(ch <-chan runner.Token) ([]string, stri
 // on disk — that is treated as a no-op rewrite and silently skipped to avoid
 // inflating the "files changed" list during fix iterations.
 func (a *CoderAgent) writeOneFile(path, content string) error {
-	path = sanitizeFilePath(path, a.root)
+	return writeProjectFile(a.root, path, content, false, a.cfg.Project.Scope)
+}
+
+// writeProjectFile is the safe file writer shared by the Coder and the
+// workspace worker: the path is sanitized to stay under root, .git and .decsr
+// are protected, symlinks may not lead out of the root, the project scope
+// (allow/deny globs) is enforced, Go content gets a valid package line, and
+// identical content returns errNoOpRewrite. Test files are refused unless
+// allowTests is set.
+func writeProjectFile(root, path, content string, allowTests bool, scope config.ScopeConfig) error {
+	path = sanitizeFilePath(path, root)
 	if path == "" {
 		return fmt.Errorf("empty path after sanitization")
 	}
-	if strings.HasSuffix(path, "_test.go") {
+	path = filepath.ToSlash(filepath.Clean(path))
+	if first := strings.SplitN(path, "/", 2)[0]; strings.EqualFold(first, ".git") || strings.EqualFold(first, ".decsr") {
+		return fmt.Errorf("refusing to write %s: protected path", path)
+	}
+	if matchesScope(path, scope.Deny) {
+		return fmt.Errorf("refusing to write %s: denied by project scope", path)
+	}
+	if len(scope.Allow) > 0 && !matchesScope(path, scope.Allow) {
+		return fmt.Errorf("refusing to write %s: outside project scope (not in allow list)", path)
+	}
+	if !allowTests && strings.HasSuffix(path, "_test.go") {
 		return fmt.Errorf("refusing to write %s: tester owns test files", path)
 	}
 	if strings.HasSuffix(path, ".go") {
 		content = fixInvalidGoPackage(content)
 	}
-	target := filepath.Join(a.root, path)
+	target := filepath.Join(root, path)
+	if err := checkWriteTarget(root, target, path); err != nil {
+		return err
+	}
 	if existing, err := os.ReadFile(target); err == nil && string(existing) == content { // #nosec G304 -- target is sanitized via filepath.Join under the project root
 		return errNoOpRewrite
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 		return fmt.Errorf("mkdir for %s: %w", path, err)
 	}
+	// Re-check after creating directories: a symlink may have been followed.
+	if err := checkWriteTarget(root, target, path); err != nil {
+		return err
+	}
 	return os.WriteFile(target, []byte(content), 0o600)
+}
+
+// checkWriteTarget refuses a target that is an existing symlink or whose
+// deepest existing parent directory resolves outside the resolved root.
+func checkWriteTarget(root, target, rel string) error {
+	if fi, err := os.Lstat(target); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to write %s: path is a symlink", rel)
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
+	}
+	dir := filepath.Dir(target)
+	for {
+		if _, err := os.Lstat(dir); err == nil {
+			break
+		}
+		next := filepath.Dir(dir)
+		if next == dir {
+			break
+		}
+		dir = next
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return fmt.Errorf("refusing to write %s: cannot resolve directory: %w", rel, err)
+	}
+	r, err := filepath.Rel(realRoot, realDir)
+	if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("refusing to write %s: resolves outside the project root", rel)
+	}
+	return nil
+}
+
+// matchesScope reports whether the slash-separated relative path matches any
+// pattern. Like the context exclude patterns, a pattern is tried with
+// filepath.Match against the whole path and the base name; additionally
+// "dir/**", "**/name" and a bare directory name match by path segments.
+func matchesScope(path string, patterns []string) bool {
+	base := filepath.Base(path)
+	for _, p := range patterns {
+		p = strings.TrimSuffix(filepath.ToSlash(strings.TrimSpace(p)), "/")
+		if p == "" {
+			continue
+		}
+		if ok, _ := filepath.Match(p, path); ok {
+			return true
+		}
+		if ok, _ := filepath.Match(p, base); ok {
+			return true
+		}
+		if dir, ok := strings.CutSuffix(p, "/**"); ok {
+			if path == dir || strings.HasPrefix(path, dir+"/") {
+				return true
+			}
+			if ok, _ := filepath.Match(dir, firstSegments(path, strings.Count(dir, "/")+1)); ok {
+				return true
+			}
+		}
+		if rest, ok := strings.CutPrefix(p, "**/"); ok {
+			segs := strings.Split(path, "/")
+			for i := range segs {
+				if ok, _ := filepath.Match(rest, strings.Join(segs[i:], "/")); ok {
+					return true
+				}
+			}
+		}
+		if path == p || strings.HasPrefix(path, p+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// firstSegments returns the first n slash-separated segments of path.
+func firstSegments(path string, n int) string {
+	segs := strings.Split(path, "/")
+	if n >= len(segs) {
+		return path
+	}
+	return strings.Join(segs[:n], "/")
 }
 
 // errNoOpRewrite signals that a file write was suppressed because the content
@@ -1079,18 +1188,7 @@ func (a *CoderAgent) testCmds() []string {
 }
 
 func (a *CoderAgent) defaultTestCmds() []string {
-	switch a.detectLanguage() {
-	case "go":
-		return []string{"go test -count=1 ./..."}
-	case "node", "javascript", "typescript":
-		return []string{"npm test"}
-	case "python":
-		return []string{"python -m pytest"}
-	case "rust":
-		return []string{"cargo test"}
-	default:
-		return nil
-	}
+	return lang.CommandsFor(a.detectLanguage(), a.root).Test
 }
 
 func (a *CoderAgent) collectRelatedTestFiles(files []string) []string {
@@ -1144,6 +1242,12 @@ func filterTestCommands(cmds []string, buildCommand string) []string {
 			continue
 		case strings.HasPrefix(lower, "mvn compile"):
 			continue
+		case strings.HasPrefix(lower, "mvn -q compile"):
+			continue
+		case strings.HasPrefix(lower, "cmake -s "):
+			continue
+		case strings.HasPrefix(lower, "dotnet build"):
+			continue
 		case strings.HasPrefix(lower, "gradle compile"):
 			continue
 		}
@@ -1166,11 +1270,7 @@ func (a *CoderAgent) validationSummary(buildCommand string, testCommands []strin
 // ensureGoMod initialises go.mod if the project is Go and no go.mod exists.
 // Uses ModulePath from the project config.
 func (a *CoderAgent) ensureGoMod() {
-	lang := a.cfg.Project.Language
-	if lang == "" {
-		lang = a.detectLanguage()
-	}
-	if lang != "go" && lang != "" {
+	if a.detectLanguage() != "go" {
 		return
 	}
 
@@ -1202,44 +1302,17 @@ func (a *CoderAgent) ensureGoMod() {
 
 // buildCmd returns the build command for the project language.
 func (a *CoderAgent) buildCmd() string {
-	lang := a.cfg.Project.Language
-	if lang == "" {
-		lang = a.detectLanguage()
-	}
-	switch lang {
-	case "go":
+	language := a.detectLanguage()
+	if language == "go" {
 		return goBuildCmd
-	case "rust":
-		return "cargo build"
-	case "node", "javascript", "typescript":
-		return "npm run build --if-present"
-	case "java":
-		if fileExists(filepath.Join(a.root, "pom.xml")) {
-			return "mvn compile -q"
-		}
-		return "gradle compileJava -q"
-	default:
-		return ""
 	}
+	return lang.CommandsFor(language, a.root).Build
 }
 
-// detectLanguage determines the project language from project files.
+// detectLanguage returns the configured project language, or detects it from
+// project files.
 func (a *CoderAgent) detectLanguage() string {
-	markers := map[string]string{
-		"go.mod":           "go",
-		"Cargo.toml":       "rust",
-		"package.json":     "node",
-		"pom.xml":          "java",
-		"build.gradle":     "java",
-		"requirements.txt": "python",
-		"pyproject.toml":   "python",
-	}
-	for file, lang := range markers {
-		if fileExists(filepath.Join(a.root, file)) {
-			return lang
-		}
-	}
-	return ""
+	return lang.Resolve(a.cfg.Project.Language, a.root)
 }
 
 // sourceExtensions are file extensions recognized as source code.
@@ -1363,6 +1436,7 @@ func (f *fenceState) closes(trimmed string) bool {
 type FileBlock struct {
 	Path    string
 	Content string
+	Guessed bool // the path was inferred from the content, not stated by the model
 }
 
 // ExtractFileBlocks parses LLM output for code blocks with associated file paths.
@@ -1389,13 +1463,16 @@ func ExtractFileBlocks(output string) []FileBlock {
 		trimmed := strings.TrimSpace(line)
 
 		if inFence && fence.closes(trimmed) {
+			guessed := false
 			if lastPath == "" {
 				lastPath = guessFilePathFromContent(contentLines)
+				guessed = lastPath != ""
 			}
 			if lastPath != "" {
 				blocks = append(blocks, FileBlock{
 					Path:    lastPath,
 					Content: strings.Join(contentLines, "\n") + "\n",
+					Guessed: guessed,
 				})
 			}
 			inFence = false

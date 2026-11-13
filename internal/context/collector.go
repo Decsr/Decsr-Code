@@ -15,6 +15,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/embedder"
 	"github.com/Decsr/Decsr-Code/internal/executil"
 	"github.com/Decsr/Decsr-Code/internal/index"
+	"github.com/Decsr/Decsr-Code/internal/lang"
 	"github.com/Decsr/Decsr-Code/internal/memory"
 	"github.com/Decsr/Decsr-Code/internal/safefile"
 )
@@ -95,7 +96,7 @@ func Collect(root string, cfg config.Config) (ProjectContext, error) {
 	pc.ProjectType = detectProjectType(rootAbs)
 	pc.IsBrownfield = detectBrownfield(pc.Files, pc.ProjectType)
 	pc.TreeStructure = buildTreeStructure(pc.Files)
-	pc.ProgrammingLanguage = cfg.Project.Language
+	pc.ProgrammingLanguage = lang.Resolve(cfg.Project.Language, rootAbs)
 
 	if pc.IsBrownfield {
 		pc.SourceFiles = collectSourceFiles(rootAbs, pc.Files, nil)
@@ -322,26 +323,17 @@ func (p ProjectContext) SystemPromptFragment(profile ...ContextProfile) string {
 
 // detectProjectType identifies the project language/framework from marker files.
 func detectProjectType(root string) string {
-	markers := []struct {
-		file     string
-		projType string
-	}{
-		{"go.mod", "go"},
-		{"Cargo.toml", "rust"},
-		{"package.json", "node"},
-		{"pom.xml", "java-maven"},
-		{"build.gradle", "java-gradle"},
-		{"pyproject.toml", "python"},
-		{"requirements.txt", "python"},
-		{"Gemfile", "ruby"},
-		{"mix.exs", "elixir"},
-	}
-	for _, m := range markers {
-		if fileExists(filepath.Join(root, m.file)) {
-			return m.projType
+	switch l := lang.DetectMarkers(root); l {
+	case "javascript", "typescript":
+		return "node"
+	case "java":
+		if fileExists(filepath.Join(root, "pom.xml")) {
+			return "java-maven"
 		}
+		return "java-gradle"
+	default:
+		return l
 	}
-	return ""
 }
 
 // detectBrownfield returns true if the project already has meaningful source code.
