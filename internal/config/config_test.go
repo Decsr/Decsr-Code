@@ -608,6 +608,19 @@ func TestValidRoleName(t *testing.T) {
 	}
 }
 
+func TestValidQualifiedName(t *testing.T) {
+	for _, n := range []string{"superpowers:brainstorming", "a-b:c_d", "p:1"} {
+		if !ValidQualifiedName(n) {
+			t.Errorf("%q should be valid", n)
+		}
+	}
+	for _, n := range []string{"", "plain", ":x", "x:", "a:b:c", "A:b", "a:B", "a b:c", "a:../b"} {
+		if ValidQualifiedName(n) {
+			t.Errorf("%q should be invalid", n)
+		}
+	}
+}
+
 func TestSaveProjectRoleKeepsReadOnly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()

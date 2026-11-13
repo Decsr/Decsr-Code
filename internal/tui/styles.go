@@ -174,6 +174,10 @@ var styleGateBanner = lipgloss.NewStyle().
 	Bold(true).
 	Padding(0, 2)
 
+// Suggested prompt shown as ghost text in the empty Workspace prompt; italic
+// so it also reads without color.
+var styleWsGhost = lipgloss.NewStyle().Foreground(crt.dim).Italic(true)
+
 // Conversation line.
 var styleConvTimestamp = lipgloss.NewStyle().Foreground(crt.dim)
 

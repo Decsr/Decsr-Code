@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -30,6 +31,17 @@ type Config struct {
 	ModelMemory    ModelMemoryConfig      `yaml:"model_memory,omitempty"`
 	Notifications  NotifyConfig           `yaml:"notifications,omitempty"`
 	Workspace      WorkspaceConfig        `yaml:"workspace,omitempty"`
+
+	// PluginAgents are the roles loaded from plugins, keyed "<plugin>:<agent>".
+	// They are filled in at run time and never written to a config file.
+	PluginAgents map[string]PluginAgent `yaml:"-"`
+}
+
+// PluginAgent is a workspace role defined by a plugin agent file.
+type PluginAgent struct {
+	Description string // one line
+	Prompt      string // the role prompt (the agent file body)
+	ReadOnly    bool
 }
 
 // WorkspaceConfig controls the node workspace.
@@ -513,6 +525,13 @@ var roleNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]{1,31}$`)
 // ValidRoleName reports whether name is a valid custom role name.
 func ValidRoleName(name string) bool {
 	return roleNameRe.MatchString(name)
+}
+
+// ValidQualifiedName reports whether s is "<plugin>:<name>", both parts valid
+// per ValidName. It names plugin skills, commands and agent roles.
+func ValidQualifiedName(s string) bool {
+	plugin, name, ok := strings.Cut(s, ":")
+	return ok && ValidName(plugin) && ValidName(name)
 }
 
 // SaveProjectRole sets agents[name] in <root>/.decsr/project.yaml, keeping the

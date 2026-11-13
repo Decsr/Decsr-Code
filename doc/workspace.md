@@ -98,10 +98,24 @@ shows the keys of the area that has focus.
 | `Alt+Enter` | New line in the task |
 | `/` | At the start of the text: open the command list |
 | `Up` / `Down`, `Tab` | In the command list: move, complete the name |
-| `Esc` | Close the command list; otherwise go to the graph (when it has nodes) |
+| `Right` | Empty prompt with a suggestion shown: fill the prompt with it (does not send) |
+| `Esc` | Hide the suggestion; close the command list; otherwise go to the graph (when it has nodes) |
 | `PgUp` / `PgDn` | Scroll the conversation |
 | `?` | Help (only when the prompt is empty) |
 | `Ctrl+C` | Quit (press twice) |
+
+**Suggestions.** An empty prompt shows a dim italic suggestion in place of
+"Type a task or / for commands", and the hint bar adds `→ accept suggestion`.
+It is picked from the session state, with no model call, and only while no
+node runs and no overlay is open:
+
+1. Build & test failed and has no fix node: `fix the failing build and tests`
+2. Every node is done: `/compact` with 6 or more done nodes, otherwise
+   `review the changes and add any missing tests`
+3. A fresh session in a project with saved sessions: `/resume`
+
+`Right` fills the prompt with it; `Enter` then sends or runs it. `Esc` hides
+it. It stays hidden until the graph or the saved sessions change.
 
 **Graph focus.** Single keys act on the selected node.
 
@@ -156,12 +170,14 @@ prompt and lands there.
 | `/project` | Switch to another project (see [Switching project](#switching-project)) |
 | `/profile` | Save or apply a profile of role settings (see [Profiles](#profiles)) |
 | `/roles` (`/agents`) | List all roles, with their skills, and create a new one |
+| `/plugin` (`/plugins`) | List plugins; `/plugin enable <name>`, `/plugin disable <name>` and `/plugin reload` (see [Plugins](#plugins)) |
 | `/status` | Project path, language, profile, session, node counts, roles with runner/model/effort, parallel limit, custom commands and skills found |
 | `/cost` | Tokens in and out per node and per role, the lead's usage, and the total |
 | `/export` | Write the session to `.decsr/exports/<session id>.md` (title, transcript, summary, each node with role, status, files and summary) |
 | `/config` (`/menu`) | Leave for the classic menu: settings, project setup, classic pipeline |
 | `/quit` (`/exit`) | Leave the Workspace (asks first while nodes run) |
 | `/<name> [args]` | A [custom command](#custom-commands-and-skills) |
+| `/<plugin>:<name> [args]` | A command of a [plugin](#plugins) |
 
 `/clear`, `/compact`, `/project`, `/resume` and applying a profile are refused
 while nodes are running: `stop the running nodes first`. Saving a profile stays
@@ -233,7 +249,8 @@ agents:
 
 `/profile` opens a list of saved profiles. `Enter` applies one: its roles are
 written into the current project's `.decsr/project.yaml` (roles not in the
-profile are left alone), `profile: <name>` is recorded under `project:`, and
+profile are left alone; an empty runner, model, effort or description in the
+profile keeps the project's value), `profile: <name>` is recorded under `project:`, and
 the graph's role labels are refreshed. Applying is refused while nodes run,
 because it would switch their models in the middle of a batch. The row `save current roles as...` asks
 for a name and saves each role's own configured values: a custom role that only
@@ -300,6 +317,73 @@ Wrap errors with `%w`. Keep functions under 60 lines.
 The text is added to the prompt of that role's nodes. A skill that is listed but
 missing (or too large) does not fail the node; it shows as a warning on the
 node.
+
+## Plugins
+
+DECSR loads Claude-format plugins: a folder with `.claude-plugin/plugin.json`
+(`name` is required and must match `[a-z0-9][a-z0-9_-]{0,31}`; `description` and
+`version` are shown). Put the folder in `<project>/.decsr/plugins/<dir>/` or
+`~/.decsr/plugins/<dir>/`; a project plugin wins over a user plugin of the same
+name. A plugin must be a real directory (a symlink is skipped). Files are read
+only when they are regular files without NUL bytes and at most 64 KB. A
+`plugin.json` that cannot be parsed skips the plugin and shows as a warning in
+`/plugin`.
+
+`commands/`, `skills/` and `agents/` are always scanned. `plugin.json` may also
+list `commands`, `skills` or `agents` (a path or an array of paths relative to
+the plugin; absolute paths and paths leaving the plugin are ignored), which are
+scanned in addition.
+
+- **Commands.** `commands/<file>.md` is the command `/<plugin>:<file>`. Its
+  description is the frontmatter `description` (else the first `# heading`, else
+  the first 60 characters); `argument-hint` is shown in the command list.
+  `$ARGUMENTS` works as in custom commands. A built-in or custom command is never
+  replaced.
+- **Skills.** `skills/<name>/SKILL.md` is the skill `<plugin>:<name>`. List it on
+  a role like any skill (`skills: [superpowers:brainstorming]`); the text after
+  the frontmatter is added to the prompt. A skill of a missing or disabled
+  plugin shows the usual `skill "..." not found` warning on the node.
+- **Agents.** `agents/<file>.md` is the role `<plugin>:<file>`, offered to the
+  lead and in the agent picker next to your own roles. The body (first 16 KB)
+  is the role prompt; the runner, model and effort are those of `pm`. The role is
+  read-only when the frontmatter has a `tools` list without `Write`, `Edit`,
+  `MultiEdit` or `NotebookEdit`. Plugin roles are never written to `config.yaml`,
+  `project.yaml` or a profile.
+
+Markdown files may start with YAML frontmatter between `---` lines. The same
+frontmatter works in `.decsr/commands/*.md`. A header that is not valid YAML is
+read line by line instead: each `key: value` line at the start of a line is used
+as it is. Only a header with no closing `---` is left in the text.
+
+`/plugin` lists each plugin with its version, scope, state, commands, skills and
+agent roles. A plugin with `hooks/`, `.mcp.json` or `mcpServers` is marked:
+hooks and MCP servers are not used by decsr. `/plugin disable <name>` and
+`/plugin enable <name>` change `~/.decsr/plugins/disabled` (one name per line)
+and reload; `/plugin reload` rescans the folders. These are refused while nodes
+are running, and a node assigned a role that is gone loses that assignment.
+### Recommended set
+
+`scripts/install-plugins.sh` (needs git; `--dry-run` previews, `--uninstall`
+removes only what it installed) copies superpowers, ui-ux-pro-max,
+modern-cpp, modern-python, insecure-defaults, differential-review,
+feature-dev and pr-review-toolkit into `~/.decsr/plugins`, and writes a
+`plugins` profile that gives the built-in roles skills:
+
+| Role | Skills |
+|---|---|
+| pm | brainstorming, writing-plans |
+| coder | test-driven-development, modern-cpp, modern-python |
+| coder_fixer | systematic-debugging |
+| qa | verification-before-completion, test-driven-development |
+| security | differential-review |
+| ux_reviewer | ui-ux-pro-max |
+
+The profile lists only `skills` (the role's existing skills from
+`~/.decsr/config.yaml`, then the plugin ones) and `read_only` (copied when
+true). It has no runner, model, effort or description, and an empty value in a
+profile keeps what the project already has, so applying it only adds skills.
+Open decsr, run `/plugin` to see the plugins and `/profile plugins` to apply
+the profile.
 
 ## Roles
 

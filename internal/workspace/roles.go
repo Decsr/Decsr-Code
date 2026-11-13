@@ -14,6 +14,8 @@ type Role struct {
 	ReadOnly    bool // reviews and reports only; never writes files
 	Agent       config.AgentConfig
 	UserSkills  []string // file-based skills (.decsr/skills/<name>.md)
+	Plugin      bool     // defined by a plugin agent file, never saved to a config
+	Prompt      string   // the role prompt of a plugin role
 }
 
 var builtinDescriptions = map[string]string{
@@ -30,7 +32,7 @@ var builtinDescriptions = map[string]string{
 var readOnlyBuiltin = map[string]bool{"ux_reviewer": true, "security": true}
 
 // Roles returns the built-in roles in config.BuiltinRoles order, then custom
-// roles sorted by name. A custom role without runner/model inherits the pm
+// roles sorted by name, then plugin roles ("<plugin>:<agent>") sorted by name. A custom role without runner/model inherits the pm
 // role's runner, model and effort.
 func Roles(cfg config.Config) []Role {
 	pm := cfg.Agents["pm"]
@@ -61,6 +63,19 @@ func Roles(cfg config.Config) []Role {
 		}
 		ac.Skills = nil
 		out = append(out, Role{Name: name, Description: Sanitize(ac.Description), ReadOnly: ac.ReadOnly, Agent: ac, UserSkills: ac.UserSkills})
+	}
+	var plug []string
+	for name := range cfg.PluginAgents {
+		// A plugin role never shadows a configured one.
+		if _, taken := cfg.Agents[name]; !taken && config.ValidQualifiedName(name) {
+			plug = append(plug, name)
+		}
+	}
+	sort.Strings(plug)
+	for _, name := range plug {
+		pa := cfg.PluginAgents[name]
+		ac := config.AgentConfig{Runner: pm.Runner, Model: pm.Model, Effort: pm.Effort, ReadOnly: pa.ReadOnly}
+		out = append(out, Role{Name: name, Description: Sanitize(pa.Description), ReadOnly: pa.ReadOnly, Agent: ac, Plugin: true, Prompt: pa.Prompt})
 	}
 	return out
 }

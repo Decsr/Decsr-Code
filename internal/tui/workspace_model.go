@@ -24,6 +24,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/config"
 	dctx "github.com/Decsr/Decsr-Code/internal/context"
 	"github.com/Decsr/Decsr-Code/internal/lang"
+	"github.com/Decsr/Decsr-Code/internal/plugins"
 	"github.com/Decsr/Decsr-Code/internal/runner"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
@@ -71,6 +72,7 @@ type wsDeps struct {
 	deleteProfile  func(name string) error
 	recent         func() []RecentProject
 	customCommands func() []workspace.CustomCommand
+	loadPlugins    func() plugins.Set
 }
 
 func (d *wsDeps) fillDefaults(root string) {
@@ -96,6 +98,9 @@ func (d *wsDeps) fillDefaults(root string) {
 	}
 	if d.customCommands == nil {
 		d.customCommands = func() []workspace.CustomCommand { return workspace.LoadCustomCommands(root) }
+	}
+	if d.loadPlugins == nil {
+		d.loadPlugins = func() plugins.Set { return plugins.Load(root) }
 	}
 }
 
@@ -137,7 +142,14 @@ func writeSplitRaw(root, raw string) {
 func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (WorkspaceResult, error) {
 	var mu sync.Mutex
 	cur := cfg
-	getCfg := func() config.Config { mu.Lock(); defer mu.Unlock(); return cur }
+	var pluginAgents map[string]config.PluginAgent // set by deps.loadPlugins
+	getCfg := func() config.Config {
+		mu.Lock()
+		defer mu.Unlock()
+		c := cur
+		c.PluginAgents = pluginAgents
+		return c
+	}
 	setCfg := func(c config.Config) { mu.Lock(); cur = c; mu.Unlock() }
 
 	var once sync.Once
@@ -234,6 +246,13 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 			return c, nil
 		},
 		checkCmds: checkCmds,
+		loadPlugins: func() plugins.Set {
+			set := plugins.Load(root)
+			mu.Lock()
+			pluginAgents = set.AgentRoles()
+			mu.Unlock()
+			return set
+		},
 	}
 
 	prog := tea.NewProgram(newWorkspaceModel(root, cfg, deps, opts), tea.WithAltScreen())
@@ -463,18 +482,20 @@ type workspaceModel struct {
 	noticeErr     bool
 
 	// session and prompt
-	sess        *wsSess
-	nSaved      int // saved sessions of this project, for the empty state
-	custom      []workspace.CustomCommand
-	input       textarea.Model
-	scroll      int // chat lines scrolled up from the newest
-	cmdIdx      int
-	cmdPicked   bool // the highlight was moved with the arrows
-	splitting   bool
-	splitGen    int
-	splitTask   string
-	cancelSplit context.CancelFunc
-	stream      *wsStream
+	sess         *wsSess
+	nSaved       int    // saved sessions of this project, for the empty state
+	sugDismissed string // suggestionKey of the suggestion hidden by Esc or accepting
+	custom       []workspace.CustomCommand
+	plug         plugins.Set
+	input        textarea.Model
+	scroll       int // chat lines scrolled up from the newest
+	cmdIdx       int
+	cmdPicked    bool // the highlight was moved with the arrows
+	splitting    bool
+	splitGen     int
+	splitTask    string
+	cancelSplit  context.CancelFunc
+	stream       *wsStream
 
 	// graph
 	eng       *workspace.Engine
@@ -568,6 +589,8 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...Work
 		m.setNotice("old workspace graph: "+oneLine(err.Error()), true)
 	}
 	m.custom = deps.customCommands()
+	m.plug = deps.loadPlugins()
+	m.cfg = m.withPluginAgents(m.cfg)
 	m.refreshSaved()
 	if len(opts) > 0 && opts[0].Resume {
 		m = m.openSessions()
@@ -837,6 +860,17 @@ func (m workspaceModel) promptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	empty := m.input.Value() == ""
 	open := m.paletteOpen()
 	matches := m.cmdMatches(m.input.Value())
+	if sug := m.suggestion(); sug != "" {
+		switch k {
+		case "right":
+			m.dismissSuggestion(sug)
+			m.input.SetValue(sug)
+			return m, nil
+		case "esc":
+			m.dismissSuggestion(sug)
+			return m, nil
+		}
+	}
 	switch k {
 	case "pgup":
 		m.scroll += 3
@@ -1701,7 +1735,7 @@ func (m workspaceModel) saveForm() (tea.Model, tea.Cmd) {
 		m.formErr = err.Error()
 		return m, nil
 	}
-	m.cfg = cfg
+	m.cfg = m.withPluginAgents(cfg)
 	m.overlay = wsOverlayNone
 	if m.formNode != "" && m.eng != nil {
 		if err := m.eng.Assign(m.formNode, name); err != nil {
@@ -1993,6 +2027,9 @@ func (m workspaceModel) hintLine() string {
 		hs = []keyHint{{"↑↓", "choose"}, {"Tab", "complete"}, {"Enter", "run"}, {"Esc", "close"}}
 	default:
 		hs = []keyHint{{"Enter", "send"}, {"/", "commands"}, {"Tab", "graph"}}
+		if m.suggestion() != "" {
+			hs = append([]keyHint{{"Enter", "send"}, {"→", "accept suggestion"}}, hs[1:]...)
+		}
 		if m.input.Value() == "" {
 			hs = append(hs, keyHint{"?", "help"})
 		}
@@ -2146,7 +2183,19 @@ func (m workspaceModel) promptBox() []string {
 	if m.focus == wsFocusPrompt && !m.splitting {
 		boxStyle = boxStyle.BorderForeground(focusBorder)
 	}
-	return strings.Split(boxStyle.Render(m.input.View()), "\n")
+	in := m.input
+	if sug := m.suggestion(); sug != "" {
+		in.Placeholder = sug
+		in.FocusedStyle.Placeholder, in.BlurredStyle.Placeholder = styleWsGhost, styleWsGhost
+		// The textarea draws with the style its pointer was set to by
+		// Focus or Blur; on this copy that pointer still names the original.
+		if in.Focused() {
+			in.Focus()
+		} else {
+			in.Blur()
+		}
+	}
+	return strings.Split(boxStyle.Render(in.View()), "\n")
 }
 
 // paletteLines is the "/" command list drawn right above the prompt box, at

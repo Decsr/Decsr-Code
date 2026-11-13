@@ -421,7 +421,7 @@ func pickDefaultIndex(items []wsPickItem) int {
 }
 
 // renderPickRow draws one picker row of exactly inner cells.
-func renderPickRow(it wsPickItem, selected bool, inner int) string {
+func renderPickRow(it wsPickItem, selected bool, inner, nameW int) string {
 	bg := func(fg lipgloss.Color, bold bool) lipgloss.Style {
 		st := lipgloss.NewStyle().Foreground(fg).Bold(bold)
 		if selected {
@@ -437,8 +437,8 @@ func renderPickRow(it wsPickItem, selected bool, inner int) string {
 	sb.WriteString(bg(crt.bright, true).Render(marker))
 	switch it.kind {
 	case "role":
-		sb.WriteString(bg(roleColor(it.name), true).Render(padRight(ansi.Truncate(it.name, 14, "…"), 14)))
-		used := 2 + 14
+		sb.WriteString(bg(roleColor(it.name), true).Render(padRight(fitRoleName(it.name, nameW), nameW)))
+		used := 2 + nameW
 		if it.suggested {
 			sb.WriteString(bg(galaxyGold, true).Render(" ★ suggested"))
 			used += 12
@@ -481,6 +481,25 @@ func renderPickRow(it wsPickItem, selected bool, inner int) string {
 	return row
 }
 
+// maxPickNameW caps the role name column so the model and description still
+// fit in the 70-cell picker.
+const maxPickNameW = 28
+
+// fitRoleName shortens a role name to w cells. A plugin role
+// ("plugin:agent") loses the end of the plugin part first so the agent part
+// stays readable: "pr-re…:silent-failure-hunter".
+func fitRoleName(name string, w int) string {
+	if ansi.StringWidth(name) <= w {
+		return name
+	}
+	if i := strings.IndexByte(name, ':'); i > 0 {
+		if keep := w - ansi.StringWidth(name[i:]) - 1; keep >= 3 {
+			return ansi.Truncate(name[:i], keep, "") + "…" + name[i:]
+		}
+	}
+	return ansi.Truncate(name, w, "…")
+}
+
 // renderPicker draws the role list box (assignment picker or /roles list).
 func renderPicker(title string, items []wsPickItem, idx int, footer string, width, height int) string {
 	boxW := min(70, width-2)
@@ -493,9 +512,15 @@ func renderPicker(title string, items []wsPickItem, idx int, footer string, widt
 	if idx >= rows {
 		start = idx - rows + 1
 	}
+	nameW := 14
+	for _, it := range items {
+		if it.kind == "role" {
+			nameW = max(nameW, min(ansi.StringWidth(it.name), maxPickNameW))
+		}
+	}
 	var body []string
 	for i := start; i < start+rows && i < len(items); i++ {
-		body = append(body, renderPickRow(items[i], i == idx, inner))
+		body = append(body, renderPickRow(items[i], i == idx, inner, nameW))
 	}
 	body = append(body, "", lipgloss.NewStyle().Foreground(crt.dim).Render(footer))
 	return wsBox(ansi.Truncate(title, boxW-6, "…"), boxW, body)
@@ -561,6 +586,9 @@ func renderCmdList(cmds []wsCommand, idx, width, maxRows int) []string {
 			descSt = descSt.Background(surfaceRaised)
 		}
 		desc := c.desc
+		if c.hint != "" {
+			desc = c.hint + "  " + desc
+		}
 		if c.tag != "" {
 			desc += " " + c.tag
 		}
@@ -599,6 +627,7 @@ func workspaceHelp(cmds []wsCommand) []helpSection {
 			{"Esc", "prompt: go to the graph (closes the command list first)"},
 			{"/ or c", "graph: go to the prompt"},
 			{"Enter", "prompt: send the task or run the command"},
+			{"→", "empty prompt: accept the suggestion shown; Esc hides it"},
 			{"Alt+Enter", "prompt: new line"},
 			{"/usr/lib is gone", "a first word with a second / is sent as a task"},
 			{"//text", "sends /text as a task, not a command"},

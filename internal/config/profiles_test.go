@@ -152,6 +152,35 @@ func TestApplyProfile(t *testing.T) {
 	}
 }
 
+func TestApplyProfileEmptyKeepsProjectValues(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	if err := Save(root, Config{
+		Agents: map[string]AgentConfig{
+			"coder": {Runner: "claude", Model: "mine", Effort: "low", Description: "kept", ReadOnly: true},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveProfile("sk", map[string]AgentConfig{
+		"coder": {UserSkills: []string{"a:b"}},
+		"qa":    {UserSkills: []string{"c:d"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyProfile(root, "sk"); err != nil {
+		t.Fatal(err)
+	}
+	proj := LoadProject(root)
+	c := proj.Agents["coder"]
+	if c.Runner != "claude" || c.Model != "mine" || c.Effort != "low" || c.Description != "kept" || c.ReadOnly || !reflect.DeepEqual(c.UserSkills, []string{"a:b"}) {
+		t.Errorf("coder = %+v", c)
+	}
+	if q := proj.Agents["qa"]; q.Runner != "" || q.Model != "" || !reflect.DeepEqual(q.UserSkills, []string{"c:d"}) {
+		t.Errorf("qa = %+v", q)
+	}
+}
+
 func TestApplyProfileUnknownRunner(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
