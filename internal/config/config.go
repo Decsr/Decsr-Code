@@ -88,6 +88,7 @@ type ProjectConfig struct {
 	MaxFixAttempts int           `yaml:"max_fix_attempts,omitempty"`
 	Scope          ScopeConfig   `yaml:"scope,omitempty"`
 	Context        ContextConfig `yaml:"context,omitempty"`
+	Profile        string        `yaml:"profile,omitempty"` // name of the last applied role profile
 }
 
 type ScopeConfig struct {
@@ -164,6 +165,7 @@ type AgentConfig struct {
 	MaxContextTokens int      `yaml:"max_context_tokens,omitempty"` // 0 = no limit (for local models)
 	ReadOnly         bool     `yaml:"read_only,omitempty"`          // workspace role that reports only and never writes files
 	Skills           []string `yaml:"-"`                            // always from defaults, never persisted
+	UserSkills       []string `yaml:"skills,omitempty"`             // file-based skills (.decsr/skills/<name>.md)
 }
 
 // globalConfigDir returns the directory for the global config (~/.decsr).
@@ -389,6 +391,9 @@ func merge(dst *Config, src Config) {
 	if src.Project.LintCmd != "" {
 		dst.Project.LintCmd = src.Project.LintCmd
 	}
+	if src.Project.Profile != "" {
+		dst.Project.Profile = src.Project.Profile
+	}
 	if src.Project.MaxFixAttempts > 0 {
 		dst.Project.MaxFixAttempts = src.Project.MaxFixAttempts
 	}
@@ -482,6 +487,9 @@ func merge(dst *Config, src Config) {
 			if ac.ReadOnly {
 				existing.ReadOnly = true
 			}
+			if len(ac.UserSkills) > 0 {
+				existing.UserSkills = ac.UserSkills
+			}
 			dst.Agents[role] = existing
 		}
 	}
@@ -525,6 +533,9 @@ func SaveProjectRole(root, name string, ac AgentConfig) error {
 	existing.Model = ac.Model
 	existing.Effort = ac.Effort
 	existing.ReadOnly = ac.ReadOnly
+	if ac.UserSkills != nil {
+		existing.UserSkills = ac.UserSkills
+	}
 	cfg.Agents[name] = existing
 	return Save(root, cfg)
 }

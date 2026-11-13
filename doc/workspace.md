@@ -1,19 +1,26 @@
 # Workspace
 
-The Workspace is the screen `decsr` opens by default. You type a task in a chat
-box, a lead agent splits it into sub-tasks, you decide which agent does each
+The Workspace is the screen `decsr` opens by default. You type a task in the
+prompt, a lead agent splits it into sub-tasks, you decide which agent does each
 one, and the assigned sub-tasks run in parallel. Every sub-task is a node in a
 graph, so you can see who does what and what is waiting on what.
+
+It is one screen: the node graph and the inspector on top, the last lines of
+the conversation under them, and the prompt at the bottom. Before the first
+task the graph pane shows `No nodes yet.` and, if this project has saved
+sessions, `N saved sessions - /resume`. Each project keeps its own sessions, so
+you can leave and continue later (see [Sessions](#sessions)).
 
 Nothing runs until you press a key. The classic pipeline (Context, Spec, Plan,
 Code, QA and so on) is unchanged; see [Reaching the classic pipeline](#reaching-the-classic-pipeline).
 
 ## Flow
 
-1. **Chat.** The start screen is a chat box. No repository compaction runs at
+1. **Chat.** The prompt starts focused. No repository compaction runs at
    start; the lead only gets a cheap, locally collected project summary (plus
    `.decsr/context_pack.md` if one already exists). Type a task and press
-   `Enter` (`Alt+Enter` adds a new line).
+   `Enter` (`Alt+Enter` adds a new line). A second task in the same session is
+   added to the existing graph (see [Sessions](#sessions)).
 2. **Split.** The lead (the `pm` agent's runner and model) splits the task into
    nodes. Each node has a title, a description, the nodes it depends on and a
    *suggested* role. If the reply is unusable (no result, a dependency cycle, a
@@ -21,7 +28,8 @@ Code, QA and so on) is unchanged; see [Reaching the classic pipeline](#reaching-
    send the task again. If the lead gives several sub-tasks but no role for any
    of them, it is asked once more for the complete answer. The lead's full raw
    answer of the last split is saved to `.decsr/workspace_split.txt`, so you can
-   see what it actually said.
+   see what it actually said. After a successful split the focus moves to the
+   graph and the first new node is selected.
 3. **Assign.** Every node starts unassigned. Press `a` on a node to pick its
    role, or `A` to accept every suggestion that is a defined role. If the lead
    suggests a role you have not defined, the picker offers to create it.
@@ -77,25 +85,31 @@ blocked and say why.
 
 ## Keys
 
-On the start screen:
+The screen has two focus areas, the prompt and the graph. It starts on the
+prompt. `Tab` or `Shift+Tab` switches between them; the hint bar at the bottom
+shows the keys of the area that has focus.
+
+**Prompt focus.** Every printable key is text, so you can type `q`, `r`, `a`,
+`?` or `/` anywhere in a task without triggering anything.
 
 | Key | Action |
 |---|---|
-| `Enter` | Send the task to the lead |
+| `Enter` | Send the task, or run the command when the text starts with `/` (see [Commands](#commands)) |
 | `Alt+Enter` | New line in the task |
-| `/` | Open the command list |
-| `PgUp` / `PgDn` | Scroll the chat |
-| `?` | Help (when the box is empty) |
-| `Esc` | Cancel the split while it runs |
-| `Ctrl+C` | Quit |
+| `/` | At the start of the text: open the command list |
+| `Up` / `Down`, `Tab` | In the command list: move, complete the name |
+| `Esc` | Close the command list; otherwise go to the graph (when it has nodes) |
+| `PgUp` / `PgDn` | Scroll the conversation |
+| `?` | Help (only when the prompt is empty) |
+| `Ctrl+C` | Quit (press twice) |
 
-On the graph:
+**Graph focus.** Single keys act on the selected node.
 
 | Key | Action |
 |---|---|
 | arrows or `h j k l` | Move between nodes |
 | `Enter` or `o` | Open the full output of the node |
-| `i` | Show or hide the inspector |
+| `i` | Show or hide the inspector. Under 100 columns it opens as a box over the graph; `i` or `Esc` closes it |
 | `a` | Pick the role for the selected node |
 | `A` | Accept all suggestions that are defined roles |
 | `r` | Run the selected node |
@@ -103,28 +117,189 @@ On the graph:
 | `s` | Stop the selected node |
 | `S` | Stop all running nodes |
 | `f` | Add a fix node after Build & test has failed |
-| `n` | New task (asks first if work is unfinished) |
-| `/` | Command list |
+| `/` or `c` | Go to the prompt (`/` also types the slash) |
+| `Tab` | Go to the prompt |
 | `?` | Help |
 | `q` | Quit (asks first while nodes run) |
 
 In the output view: `Esc` or `q` returns to the graph, `s` stops the node, and
-the arrow and page keys scroll.
-
-### Commands
-
-Type `/` (or press `/` on the graph) to filter and run a command with `Enter`.
-
-| Command | What it does |
-|---|---|
-| `/help` | Keyboard help |
-| `/roles` | List all roles and create a new one |
-| `/resume` | Reopen the last unfinished graph |
-| `/menu` | Open the classic Home menu |
-| `/quit` | Quit |
+the arrow and page keys scroll. The old `n` key (new task) is gone; use
+`/clear`.
 
 Quitting while nodes run asks for confirmation, then stops them and kills the
 agent processes.
+
+## Commands
+
+Type `/` at the start of the prompt to filter the list by prefix, move with
+`Up`/`Down`, complete with `Tab`, run with `Enter`. `Enter` runs a command only
+when the text is an exact command name or alias, when you moved the highlight
+with `Up`/`Down` (or completed with `Tab`), or when exactly one command matches
+the prefix. Otherwise it prints `! /co matches several commands: /compact,
+/config, /cost - keep typing or press Tab` and leaves the text alone. An
+unknown command prints `unknown command /x - /help lists them`.
+
+**Tasks that start with a slash.** A single line whose first word contains a
+second `/` (for example `/usr/lib is missing libfoo, fix the build`) is sent as
+a task, not run as a command. To send a task that starts with a command name,
+double the slash: `//compact the logs` sends `/compact the logs`. A text pasted
+into the prompt (or typed in one burst) is inserted as text; it is never sent or
+run until you press `Enter`. With graph focus, a paste moves the focus to the
+prompt and lands there.
+
+| Command | What it does |
+|---|---|
+| `/help` | Keys and the full command list, including custom commands |
+| `/clear` | Save this session and start a new, empty one (asks first when nodes are unfinished) |
+| `/compact` | Fold finished nodes into the session summary (see [Compact](#compact)) |
+| `/resume` | Pick a saved session of this project |
+| `/project` | Switch to another project (see [Switching project](#switching-project)) |
+| `/profile` | Save or apply a profile of role settings (see [Profiles](#profiles)) |
+| `/roles` (`/agents`) | List all roles, with their skills, and create a new one |
+| `/status` | Project path, language, profile, session, node counts, roles with runner/model/effort, parallel limit, custom commands and skills found |
+| `/cost` | Tokens in and out per node and per role, the lead's usage, and the total |
+| `/export` | Write the session to `.decsr/exports/<session id>.md` (title, transcript, summary, each node with role, status, files and summary) |
+| `/config` (`/menu`) | Leave for the classic menu: settings, project setup, classic pipeline |
+| `/quit` (`/exit`) | Leave the Workspace (asks first while nodes run) |
+| `/<name> [args]` | A [custom command](#custom-commands-and-skills) |
+
+`/clear`, `/compact`, `/project`, `/resume` and applying a profile are refused
+while nodes are running: `stop the running nodes first`. Saving a profile stays
+allowed.
+
+## Sessions
+
+A session is one conversation in one project: the transcript, a running
+summary, and one graph. It is saved after every change to
+`<project>/.decsr/sessions/<id>.json` (mode 0600). The id looks like
+`20261113-104512-a1b2`. The session list of one project never shows another
+project's sessions.
+
+- A new session is not written to disk until it has a line.
+- The transcript keeps the last 500 lines.
+- A second task in the same session is **appended** to the graph: new nodes
+  continue the numbering (`T5`, `T6`, ...), numbers are never reused, and the
+  lead is shown the session summary and the current nodes. The lead is told to
+  number new sub-tasks from the next free number and may list an existing node
+  in `depends_on` when the new work needs it; such a dependency is kept as is
+  (a dependency on an ID that is neither new nor in the graph still rejects the
+  split). Build & test is reset to not started and waits for every work node
+  again.
+- `/clear` saves the session and starts a new one. The old one stays in `/resume`.
+- `/resume` lists the project's sessions newest first (`title - 3/7 done - 2h
+  ago`, the current one marked). `Enter` loads one (the current session is saved
+  first), `d` deletes one after `y/n`, `Esc` closes. Nodes that were running
+  when you left come back as not started.
+- A broken session file is skipped in the list.
+- `decsr resume` opens the Workspace with this list already showing.
+- The first time a project with an old `.decsr/workspace.json` is opened, it is
+  wrapped in a session and renamed to `workspace.json.migrated`.
+
+### Compact
+
+`/compact` makes no model call. A finished work or fix node (status done) is
+removed from the graph and written into the session summary as one line:
+`- T1 <title> [<role>]: <first 400 characters of its summary> (files: a, b)`,
+but only when no unfinished node depends on it (every node that depends on it is
+folded too). A finished node that a todo, running or failed node still needs
+stays, so that node keeps the work it builds on; the notice says how many were
+kept, for example `compacted 3 finished nodes; kept 1 that unfinished nodes
+still depend on`. Nodes that stay keep their edges to each other; a dependency
+on a removed node is dropped. Build & test stays. The summary is capped at
+12,000 characters (oldest lines go first). It is given to the lead on the next
+task and to every worker as an `Earlier in this session` section of its context
+(the most recent 4,000 characters). Running it again with nothing to fold says
+`nothing to compact`.
+
+## Profiles
+
+A profile is a named set of per-role settings (runner, model, effort,
+description, `read_only`, skills), stored once for all projects in
+`~/.decsr/profiles/<name>.yaml`:
+
+```yaml
+agents:
+  coder:
+    runner: claude
+    model: sonnet
+  qa:
+    runner: opencode
+    model: ollama/qwen3
+    skills: [house-style]
+  docs_writer:
+    description: Writes user-facing documentation.
+    read_only: true
+```
+
+`/profile` opens a list of saved profiles. `Enter` applies one: its roles are
+written into the current project's `.decsr/project.yaml` (roles not in the
+profile are left alone), `profile: <name>` is recorded under `project:`, and
+the graph's role labels are refreshed. Applying is refused while nodes run,
+because it would switch their models in the middle of a batch. The row `save current roles as...` asks
+for a name and saves each role's own configured values: a custom role that only
+inherits its runner and model from `pm` is saved without them, and built-in
+roles are saved without `description` and `read_only` (those are built in). `d` deletes a profile after `y/n`.
+Names are 1-32 characters: lowercase letters, digits, `-` and `_`, starting with
+a letter or digit. A profile that names an unknown runner is refused and nothing
+is written. The summary line shows `profile: <name>` when one has been applied.
+
+A project file or profile can only add to the global configuration: it cannot
+clear a globally configured `skills` list (a non-empty list replaces it) or a
+`read_only: true` flag (a missing or `false` value changes nothing).
+
+## Switching project
+
+`/project` lists the current project first, then recent projects (a directory
+that no longer exists, or is a file, is dimmed with `(missing)` and cannot be
+chosen), and a last row
+`open path...` that takes a path (`~` is expanded; it must be an existing
+directory; only a trailing line break is trimmed, spaces in the path count). Choosing one saves the session, changes the working directory and
+reopens the Workspace there, with that project's config and sessions. The
+projects you open are recorded in `~/.decsr/projects.json`, the same list the
+classic project picker uses. If DECSR cannot change into the directory it prints
+the error and reopens the Workspace in the current project.
+
+## Custom commands and skills
+
+Both are plain markdown files. A project file wins over a user file of the same
+name. Names must match `[a-z0-9][a-z0-9_-]{0,31}`; files with other names, empty
+files and files over 64 KB are ignored. Files are read when the command list
+opens, so new ones appear without a restart.
+
+**Command.** `<project>/.decsr/commands/<name>.md` or
+`~/.decsr/commands/<name>.md` defines `/<name>`. Running it sends the file's
+text as a task, with `$ARGUMENTS` replaced by what you typed after the name (if
+the file has no `$ARGUMENTS`, the arguments are appended). A first line of
+`# text` becomes the description in the command list; otherwise the first 60
+characters are used. A custom command never replaces a built-in one.
+
+```markdown
+# Add tests for a package
+Write table-driven tests for $ARGUMENTS.
+Cover error paths. Do not change non-test files.
+```
+
+`/addtests ./internal/config` sends that text with the path filled in.
+
+**Skill.** `<project>/.decsr/skills/<name>.md` or `~/.decsr/skills/<name>.md` is
+a document a role can load. List it on the role:
+
+```yaml
+agents:
+  coder:
+    skills: [house-style]
+```
+
+and `.decsr/skills/house-style.md` holds, for example:
+
+```markdown
+Use `errors.Is`, never compare error strings.
+Wrap errors with `%w`. Keep functions under 60 lines.
+```
+
+The text is added to the prompt of that role's nodes. A skill that is listed but
+missing (or too large) does not fail the node; it shows as a warning on the
+node.
 
 ## Roles
 
@@ -226,19 +401,23 @@ on the node. If none are known yet (for example the project has no files), the
 node is added without commands and they are resolved when it runs, so a
 language that is detected by then is used. If there are still none when it
 runs, it finishes with a warning instead of passing silently. If it fails, select it and press `f`: DECSR adds a
-fix node (`F1`, `F2`, ...) that receives the failure output, suggested role
+fix node (`F1`, `F2`, ...; a number is never reused in a session, not even after
+`/compact`) that receives the failure output, suggested role
 `coder_fixer`. Assign it, run it, and Build & test is queued again behind it.
 
 ## Where state is stored
 
-The graph is saved to `.decsr/workspace.json` after every change. If you quit
-or crash with unfinished work, use `/resume` on the start screen to reopen it.
-Nodes that were running are reloaded as not started. The Workspace does not
-use the classic pipeline's run state or beads issues.
+Graph and conversation are saved with the session, in
+`.decsr/sessions/<id>.json`, after every change. If you quit or crash with
+unfinished work, run `decsr resume` or type `/resume` to reopen it. Nodes that
+were running are reloaded as not started. The Workspace does not use the
+classic pipeline's run state or beads issues. Profiles live in
+`~/.decsr/profiles/`, custom commands and skills in `.decsr/commands/` and
+`.decsr/skills/` (project) or the same folders under `~/.decsr/` (user).
 
 ## Reaching the classic pipeline
 
-- Type `/menu` in the Workspace to open the Home menu. Its `CLASSIC PIPELINE`
+- Type `/config` (or `/menu`) in the Workspace to open the Home menu. Its `CLASSIC PIPELINE`
   item (`1`) starts the old New Task flow; `WORKSPACE` (`w`) returns here.
 - Changes made in the menu (settings, a different project) apply when you come
   back to the Workspace, which then opens in the selected project.

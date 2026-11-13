@@ -32,15 +32,16 @@ func applyProjectSetupWithError(root string, msg setupDoneMsg) (config.Config, e
 	}
 
 	projectCfg := config.LoadProject(root)
-	// Keep each role's description and read-only flag, and keep custom roles even when they have
+	// Keep each role's description, read-only flag and file skills, and keep custom roles even when they have
 	// no runner/model/effort override, so saving never deletes them.
 	for role, old := range projectCfg.Agents {
 		if ac, ok := projectAgents[role]; ok {
 			ac.Description = old.Description
 			ac.ReadOnly = old.ReadOnly
+			ac.UserSkills = old.UserSkills
 			projectAgents[role] = ac
-		} else if (!config.IsBuiltinRole(role) && role != "pr") || old.Description != "" || old.ReadOnly {
-			projectAgents[role] = config.AgentConfig{Description: old.Description, ReadOnly: old.ReadOnly}
+		} else if (!config.IsBuiltinRole(role) && role != "pr") || old.Description != "" || old.ReadOnly || len(old.UserSkills) > 0 {
+			projectAgents[role] = config.AgentConfig{Description: old.Description, ReadOnly: old.ReadOnly, UserSkills: old.UserSkills}
 		}
 	}
 	if len(projectAgents) > 0 {

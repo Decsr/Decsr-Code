@@ -5,8 +5,9 @@ Cockpit**. It is designed for one question: *what is the pipeline doing, and
 what needs me now?*
 
 > **Default screen:** `decsr` with no arguments opens the [Workspace](workspace.md)
-> (chat, split into nodes, assign agents). This reference covers the classic
-> pipeline cockpit, reached from the Home menu with `/menu` in the Workspace.
+> (prompt, node graph, assign agents; saved sessions per project, `decsr resume`).
+> This reference covers the classic pipeline cockpit, reached from the Home menu
+> with `/config` (or `/menu`) in the Workspace.
 
 The run header is two lines. Line 1 is the task title, an optional pipeline
 tag, a 7-segment phase strip, an optional state label (`FAILED`, `GATE`,

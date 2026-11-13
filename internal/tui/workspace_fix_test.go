@@ -106,16 +106,18 @@ func TestWorkspaceWarnings(t *testing.T) {
 	}
 }
 
-func TestWorkspaceEngineClosedWhenGraphDiscarded(t *testing.T) {
+func TestWorkspaceEngineClosedOnClear(t *testing.T) {
 	h := newWSHarness(t)
 	h.toGraph()
 	old := h.eng
 	pump := wsWaitEvent(old)
 	h.m.g.Nodes[0].Status = workspace.StatusDone
-	// Discard: nothing is running, the graph is unfinished.
-	h.key("n", "y")
-	if h.m.screen != wsScreenStart {
-		t.Fatalf("not on the start screen:\n%s", h.view())
+	// /clear: nothing is running, the graph is unfinished.
+	h.key("tab")
+	h.typeCmd("/clear")
+	h.key("y")
+	if h.m.eng != nil || h.m.hasNodes() {
+		t.Fatalf("the graph was not cleared:\n%s", h.view())
 	}
 	select {
 	case <-old.Done():
@@ -203,10 +205,10 @@ func TestWorkspacePaletteTouchesInput(t *testing.T) {
 		lines := strings.Split(h.view(), "\n")
 		last, box := -1, -1
 		for i, l := range lines {
-			if strings.Contains(l, "/quit") {
+			if strings.HasPrefix(strings.TrimSpace(l), "▸ /") || strings.HasPrefix(strings.TrimSpace(l), "/") {
 				last = i
 			}
-			if box < 0 && strings.HasPrefix(l, "┌") {
+			if box < 0 && strings.HasPrefix(l, "┌") && i > 3 && last >= 0 {
 				box = i
 			}
 		}
@@ -229,23 +231,16 @@ func TestWorkspaceInputClearedWhileSplitting(t *testing.T) {
 	}
 }
 
-func TestWorkspaceReplaceUnfinishedGraphAsks(t *testing.T) {
+func TestWorkspaceSecondTaskDoesNotAskToReplace(t *testing.T) {
 	h := newWSHarness(t)
-	h.m.saved = wsFixtureGraph()
+	h.toGraph()
+	h.key("tab")
 	h.m.input.SetValue("another task")
 	h.key("enter")
-	h.want(`Replace the unfinished graph "Todo CLI"? y/n`)
-	if h.m.splitting {
-		t.Fatal("split started before the answer")
+	if !h.m.splitting || h.m.overlay != wsOverlayNone {
+		t.Fatal("a second task must go straight to the lead")
 	}
-	h.key("n")
-	if h.m.splitting || h.m.input.Value() != "another task" {
-		t.Fatalf("n must keep the text: splitting=%v input=%q", h.m.splitting, h.m.input.Value())
-	}
-	h.key("enter", "y")
-	if !h.m.splitting {
-		t.Fatal("y did not start the split")
-	}
+	h.wantNot("Replace the unfinished graph")
 }
 
 func TestShortModel(t *testing.T) {

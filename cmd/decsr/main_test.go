@@ -47,3 +47,34 @@ func TestReturnsToWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkspaceNext(t *testing.T) {
+	tests := []struct {
+		name     string
+		in       tui.WorkspaceResult
+		wantStep workspaceStep
+		wantPath string
+	}{
+		{"empty result quits", tui.WorkspaceResult{}, stepQuit, ""},
+		{"menu", tui.WorkspaceResult{OpenMenu: true}, stepMenu, ""},
+		{"switch", tui.WorkspaceResult{SwitchProject: "/p"}, stepSwitch, "/p"},
+		{"switch beats menu", tui.WorkspaceResult{SwitchProject: "/p", OpenMenu: true}, stepSwitch, "/p"},
+	}
+	for _, tt := range tests {
+		step, path := workspaceNext(tt.in)
+		if step != tt.wantStep || path != tt.wantPath {
+			t.Errorf("%s: got (%v, %q), want (%v, %q)", tt.name, step, path, tt.wantStep, tt.wantPath)
+		}
+	}
+}
+
+func TestSubcommandWorkspaceOptions(t *testing.T) {
+	if opts, ok := subcommandWorkspaceOptions("resume"); !ok || !opts.Resume {
+		t.Errorf("resume: got (%+v, %v), want Resume=true", opts, ok)
+	}
+	for _, sub := range []string{"run", "task", "report", ""} {
+		if _, ok := subcommandWorkspaceOptions(sub); ok {
+			t.Errorf("%q must not be a workspace entry", sub)
+		}
+	}
+}

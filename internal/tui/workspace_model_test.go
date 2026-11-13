@@ -60,12 +60,20 @@ type wsRoleCall struct {
 type wsHarness struct {
 	t         *testing.T
 	m         workspaceModel
+	root      string
 	exec      *wsFakeExec
 	eng       *workspace.Engine
 	roleCalls []wsRoleCall
 	splitErr  error
 	graph     func() *workspace.Graph
 	checks    []string
+	tasks     []string      // task text of every split call
+	earlier   []string      // "earlier in this session" text of every split call
+	existing  [][]string    // node IDs passed to every split call
+	nexts     []int         // first new number passed to every split call
+	summary   func() string // session summary hook given to the engine
+	recent    []RecentProject
+	splitCmd  tea.Cmd // command of the split that started last
 }
 
 func wsFixtureGraph() *workspace.Graph {
@@ -87,18 +95,36 @@ func wsFixtureGraph() *workspace.Graph {
 	}
 }
 
-func newWSHarness(t *testing.T) *wsHarness {
+// wsSmallGraph is a two-node split used for follow-up tasks.
+func wsSmallGraph() *workspace.Graph {
+	return &workspace.Graph{
+		Task: "Add search", Title: "Search",
+		Nodes: []*workspace.Node{
+			{ID: "T1", Title: "Search index", Kind: workspace.KindWork, Status: workspace.StatusTodo, SuggestedRole: "coder"},
+			{ID: "T2", Title: "Search tests", Kind: workspace.KindWork, Status: workspace.StatusTodo, SuggestedRole: "qa", DependsOn: []string{"T1"}},
+		},
+	}
+}
+
+// newWSHarnessAt builds a harness for a given project root (and the HOME that
+// the caller already set).
+func newWSHarnessAt(t *testing.T, root string) *wsHarness {
 	t.Helper()
-	h := &wsHarness{t: t, exec: &wsFakeExec{}, graph: wsFixtureGraph, checks: []string{"go build ./...", "go test ./..."}}
+	h := &wsHarness{t: t, root: root, exec: &wsFakeExec{}, graph: wsFixtureGraph, checks: []string{"go build ./...", "go test ./..."}}
 	deps := wsDeps{
-		split: func(_ context.Context, _ string, _ func(string)) (*workspace.Graph, runner.TokenUsage, error) {
+		split: func(_ context.Context, task, earlier string, existing []string, next int, _ func(string)) (*workspace.Graph, runner.TokenUsage, error) {
+			h.tasks = append(h.tasks, task)
+			h.existing = append(h.existing, existing)
+			h.nexts = append(h.nexts, next)
+			h.earlier = append(h.earlier, earlier)
 			if h.splitErr != nil {
 				return nil, runner.TokenUsage{}, h.splitErr
 			}
 			return h.graph(), runner.TokenUsage{InputTokens: 100, OutputTokens: 50}, nil
 		},
-		newEngine: func(g *workspace.Graph) *workspace.Engine {
-			h.eng = workspace.NewEngine(g, h.exec, 3, "")
+		newEngine: func(g *workspace.Graph, save func(*workspace.Graph) error, summary func() string) *workspace.Engine {
+			h.summary = summary
+			h.eng = workspace.NewEngineWithSave(g, h.exec, 3, save)
 			return h.eng
 		},
 		saveRole: func(name string, ac config.AgentConfig) (config.Config, error) {
@@ -113,8 +139,9 @@ func newWSHarness(t *testing.T) *wsHarness {
 			return cfg, nil
 		},
 		checkCmds: func() []string { return h.checks },
+		recent:    func() []RecentProject { return h.recent },
 	}
-	h.m = newWorkspaceModel(t.TempDir(), config.DefaultConfig(), deps)
+	h.m = newWorkspaceModel(root, config.DefaultConfig(), deps)
 	h.send(tea.WindowSizeMsg{Width: 120, Height: 34})
 	t.Cleanup(func() {
 		h.m.runCancel()
@@ -123,6 +150,13 @@ func newWSHarness(t *testing.T) *wsHarness {
 		}
 	})
 	return h
+}
+
+// newWSHarness is hermetic: HOME and the project root are temp directories.
+func newWSHarness(t *testing.T) *wsHarness {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	return newWSHarnessAt(t, t.TempDir())
 }
 
 func wsKeyMsg(s string) tea.KeyMsg {
@@ -143,6 +177,8 @@ func wsKeyMsg(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyRight}
 	case "tab":
 		return tea.KeyMsg{Type: tea.KeyTab}
+	case "shift+tab":
+		return tea.KeyMsg{Type: tea.KeyShiftTab}
 	case "backspace":
 		return tea.KeyMsg{Type: tea.KeyBackspace}
 	case "pgup":
@@ -155,8 +191,12 @@ func wsKeyMsg(s string) tea.KeyMsg {
 
 func (h *wsHarness) send(msg tea.Msg) tea.Cmd {
 	h.t.Helper()
+	was := h.m.splitting
 	next, cmd := h.m.Update(msg)
 	h.m = next.(workspaceModel)
+	if h.m.splitting && !was {
+		h.splitCmd = cmd
+	}
 	return cmd
 }
 
@@ -189,19 +229,77 @@ func (h *wsHarness) wantNot(sub string) {
 	}
 }
 
-// toGraph types a task and feeds back the split result.
+// toGraph sends a task and feeds back the split result.
 func (h *wsHarness) toGraph() {
 	h.t.Helper()
-	h.m.input.SetValue("Build a todo CLI")
+	h.sendTask("Build a todo CLI")
+	if h.m.focus != wsFocusGraph || !h.m.hasNodes() {
+		h.t.Fatalf("no graph after the split:\n%s", h.view())
+	}
+}
+
+// finishSplit runs the split command of the pending send (so the split seam
+// is called) and delivers its result to the model.
+func (h *wsHarness) finishSplit() {
+	h.t.Helper()
+	if h.splitCmd == nil {
+		h.t.Fatal("no split is pending")
+	}
+	h.send(splitResult(h.t, h.splitCmd))
+}
+
+// splitResult runs cmd (a split command, possibly in a batch with a tick) and
+// returns the wsSplitDoneMsg it produces.
+func splitResult(t *testing.T, cmd tea.Cmd) wsSplitDoneMsg {
+	t.Helper()
+	out := make(chan wsSplitDoneMsg, 1)
+	var run func(c tea.Cmd)
+	run = func(c tea.Cmd) {
+		if c == nil {
+			return
+		}
+		go func() {
+			switch msg := c().(type) {
+			case wsSplitDoneMsg:
+				select {
+				case out <- msg:
+				default:
+				}
+			case tea.BatchMsg:
+				for _, sub := range msg {
+					run(sub)
+				}
+			}
+		}()
+	}
+	run(cmd)
+	select {
+	case msg := <-out:
+		return msg
+	case <-time.After(3 * time.Second):
+		t.Fatal("the split command produced no result")
+	}
+	return wsSplitDoneMsg{}
+}
+
+// sendTask types text, sends it and delivers the split result.
+func (h *wsHarness) sendTask(text string) {
+	h.t.Helper()
+	h.m.input.SetValue(text)
 	h.key("enter")
 	if !h.m.splitting {
-		h.t.Fatal("Enter did not start a split")
+		h.t.Fatalf("Enter did not start a split:\n%s", h.view())
 	}
-	g, _, _ := h.m.deps.split(context.Background(), "", nil)
-	h.send(wsSplitDoneMsg{gen: h.m.splitGen, g: g, usage: runner.TokenUsage{InputTokens: 100, OutputTokens: 50}})
-	if h.m.screen != wsScreenGraph {
-		h.t.Fatalf("not on the graph screen:\n%s", h.view())
+	h.finishSplit()
+}
+
+// typeCmd types a command line (one key per rune) and presses Enter.
+func (h *wsHarness) typeCmd(line string) {
+	h.t.Helper()
+	for _, r := range line {
+		h.key(string(r))
 	}
+	h.key("enter")
 }
 
 // pump feeds engine events to the model until cond holds.
@@ -220,12 +318,21 @@ func (h *wsHarness) pump(cond func(m workspaceModel) bool) {
 
 func (h *wsHarness) status(id string) workspace.Status { return h.m.g.Node(id).Status }
 
-func TestWorkspaceStartShowsChatBox(t *testing.T) {
+func TestWorkspaceEmptyStateIsTheWholeScreen(t *testing.T) {
 	h := newWSHarness(t)
-	h.want("Type a task")
-	h.want("lead splits")
+	h.want("WORKSPACE")
+	h.want("GRAPH")
+	h.want("INSPECTOR")
+	h.want("No nodes yet. Describe a task below")
+	h.want("Type a task or / for commands")
+	h.want("Enter send")
+	h.want("Tab graph")
 	h.want("? help")
-	h.wantNot("compact")
+	h.want("new session")
+	h.wantNot("saved session")
+	if h.m.focus != wsFocusPrompt {
+		t.Fatal("focus must start on the prompt")
+	}
 }
 
 func TestWorkspaceSendSplitsAndShowsGraph(t *testing.T) {
@@ -234,10 +341,10 @@ func TestWorkspaceSendSplitsAndShowsGraph(t *testing.T) {
 	h.key("enter")
 	h.want("splitting the task")
 	h.want("you › Build a todo CLI")
-	g, _, _ := h.m.deps.split(context.Background(), "", nil)
-	h.send(wsSplitDoneMsg{gen: h.m.splitGen, g: g})
+	h.finishSplit()
 	h.want("Data model")
 	h.want("? suggested: coder")
+	h.want("split into 5 nodes: T1, T2, T3, T4, T5")
 	if h.eng.Snapshot().Node("CHECK") == nil {
 		t.Fatal("no CHECK node was added")
 	}
@@ -249,8 +356,8 @@ func TestWorkspaceSplitErrorKeepsInput(t *testing.T) {
 	h.key("enter")
 	h.send(wsSplitDoneMsg{gen: h.m.splitGen, err: errors.New("split: no sub-tasks found")})
 	h.want("! split: no sub-tasks found")
-	if h.m.screen != wsScreenStart || h.m.input.Value() != "Build a todo CLI" {
-		t.Fatalf("screen=%v input=%q", h.m.screen, h.m.input.Value())
+	if h.m.hasNodes() || h.m.input.Value() != "Build a todo CLI" {
+		t.Fatalf("nodes=%v input=%q", h.m.hasNodes(), h.m.input.Value())
 	}
 }
 
@@ -263,9 +370,8 @@ func TestWorkspaceEscCancelsSplit(t *testing.T) {
 	if h.m.splitting {
 		t.Fatal("still splitting")
 	}
-	g, _, _ := h.m.deps.split(context.Background(), "", nil)
-	h.send(wsSplitDoneMsg{gen: stale, g: g})
-	if h.m.screen != wsScreenStart || h.m.input.Value() != "Build a todo CLI" {
+	h.send(wsSplitDoneMsg{gen: stale, g: h.graph()})
+	if h.m.hasNodes() || h.m.input.Value() != "Build a todo CLI" {
 		t.Fatal("a cancelled split must not open the graph")
 	}
 }
@@ -493,7 +599,7 @@ func TestWorkspaceOutputViewFollowsTail(t *testing.T) {
 	h.send(wsEventMsg{eng: h.eng, ev: workspace.Event{NodeID: "T1", Type: workspace.EventOutput, Text: "line 102\n"}})
 	h.wantNot("line 102")
 	h.key("esc")
-	if h.m.screen != wsScreenGraph {
+	if h.m.screen != wsScreenMain {
 		t.Fatal("Esc did not return to the graph")
 	}
 }
@@ -513,27 +619,30 @@ func TestWorkspaceOutputKeepsTwoThousandLines(t *testing.T) {
 }
 
 func TestWorkspaceSlashMenuOpensMenu(t *testing.T) {
-	h := newWSHarness(t)
-	for _, r := range "/menu" {
-		h.key(string(r))
-	}
-	h.want("/menu")
-	cmd := h.key("enter")
-	if !h.m.openMenu {
-		t.Fatal("OpenMenu not set")
-	}
-	if cmd == nil {
-		t.Fatal("no quit command")
-	}
-	if _, ok := cmd().(tea.QuitMsg); !ok {
-		t.Fatal("command did not quit")
+	for _, line := range []string{"/menu", "/config"} {
+		h := newWSHarness(t)
+		for _, r := range line {
+			h.key(string(r))
+		}
+		h.want("/config")
+		cmd := h.key("enter")
+		if !h.m.openMenu {
+			t.Fatalf("%s: OpenMenu not set", line)
+		}
+		if cmd == nil {
+			t.Fatal("no quit command")
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Fatal("command did not quit")
+		}
 	}
 }
 
 func TestWorkspaceSlashPaletteFilters(t *testing.T) {
 	h := newWSHarness(t)
 	h.key("/")
-	h.want("/resume")
+	h.want("/help")
+	h.want("/compact")
 	h.want("/quit")
 	h.key("r", "o")
 	h.want("/roles")
@@ -550,7 +659,11 @@ func TestWorkspaceUnknownCommand(t *testing.T) {
 	h := newWSHarness(t)
 	h.key("/", "z")
 	h.key("enter")
-	h.want("! unknown command /z")
+	h.want("! unknown command /z — /help lists them")
+	h.m.input.Reset()
+	h.m.input.SetValue("/nope with args")
+	h.key("enter")
+	h.want("! unknown command /nope — /help lists them")
 }
 
 func TestWorkspaceResumeLoadsSaved(t *testing.T) {
@@ -559,17 +672,19 @@ func TestWorkspaceResumeLoadsSaved(t *testing.T) {
 	g.Nodes[0].Role = "coder"
 	g.Nodes[0].Status = workspace.StatusRunning
 	g.Nodes[1].Status = workspace.StatusDone
-	if err := workspace.Save(h.m.savePath(), g); err != nil {
+	s := workspace.NewSession()
+	s.Title = g.Title
+	s.Graph = g
+	if err := s.Save(h.root); err != nil {
 		t.Fatal(err)
 	}
-	h.m = newWorkspaceModel(h.m.root, h.m.cfg, h.m.deps)
+	h.m = newWorkspaceModel(h.root, h.m.cfg, h.m.deps)
 	h.send(tea.WindowSizeMsg{Width: 120, Height: 34})
-	h.want(`↺ unfinished: "Todo CLI" (1/5 done) — /resume`)
-	for _, r := range "/resume" {
-		h.key(string(r))
-	}
+	h.want("↺ 1 saved session — /resume")
+	h.typeCmd("/resume")
+	h.want("Todo CLI · 1/5 done")
 	h.key("enter")
-	if h.m.screen != wsScreenGraph {
+	if !h.m.hasNodes() || h.m.focus != wsFocusGraph {
 		t.Fatalf("resume did not open the graph:\n%s", h.view())
 	}
 	if h.status("T1") != workspace.StatusTodo {
@@ -580,11 +695,12 @@ func TestWorkspaceResumeLoadsSaved(t *testing.T) {
 
 func TestWorkspaceResumeWithNothingSaved(t *testing.T) {
 	h := newWSHarness(t)
-	for _, r := range "/resume" {
-		h.key(string(r))
+	h.typeCmd("/resume")
+	h.want("no saved sessions in this project")
+	h.key("esc")
+	if h.m.overlay != wsOverlayNone {
+		t.Fatal("Esc did not close the picker")
 	}
-	h.key("enter")
-	h.want("! nothing to resume")
 }
 
 func TestWorkspaceQuitConfirmsWhenRunning(t *testing.T) {
@@ -639,19 +755,22 @@ func TestWorkspaceCtrlCTwice(t *testing.T) {
 	}
 }
 
-func TestWorkspaceNewTaskConfirmsDiscard(t *testing.T) {
+func TestWorkspaceClearConfirmsWhenUnfinished(t *testing.T) {
 	h := newWSHarness(t)
 	h.toGraph()
+	h.key("tab")
+	h.typeCmd("/clear")
+	h.want("Start a new session? y/n")
 	h.key("n")
-	h.want("Discard this graph?")
-	h.key("n")
-	if h.m.screen != wsScreenGraph {
+	if !h.m.hasNodes() {
 		t.Fatal("n should cancel")
 	}
-	h.key("n", "y")
-	if h.m.screen != wsScreenStart || h.m.eng != nil {
-		t.Fatal("y should go back to the start screen")
+	h.typeCmd("/clear")
+	h.key("y")
+	if h.m.hasNodes() || h.m.eng != nil || h.m.focus != wsFocusPrompt {
+		t.Fatalf("y should start a new session:\n%s", h.view())
 	}
+	h.want("No nodes yet")
 }
 
 func TestWorkspaceInspectorToggle(t *testing.T) {
@@ -685,30 +804,32 @@ func assertFits(t *testing.T, name, view string, w, h int) {
 
 func TestWorkspaceViewsFitSize(t *testing.T) {
 	states := map[string]func(h *wsHarness){
-		"start":      func(h *wsHarness) {},
-		"start-text": func(h *wsHarness) { h.m.input.SetValue("line one\nline two\nline three\nline four") },
-		"start-split": func(h *wsHarness) {
+		"empty":      func(h *wsHarness) {},
+		"empty-text": func(h *wsHarness) { h.m.input.SetValue("line one\nline two\nline three\nline four") },
+		"empty-split": func(h *wsHarness) {
 			h.m.input.SetValue("Build a todo CLI with a long description that goes past the end of the line")
 			h.key("enter")
 		},
-		"start-palette": func(h *wsHarness) { h.key("/") },
-		"start-error": func(h *wsHarness) {
-			h.m.transcript = []wsLine{{"you", strings.Repeat("word ", 40)}, {"err", strings.Repeat("bad ", 60)}, {"lead", "ok"}}
+		"empty-palette": func(h *wsHarness) { h.key("/") },
+		"empty-error": func(h *wsHarness) {
+			h.m.say("you", strings.Repeat("word ", 40))
+			h.m.say("error", strings.Repeat("bad ", 60))
+			h.m.say("lead", "ok")
 		},
-		"graph":     func(h *wsHarness) { h.toGraph() },
-		"graph-sel": func(h *wsHarness) { h.toGraph(); h.m.sel = "CHECK" },
-		"picker":    func(h *wsHarness) { h.toGraph(); h.key("a") },
+		"empty-saved": func(h *wsHarness) { h.m.nSaved = 3 },
+		"graph":       func(h *wsHarness) { h.toGraph() },
+		"graph-sel":   func(h *wsHarness) { h.toGraph(); h.m.sel = "CHECK" },
+		"graph-prompt": func(h *wsHarness) {
+			h.toGraph()
+			h.key("tab")
+		},
+		"picker": func(h *wsHarness) { h.toGraph(); h.key("a") },
 		"form": func(h *wsHarness) {
 			h.toGraph()
 			h.m.sel = "T2"
 			h.key("a", "enter", "x", "enter")
 		},
 		"output": func(h *wsHarness) { h.toGraph(); h.key("o") },
-		"replace": func(h *wsHarness) {
-			h.m.saved = wsFixtureGraph()
-			h.m.input.SetValue("another task")
-			h.key("enter")
-		},
 		"wide-titles": func(h *wsHarness) {
 			h.graph = func() *workspace.Graph {
 				g := wsFixtureGraph()
@@ -724,16 +845,32 @@ func TestWorkspaceViewsFitSize(t *testing.T) {
 			h.m.sel = "T2"
 			h.key("a", "enter", "tab", "right")
 		},
-		"help":  func(h *wsHarness) { h.toGraph(); h.key("?") },
-		"cmds":  func(h *wsHarness) { h.toGraph(); h.key("/") },
-		"roles": func(h *wsHarness) { h.key("/", "r", "o", "enter") },
-		"confirm": func(h *wsHarness) {
+		"help":    func(h *wsHarness) { h.toGraph(); h.key("?") },
+		"cmds":    func(h *wsHarness) { h.toGraph(); h.key("/") },
+		"cmds-c":  func(h *wsHarness) { h.toGraph(); h.key("/", "c") },
+		"roles":   func(h *wsHarness) { h.key("/", "r", "o", "enter") },
+		"confirm": func(h *wsHarness) { h.toGraph(); h.key("tab"); h.typeCmd("/clear") },
+		"resume": func(h *wsHarness) {
 			h.toGraph()
-			h.key("n")
+			h.key("tab")
+			h.typeCmd("/resume")
+		},
+		"project": func(h *wsHarness) { h.key("/", "p", "r", "o", "j", "enter") },
+		"profile": func(h *wsHarness) { h.typeCmd("/profile") },
+		"profile-name": func(h *wsHarness) {
+			h.typeCmd("/profile")
+			h.key("enter")
+			h.key("x", "enter")
+		},
+		"status": func(h *wsHarness) { h.toGraph(); h.key("tab"); h.typeCmd("/status") },
+		"cost":   func(h *wsHarness) { h.toGraph(); h.key("tab"); h.typeCmd("/cost") },
+		"custom": func(h *wsHarness) {
+			wsWriteCommand(t, h.root, "review", "# Review the change\nReview $ARGUMENTS")
+			h.key("/")
 		},
 	}
 	for name, setup := range states {
-		for _, sz := range [][2]int{{60, 16}, {80, 24}, {120, 40}} {
+		for _, sz := range [][2]int{{60, 16}, {80, 24}, {120, 40}, {100, 20}} {
 			h := newWSHarness(t)
 			h.size(sz[0], sz[1])
 			setup(h)

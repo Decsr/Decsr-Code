@@ -220,3 +220,19 @@ func TestRunWorkerDedupesFiles(t *testing.T) {
 		t.Errorf("files = %v", res.Files)
 	}
 }
+
+func TestRunWorkerPlaceholderInRoleNotSubstituted(t *testing.T) {
+	f := &workerFake{chunks: []string{"done\n===SUMMARY===\nok\n"}}
+	_, err := RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(),
+		WorkerRequest{RolePrompt: "skill says {{TASK}} and {{CONTEXT}}", Title: "REALTASK", Context: "CTX"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := f.got.SystemPrompt
+	if !strings.Contains(p, "skill says {{TASK}} and {{CONTEXT}}") {
+		t.Errorf("placeholder in the role text was substituted:\n%s", p)
+	}
+	if strings.Count(p, "REALTASK") != 1 {
+		t.Errorf("task appears %d times", strings.Count(p, "REALTASK"))
+	}
+}

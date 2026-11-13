@@ -52,17 +52,18 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 	if strings.TrimSpace(role) == "" {
 		role = "Follow the role instructions you were given."
 	}
-	// Task and context last: they are user-controlled and may contain
-	// placeholder text.
-	sys := prompts.MustLoad("ws-worker")
 	mode := workerModeWrite
 	if req.ReadOnly {
 		mode = workerModeReadOnly
 	}
-	sys = strings.Replace(sys, "{{MODE}}", mode, 1)
-	sys = strings.Replace(sys, "{{ROLE}}", role, 1)
-	sys = strings.Replace(sys, "{{TASK}}", task, 1)
-	sys = strings.Replace(sys, "{{CONTEXT}}", req.Context, 1)
+	// One pass, so placeholder text inside a role, skill, task or context is
+	// never substituted.
+	sys := strings.NewReplacer(
+		"{{MODE}}", mode,
+		"{{ROLE}}", role,
+		"{{TASK}}", task,
+		"{{CONTEXT}}", req.Context,
+	).Replace(prompts.MustLoad("ws-worker"))
 
 	ch, err := r.Complete(ctx, runner.CompletionRequest{
 		SystemPrompt: sys,

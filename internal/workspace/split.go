@@ -29,6 +29,38 @@ var reservedKeyRe = regexp.MustCompile(`^(CHECK|F[0-9]+)$`)
 
 // BuildSplitPrompt assembles the lead's system prompt.
 func BuildSplitPrompt(task string, roles []Role, projectContext string) string {
+	return buildSplitPrompt(task, roles, projectContext, nil, 0)
+}
+
+// followUpRules is added to the prompt when the graph already has nodes.
+func followUpRules(existing []string, next int) string {
+	if len(existing) == 0 {
+		return ""
+	}
+	if next < 1 {
+		next = nextAfter(existing)
+	}
+	return fmt.Sprintf("\n## Follow-up task\n\n"+
+		"The graph already has these nodes: %s.\n"+
+		"- Number the new sub-tasks from `T%d` upward. Never reuse an existing ID.\n"+
+		"- You MAY list an existing ID in `depends_on` when the new work needs that node's result.\n",
+		strings.Join(existing, ", "), next)
+}
+
+// nextAfter is one more than the highest T<number> among ids (1 for none).
+func nextAfter(ids []string) int {
+	top := 0
+	for _, id := range ids {
+		if len(id) > 1 && id[0] == 'T' {
+			if v, err := strconv.Atoi(id[1:]); err == nil && v > top {
+				top = v
+			}
+		}
+	}
+	return top + 1
+}
+
+func buildSplitPrompt(task string, roles []Role, projectContext string, existing []string, next int) string {
 	var sb strings.Builder
 	for _, r := range roles {
 		if r.ReadOnly {
@@ -38,12 +70,13 @@ func BuildSplitPrompt(task string, roles []Role, projectContext string) string {
 		fmt.Fprintf(&sb, "- %s: %s\n", r.Name, r.Description)
 	}
 	p := prompts.MustLoad("ws-split")
-	// Task and context last: they are user-controlled and may contain
-	// placeholder text.
-	p = strings.Replace(p, "{{ROLES}}", strings.TrimRight(sb.String(), "\n"), 1)
-	p = strings.Replace(p, "{{TASK}}", task, 1)
-	p = strings.Replace(p, "{{PROJECT_CONTEXT}}", projectContext, 1)
-	return p
+	// One pass, so placeholder text inside a value is never substituted.
+	return strings.NewReplacer(
+		"{{ROLES}}", strings.TrimRight(sb.String(), "\n"),
+		"{{FOLLOWUP}}", followUpRules(existing, next),
+		"{{TASK}}", task,
+		"{{PROJECT_CONTEXT}}", projectContext,
+	).Replace(p)
 }
 
 type splitTask struct {
@@ -100,6 +133,13 @@ func (t *splitTask) UnmarshalJSON(data []byte) error {
 // ParseSplit turns the lead's output into a validated graph. Roles named by
 // the lead become suggestions only; nothing is assigned.
 func ParseSplit(task, output string, roles []Role) (*Graph, error) {
+	return ParseSplitWith(task, output, roles, nil)
+}
+
+// ParseSplitWith is ParseSplit for a follow-up task: a dependency that names
+// one of the existing node IDs (and not one of the new tasks' own keys) is
+// kept as an external dependency and passes validation.
+func ParseSplitWith(task, output string, roles []Role, existing []string) (*Graph, error) {
 	tasksRaw, ok := section(output, markerTasks)
 	if !ok {
 		return nil, fmt.Errorf("split: no %s section in the lead's answer", markerTasks)
@@ -117,7 +157,7 @@ func ParseSplit(task, output string, roles []Role) (*Graph, error) {
 
 	g := &Graph{Task: task}
 	if title, ok := section(output, markerTitle); ok {
-		g.Title = strings.TrimSpace(strings.SplitN(strings.TrimSpace(title), "\n", 2)[0])
+		g.Title = Sanitize(strings.SplitN(strings.TrimSpace(title), "\n", 2)[0])
 	}
 	if g.Title == "" {
 		if r := []rune(strings.TrimSpace(task)); len(r) > 60 {
@@ -140,7 +180,7 @@ func ParseSplit(task, output string, roles []Role) (*Graph, error) {
 				if _, dup := declared[name]; !dup {
 					declaredOrder = append(declaredOrder, name)
 				}
-				declared[name] = strings.TrimSpace(r.Description)
+				declared[name] = Sanitize(r.Description)
 			}
 		}
 	}
@@ -157,8 +197,8 @@ func ParseSplit(task, output string, roles []Role) (*Graph, error) {
 		key := upperKey(t.Key)
 		nd := &Node{
 			ID:          ids.final[i],
-			Title:       strings.TrimSpace(t.Title),
-			Description: strings.TrimSpace(t.Description),
+			Title:       Sanitize(t.Title),
+			Description: strings.TrimSpace(SanitizeText(t.Description)),
 			Kind:        KindWork,
 			Status:      StatusTodo,
 		}
@@ -200,7 +240,34 @@ func ParseSplit(task, output string, roles []Role) (*Graph, error) {
 		}
 	}
 
-	if err := g.Validate(); err != nil {
+	// External dependencies are checked apart: Validate only knows g's nodes.
+	own := make(map[string]bool, len(g.Nodes))
+	for _, nd := range g.Nodes {
+		own[nd.ID] = true
+	}
+	outside := map[string]bool{}
+	for _, id := range existing {
+		if id != "" && id != "CHECK" && !own[id] {
+			outside[id] = true
+		}
+	}
+	external := make(map[*Node][]string)
+	for _, nd := range g.Nodes {
+		var internal []string
+		for _, d := range nd.DependsOn {
+			if outside[d] {
+				external[nd] = append(external[nd], d)
+			} else {
+				internal = append(internal, d)
+			}
+		}
+		nd.DependsOn = internal
+	}
+	err := g.Validate()
+	for _, nd := range g.Nodes {
+		nd.DependsOn = append(nd.DependsOn, external[nd]...)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("split: %v", err)
 	}
 	return g, nil
@@ -211,8 +278,21 @@ const splitRetryMsg = `Your answer is missing the "role" (and possibly "depends_
 // Split asks the lead to split task and parses the answer. When the graph has
 // several nodes and the lead suggested no role at all, it asks once more.
 func Split(ctx context.Context, r runner.LLMRunner, model string, task string, roles []Role, projectContext string, onToken func(string)) (*Graph, runner.TokenUsage, error) {
+	return SplitWith(ctx, r, model, task, roles, projectContext, nil, onToken)
+}
+
+// SplitWith is Split for a follow-up task: existing lists the IDs already in
+// the graph, which the lead may depend on and must not reuse. New sub-tasks
+// are numbered after the highest existing T number.
+func SplitWith(ctx context.Context, r runner.LLMRunner, model string, task string, roles []Role, projectContext string, existing []string, onToken func(string)) (*Graph, runner.TokenUsage, error) {
+	return SplitNext(ctx, r, model, task, roles, projectContext, existing, 0, onToken)
+}
+
+// SplitNext is SplitWith with an explicit first number for the new sub-tasks
+// (0 = after the highest existing T number).
+func SplitNext(ctx context.Context, r runner.LLMRunner, model string, task string, roles []Role, projectContext string, existing []string, next int, onToken func(string)) (*Graph, runner.TokenUsage, error) {
 	req := runner.CompletionRequest{
-		SystemPrompt: BuildSplitPrompt(task, roles, projectContext),
+		SystemPrompt: buildSplitPrompt(task, roles, projectContext, existing, next),
 		Model:        model,
 		Messages:     []runner.ConvMessage{{Role: "user", Content: task}},
 	}
@@ -220,7 +300,7 @@ func Split(ctx context.Context, r runner.LLMRunner, model string, task string, r
 	if err != nil {
 		return nil, usage, err
 	}
-	g, err := ParseSplit(task, raw, roles)
+	g, err := ParseSplitWith(task, raw, roles, existing)
 	if err != nil {
 		return nil, usage, err
 	}
@@ -240,7 +320,7 @@ func Split(ctx context.Context, r runner.LLMRunner, model string, task string, r
 		}
 		return g, usage, nil
 	}
-	if g2, err := ParseSplit(task, raw2, roles); err == nil && anySuggestedRole(g2) {
+	if g2, err := ParseSplitWith(task, raw2, roles, existing); err == nil && anySuggestedRole(g2) {
 		return g2, usage, nil
 	}
 	return g, usage, nil
