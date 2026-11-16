@@ -12,6 +12,7 @@ const (
 	wsSuggestReview  = "review the changes and add any missing tests"
 	wsSuggestCompact = "/compact"
 	wsSuggestResume  = "/resume"
+	wsSuggestImport  = "/import speckit"
 
 	// wsSuggestCompactAt is the number of finished nodes from which /compact
 	// is suggested instead of a review.
@@ -48,6 +49,9 @@ func (m workspaceModel) suggestionText() string {
 			return wsSuggestReview
 		}
 		return ""
+	}
+	if m.spec != nil && !m.sess.hasContent() {
+		return wsSuggestImport
 	}
 	if m.nSaved > 0 && !m.sess.hasContent() {
 		return wsSuggestResume

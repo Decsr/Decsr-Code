@@ -111,6 +111,7 @@ func ParseSpecKit(text string) SpecList {
 type SpecImport struct {
 	Feature string // graph title
 	Dir     string // feature dir relative to the project root, slash separated
+	Tasks   string // tasks.md relative to the project root, slash separated; "" = Dir/tasks.md
 	Phase   int    // 0 = every phase, else only that phase number
 	HasQA   bool   // the qa role is defined; test tasks suggest it
 }
@@ -149,6 +150,10 @@ func BuildSpecGraph(list SpecList, o SpecImport) SpecResult {
 	last := ""
 	byTaskID := map[string]string{}
 	spec, plan := o.Dir+"/spec.md", o.Dir+"/plan.md"
+	tasksFile := o.Tasks
+	if tasksFile == "" {
+		tasksFile = o.Dir + "/tasks.md"
+	}
 	for _, t := range list.Tasks {
 		if o.Phase != 0 && t.Phase != o.Phase {
 			continue
@@ -174,6 +179,9 @@ func BuildSpecGraph(list SpecList, o SpecImport) SpecResult {
 			Status:        StatusTodo,
 			SuggestedRole: SuggestSpecRole(t.Text, o.HasQA),
 			DependsOn:     append([]string(nil), prevPhase...),
+		}
+		if t.ID != "" {
+			n.Spec = &SpecRef{File: tasksFile, TaskID: t.ID}
 		}
 		if !t.Parallel {
 			n.DependsOn = appendUnique(n.DependsOn, run...)

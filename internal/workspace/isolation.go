@@ -367,6 +367,11 @@ func hasMergedNode(root, session string) bool {
 		return false
 	}
 	n, err := git(root, "rev-list", "--merges", "--count", "--fixed-strings", "--grep=decsr/"+session+"-", branch)
+	if err == nil && n != "0" {
+		return true
+	}
+	// A node that changed nothing still leaves its tasks.md tick commit.
+	n, err = git(root, "rev-list", "--count", "--grep=^decsr: mark .* done in ", branch)
 	return err == nil && n != "0"
 }
 

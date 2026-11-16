@@ -223,7 +223,9 @@ node runs and no overlay is open:
 1. Build & test failed and has no fix node: `fix the failing build and tests`
 2. Every node is done: `/compact` with 6 or more done nodes, otherwise
    `review the changes and add any missing tests`
-3. A fresh session in a project with saved sessions: `/resume`
+3. A fresh session where a `specs/*/tasks.md` has open tasks (see
+   [Auto-detect](#import-from-spec-kit)): `/import speckit`
+4. A fresh session in a project with saved sessions: `/resume`
 
 `Right` fills the prompt with it; `Enter` then sends or runs it. `Esc` hides
 it. It stays hidden until the graph or the saved sessions change.
@@ -876,8 +878,41 @@ An import follows the autonomy level like a lead split: at level 2 and 3 the
 suggested roles that are defined are accepted and the run starts.
 
 Limits: a list of more than 40 tasks is imported anyway, with a hint to import
-it phase by phase. Checkbox state is only read; finished nodes are not ticked
-back in `tasks.md`.
+it phase by phase.
+
+**Write-back.** Every imported node remembers its task (`spec: {file, task_id}`
+in the session file). When the node finishes successfully (done; failed and
+stopped nodes do nothing, read-only roles count), DECSR changes the first line
+`- [ ] T003 ...` of that task in `tasks.md` to `[x]` and leaves everything else
+as it was (indentation, `*` bullets, CRLF line endings, trailing newline). A
+task that is already `[x]` is left alone. When the line is gone because you
+edited the file, the node gets the warning `tasks.md: T003 not found, not marked
+done`. A failed write is a node warning too and never fails the node. Where the
+tick goes:
+
+- Worktree isolation and `tasks.md` tracked by git: the tick is edited in the
+  integration worktree, after the node's merge, and committed there as
+  `decsr: mark T003 done in specs/003-login/tasks.md`. It also happens when the
+  node changed no code. The tick reaches your checkout with `/merge` and shows
+  in the pull request, and your checkout stays clean, so `/merge` is not blocked.
+- `tasks.md` not tracked, or shared isolation: the file in your checkout is
+  edited directly (a temp file and a rename, the file mode is kept). An untracked
+  file does not block `/merge`.
+
+**Uncommitted spec files.** Worktrees are made from a snapshot of your tracked
+files, so untracked files are not in them. When `tasks.md`, `spec.md` or
+`plan.md` of the feature is untracked and the session uses worktrees, the
+import still runs and adds one line: `specs/003-login is not committed: agents
+in worktrees can't read spec.md/plan.md — run git add specs/003-login && git
+commit, then import again`. Tracked files with uncommitted changes are fine:
+the snapshot includes them.
+
+**Auto-detect.** In a fresh session without nodes (and after `/clear` or an
+import) DECSR scans `specs/*/tasks.md` once for the most recently modified file
+with at least one open `- [ ] T<n>` task, at most 200 feature directories deep.
+The empty state then shows `Spec Kit: specs/003-login has 12 open tasks —
+/import speckit`, and `/import speckit` becomes the prompt suggestion. Projects
+without a `specs/` directory are not affected.
 
 ## Pull requests
 

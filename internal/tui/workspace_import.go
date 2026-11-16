@@ -71,6 +71,7 @@ func (m workspaceModel) cmdImport(args string) (tea.Model, tea.Cmd) {
 	res := workspace.BuildSpecGraph(workspace.ParseSpecKit(string(data)), workspace.SpecImport{
 		Feature: workspace.SpecFeatureName(string(spec), filepath.Base(dir)),
 		Dir:     filepath.ToSlash(m.relPath(dir)),
+		Tasks:   filepath.ToSlash(rel),
 		Phase:   phase,
 		HasQA:   hasQA,
 	})
@@ -80,6 +81,12 @@ func (m workspaceModel) cmdImport(args string) (tea.Model, tea.Cmd) {
 	}
 	if arg == "" {
 		m.say("system", "Using the most recently modified tasks.md: "+rel)
+	}
+	featDir := filepath.ToSlash(m.relPath(dir))
+	warnUntracked := m.worktreesLikely() && !filepath.IsAbs(featDir)
+	var untracked []string
+	if warnUntracked {
+		untracked = workspace.SpecUntracked(m.root, featDir)
 	}
 	var next tea.Model
 	var cmd tea.Cmd
@@ -95,6 +102,10 @@ func (m workspaceModel) cmdImport(args string) (tea.Model, tea.Cmd) {
 	nm.say("system", fmt.Sprintf("Imported %d %s from %s (%d done %s skipped, %d %s). Assign roles with A, then R to run.",
 		res.Imported, pluralize(res.Imported, "task", "tasks"), filepath.ToSlash(rel),
 		res.Skipped, pluralize(res.Skipped, "task", "tasks"), res.Phases, pluralize(res.Phases, "phase", "phases")))
+	if len(untracked) > 0 {
+		nm.say("system", fmt.Sprintf("%s is not committed: agents in worktrees can't read spec.md/plan.md — run git add %s && git commit, then import again", featDir, featDir))
+	}
+	nm.rescanSpec()
 	if res.Imported > specManyTasks && phase == 0 {
 		nm.say("system", "That is a lot of nodes. /import speckit --phase N imports one phase at a time.")
 	}
@@ -104,6 +115,15 @@ func (m workspaceModel) cmdImport(args string) (tea.Model, tea.Cmd) {
 	nm, autoCmd := nm.autoAfterGraph()
 	nm.saveSession()
 	return nm, tea.Batch(cmd, autoCmd)
+}
+
+// worktreesLikely is true when this session's nodes run, or will run, in
+// their own worktrees.
+func (m workspaceModel) worktreesLikely() bool {
+	if m.iso != nil {
+		return true
+	}
+	return m.eng == nil && m.deps.isolator != nil && m.deps.isolator(m.sess.snapshot().ID) != nil
 }
 
 // relPath is p relative to the project root, or p itself when outside it.

@@ -512,8 +512,9 @@ type workspaceModel struct {
 
 	// session and prompt
 	sess         *wsSess
-	nSaved       int    // saved sessions of this project, for the empty state
-	sugDismissed string // suggestionKey of the suggestion hidden by Esc or accepting
+	nSaved       int                    // saved sessions of this project, for the empty state
+	sugDismissed string                 // suggestionKey of the suggestion hidden by Esc or accepting
+	spec         *workspace.SpecFeature // newest specs/*/tasks.md with an open task; nil = none
 	custom       []workspace.CustomCommand
 	plug         plugins.Set
 	input        textarea.Model
@@ -656,6 +657,7 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...Work
 	m.plug = deps.loadPlugins()
 	m.cfg = m.withPluginAgents(m.cfg)
 	m.refreshSaved()
+	m.rescanSpec()
 	if len(opts) > 0 {
 		m.startIssue = opts[0].Issue
 	}
@@ -760,6 +762,15 @@ func (m *workspaceModel) saveSession() {
 		return
 	}
 	m.refreshSaved()
+}
+
+// rescanSpec looks for a Spec Kit tasks.md with open tasks once; it is not
+// part of rendering.
+func (m *workspaceModel) rescanSpec() {
+	m.spec = nil
+	if f, ok := workspace.DetectSpec(m.root); ok {
+		m.spec = &f
+	}
 }
 
 func (m *workspaceModel) refreshSaved() {
@@ -1331,6 +1342,7 @@ func (m workspaceModel) resetSession(s *workspace.Session) workspaceModel {
 	m.input.Reset()
 	m.input.Placeholder = wsInputHint
 	m.setFocus(wsFocusPrompt)
+	m.rescanSpec()
 	return m
 }
 
@@ -2475,6 +2487,14 @@ func (m workspaceModel) emptyPane(iw, ih int) []string {
 		}
 		line := fmt.Sprintf("↺ %d saved session%s — /resume", m.nSaved, plural)
 		body = append(body, "", centerLine(dim.Render(truncateOneLine(line, iw-2)), iw))
+	}
+	if m.spec != nil {
+		pre := fmt.Sprintf("Spec Kit: %s has %d open %s — ", m.spec.Dir, m.spec.Open, pluralize(m.spec.Open, "task", "tasks"))
+		const cmd = "/import speckit"
+		if ansi.StringWidth(pre+cmd) <= iw-2 {
+			line := dim.Render(pre) + lipgloss.NewStyle().Foreground(colText).Render(cmd)
+			body = append(body, "", centerLine(line, iw))
+		}
 	}
 	// The logo is one accent colour, without the stars; a narrow pane gets none.
 	var logo []string

@@ -74,7 +74,7 @@ activity feed with one card per node (`g` switches to the graph); see
 
 **Start from an issue:** `/issue <N|URL|bead-id>` (or `decsr issue <ref>`) sends a GitHub issue or a bead to the lead as the task; the pull request then says `Closes #N` (see [`doc/workspace.md`](doc/workspace.md#start-from-an-issue)).
 
-**Import from Spec Kit:** `/import speckit [--phase N] [path]` adds the open tasks of a Spec Kit `tasks.md` to the graph with phase and `[P]` dependencies (see [`doc/workspace.md`](doc/workspace.md#import-from-spec-kit)).
+**Import from Spec Kit:** `/import speckit [--phase N] [path]` adds the open tasks of a Spec Kit `tasks.md` to the graph with phase and `[P]` dependencies finished nodes tick their task back in `tasks.md`, and a `tasks.md` with open tasks is detected on start (see [`doc/workspace.md`](doc/workspace.md#import-from-spec-kit)).
 
 **Diff and review notes:** `d` on a node shows what it changed (`D` the whole session); `c` puts a note on a line and `S` sends the notes to the agent as a new node (see [`doc/workspace.md`](doc/workspace.md#diff-and-review-notes)).
 

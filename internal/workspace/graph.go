@@ -49,6 +49,7 @@ type Node struct {
 	Commit        string     `json:"commit,omitempty"`     // the node's own commit when it ran in a worktree; reachable through the session branch
 	Warnings      []string   `json:"warnings,omitempty"`
 	Skills        []string   `json:"skills,omitempty"` // plugin skill ids the lead chose for this node
+	Spec          *SpecRef   `json:"spec,omitempty"`   // the Spec Kit task this node was imported from
 	Error         string     `json:"error,omitempty"`
 	InputTokens   int        `json:"input_tokens,omitempty"`
 	OutputTokens  int        `json:"output_tokens,omitempty"`
@@ -57,6 +58,12 @@ type Node struct {
 	CostKnown     bool       `json:"cost_known,omitempty"` // a price was found for the node's model
 	StartedAt     time.Time  `json:"started_at,omitempty"`
 	EndedAt       time.Time  `json:"ended_at,omitempty"`
+}
+
+// SpecRef names the Spec Kit task a node was imported from.
+type SpecRef struct {
+	File   string `json:"file"`    // tasks.md relative to the project root, slash separated
+	TaskID string `json:"task_id"` // "T003"
 }
 
 // FileStat is the change one node made to one file, from git's numstat.
@@ -314,6 +321,10 @@ func (g *Graph) Clone() *Graph {
 		nn.FileStats = append([]FileStat(nil), n.FileStats...)
 		nn.Warnings = append([]string(nil), n.Warnings...)
 		nn.Skills = append([]string(nil), n.Skills...)
+		if n.Spec != nil {
+			sr := *n.Spec
+			nn.Spec = &sr
+		}
 		c.Nodes[i] = &nn
 	}
 	c.NewRoles = append([]NewRole(nil), g.NewRoles...)

@@ -222,6 +222,12 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 		out.FileStats = stats
 		out.Commit = commit
 	}
+	if n.Spec != nil {
+		if w := x.markSpecDone(n.Spec); w != "" {
+			out.Warnings = append(out.Warnings, w)
+			emit(Event{NodeID: n.ID, Type: EventOutput, Text: "\u26a0 " + w + "\n"})
+		}
+	}
 	return out, nil
 }
 

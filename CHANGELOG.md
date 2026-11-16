@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/import speckit [--phase N] [path]` adds the open tasks of a Spec Kit
   `tasks.md` to the Workspace graph, with phase and `[P]` dependencies and
   suggested roles.
+- Spec Kit write-back: a finished node imported from `tasks.md` ticks its task
+  to `[x]`, in the integration worktree (committed, so it reaches `/merge` and
+  the pull request) when the file is tracked, else in your checkout. The import
+  warns when the feature's spec files are not committed and agents in worktrees
+  could not read them, and the empty Workspace detects a `specs/*/tasks.md` with
+  open tasks and suggests `/import speckit`.
 - Diff view with line notes in the Workspace: `d` opens the diff of a node
   (its commit, or the live worktree while it runs), `D` the diff of the whole
   session. Put a note on a line with `c` and press `S` to send the notes as one
