@@ -169,6 +169,10 @@ and a word. Panes share one faint divider; only node cards, overlays and the
 prompt have rounded borders. Runner glyphs follow the `ui.icons` setting
 (`unicode`, `ascii`, `nerd`); see [workspace.md](workspace.md#runner-glyphs).
 
+From 100 columns the Workspace has a sidebar with the nodes and saved sessions
+beside the main pane, which shows an activity feed by default (`g` switches to
+the node graph, `b` toggles the sidebar); see [workspace.md](workspace.md#layout).
+
 ## Keyboard
 
 | Key | Action |

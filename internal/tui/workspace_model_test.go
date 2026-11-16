@@ -142,7 +142,8 @@ func newWSHarnessAt(t *testing.T, root string) *wsHarness {
 		recent:    func() []RecentProject { return h.recent },
 	}
 	h.m = newWorkspaceModel(root, config.DefaultConfig(), deps)
-	h.send(tea.WindowSizeMsg{Width: 120, Height: 34})
+	h.m.showGraph = true // most tests drive the graph; feed tests switch it off
+	h.send(tea.WindowSizeMsg{Width: 140, Height: 34})
 	t.Cleanup(func() {
 		h.m.runCancel()
 		if h.eng != nil {
@@ -183,6 +184,8 @@ func wsKeyMsg(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyBackspace}
 	case "pgup":
 		return tea.KeyMsg{Type: tea.KeyPgUp}
+	case "pgdown":
+		return tea.KeyMsg{Type: tea.KeyPgDown}
 	case "ctrl+c":
 		return tea.KeyMsg{Type: tea.KeyCtrlC}
 	case "space":
@@ -328,7 +331,7 @@ func TestWorkspaceEmptyStateIsTheWholeScreen(t *testing.T) {
 	h.want("No nodes yet. Describe a task below")
 	h.want("Type a task, / for commands")
 	h.want("Enter send")
-	h.want("Tab graph")
+	h.want("Tab sidebar")
 	h.want("? help")
 	h.want("new session")
 	h.wantNot("saved session")
@@ -345,7 +348,7 @@ func TestWorkspaceSendSplitsAndShowsGraph(t *testing.T) {
 	h.want("you › Build a todo CLI")
 	h.finishSplit()
 	h.want("Data model")
-	h.want("→ ? unassigned")
+	h.want("? unassigned")
 	h.want("split into 5 nodes: T1, T2, T3, T4, T5")
 	if h.eng.Snapshot().Node("CHECK") == nil {
 		t.Fatal("no CHECK node was added")
@@ -681,7 +684,8 @@ func TestWorkspaceResumeLoadsSaved(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.m = newWorkspaceModel(h.root, h.m.cfg, h.m.deps)
-	h.send(tea.WindowSizeMsg{Width: 120, Height: 34})
+	h.m.showGraph = true
+	h.send(tea.WindowSizeMsg{Width: 140, Height: 34})
 	h.want("↺ 1 saved session — /resume")
 	h.typeCmd("/resume")
 	h.want("Todo CLI · 1/5 done")

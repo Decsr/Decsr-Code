@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -567,5 +568,22 @@ func TestEngineObservedFilesDoNotRaiseOverlapWarning(t *testing.T) {
 	}
 	if c := s.Clone(); len(c.Node("T1").Observed) != 1 {
 		t.Error("Clone drops Observed")
+	}
+}
+
+func TestEngineCopiesFileStats(t *testing.T) {
+	f := newFakeExec()
+	want := []FileStat{{Path: "a.go", Added: 3, Removed: 1}, {Path: "x.png", Binary: true}}
+	f.behavior["T1"] = func(context.Context) (Result, error) {
+		return Result{Summary: "ok", FileStats: want}, nil
+	}
+	e := NewEngine(&Graph{Nodes: []*Node{work("T1")}}, f, 3, "")
+	defer e.StopAll()
+	if err := e.Run(context.Background(), "T1"); err != nil {
+		t.Fatal(err)
+	}
+	waitEvent(t, e, EventDone, "T1")
+	if got := e.Snapshot().Node("T1").FileStats; !reflect.DeepEqual(got, want) {
+		t.Errorf("FileStats = %+v, want %+v", got, want)
 	}
 }

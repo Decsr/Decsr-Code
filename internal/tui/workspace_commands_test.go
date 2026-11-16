@@ -87,10 +87,14 @@ func TestWorkspacePromptFocusTypesEveryKey(t *testing.T) {
 func TestWorkspaceTabTogglesFocusAndHints(t *testing.T) {
 	h := newWSHarness(t)
 	promptHints := h.flat()
-	h.want("Tab graph")
+	h.want("Tab sidebar")
+	h.key("tab")
+	if h.m.focus != wsFocusSidebar {
+		t.Fatal("Tab did not move to the sidebar")
+	}
 	h.key("tab")
 	if h.m.focus != wsFocusGraph {
-		t.Fatal("Tab did not move to the graph")
+		t.Fatal("Tab did not move to the main pane")
 	}
 	h.want("Tab prompt")
 	h.wantNot("Enter send")
@@ -103,7 +107,7 @@ func TestWorkspaceTabTogglesFocusAndHints(t *testing.T) {
 	}
 	h.key("shift+tab")
 	if h.m.focus != wsFocusGraph {
-		t.Fatal("Shift+Tab did not move to the graph")
+		t.Fatal("Shift+Tab did not move to the main pane")
 	}
 }
 

@@ -46,7 +46,10 @@ type Result struct {
 	Summary  string
 	Files    []string // written from the worker's explicit file blocks
 	Observed []string // new or changed on disk during the run, by the agent's own tools
-	Warnings []string
+	// FileStats are the lines added and removed per file; set only when the
+	// node ran in its own worktree.
+	FileStats []FileStat
+	Warnings  []string
 }
 
 // Executor runs one node. It must return promptly when ctx is cancelled.
@@ -201,9 +204,11 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	}
 	if x.iso != nil && !role.ReadOnly {
 		finished = true
-		if err := x.iso.Finish(n.ID, n.Title); err != nil {
+		stats, err := x.iso.FinishStats(n.ID, n.Title)
+		if err != nil {
 			return Result{}, err
 		}
+		out.FileStats = stats
 	}
 	return out, nil
 }

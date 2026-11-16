@@ -47,6 +47,53 @@ Code, QA and so on) is unchanged; see [Reaching the classic pipeline](#reaching-
    involved). See [Build & test and fix nodes](#build--test-and-fix-nodes) for
    when its commands are chosen.
 
+## Layout
+
+From 100 columns the screen has a **sidebar** on the left (about 22% of the
+width, 28 to 34 columns), a single `│` divider and the **main pane**. Under 100
+columns there is no sidebar; `b` shows it as a box over the left side.
+
+```
+ Add JSON output to the vers…  │  Activity · g graph
+ 2/5 · 1 failed                │  You  17:00
+ ✓ T1 Parse the --json flag    │    add a --json flag to the version command
+    ⬡ claude:sonnet        2m  │  ╭────────────────────────────────────────╮
+ ! T3 Tests for --json         │  │ ✓ T1 Parse the --json flag    17:01 ↗ │
+    ⬡ claude:sonnet    failed  │  │ Worked for 1m 10s                      │
+ ? T4 Document the flag        │  │ Edited cmd/version.go           +18 −2 │
+    → docs                     │  ╰────────────────────────────────────────╯
+```
+
+**Sidebar.** The session title and progress (`2/5 · 1 failed`) on top, then
+two rows per node: the status glyph, id and title, and under it the runner
+glyph, short model and the age on the right (`now` while running, then `2m`,
+`1h`, `3d` since it ended; `failed` for a failed node; an unassigned node shows
+`→ role` for the lead's suggestion). Below a divider, `Sessions` lists up to
+five other saved sessions of the project (`○ title  2/5`); `Enter` on one
+resumes it like `/resume` does, and is refused while nodes run. The list
+scrolls when it is taller than the pane.
+
+**Main pane.** It has two modes; `g` switches between them and the pane label
+shows the other one (`Activity · g graph`, `Graph · g activity`).
+
+- **Activity** (default) is a feed in time order. Your messages, the lead's
+  answers and system lines read like a chat. Each node that has started gets a
+  card at the time it started: the status glyph, id, title, runner, model and
+  start time; `Working for 37s` and the last output line while it runs; `Worked
+  for 1m 10s`, the summary (3 lines at most) and the files it changed once done
+  (`Edited cmd/version.go   +18 −2`, `Added` for a new file, at most 5 rows and
+  then `+3 more files`); `Failed after 2m`, the error and the keys that help on
+  failure. The counts come from git and exist when the node ran in its own
+  worktree; otherwise only the file names are shown. The selected card has an
+  accent border and a failed one a red border. The feed follows the newest
+  item until you scroll up.
+- **Graph** is the node graph below, with the conversation under it and the
+  inspector beside it when there is room (the main pane is at least 100 columns).
+
+In Activity mode there is no inspector pane; `i` opens it as a box for the
+selected node. One node is selected at a time, shared by the sidebar, the feed
+and the graph.
+
 ## The node graph
 
 Columns go left to right by dependency depth. Each node is a rounded card: the
@@ -128,9 +175,11 @@ blocked and say why.
 
 ## Keys
 
-The screen has two focus areas, the prompt and the graph. It starts on the
-prompt. `Tab` or `Shift+Tab` switches between them; the hint bar at the bottom
-shows the keys of the area that has focus.
+The screen has three focus areas: the prompt, the sidebar (when shown) and the
+main pane (the feed or the graph). It starts on the prompt. `Tab` goes prompt,
+sidebar, main pane and back to the prompt; `Shift+Tab` goes the other way. Under
+100 columns the sidebar is skipped. The hint bar at the bottom shows the keys of
+the area that has focus.
 
 **Prompt focus.** Every printable key is text, so you can type `q`, `r`, `a`,
 `?` or `/` anywhere in a task without triggering anything.
@@ -142,8 +191,8 @@ shows the keys of the area that has focus.
 | `/` | At the start of the text: open the command list |
 | `Up` / `Down`, `Tab` | In the command list: move, complete the name |
 | `Right` | Empty prompt with a suggestion shown: fill the prompt with it (does not send) |
-| `Esc` | Hide the suggestion; close the command list; otherwise go to the graph (when it has nodes) |
-| `PgUp` / `PgDn` | Scroll the conversation |
+| `Esc` | Hide the suggestion; close the command list; otherwise go to the main pane (when it has nodes) |
+| `PgUp` / `PgDn` | Scroll the activity feed (the conversation in Graph mode) |
 | `?` | Help (only when the prompt is empty) |
 | `Ctrl+C` | Quit (press twice) |
 
@@ -160,13 +209,19 @@ node runs and no overlay is open:
 `Right` fills the prompt with it; `Enter` then sends or runs it. `Esc` hides
 it. It stays hidden until the graph or the saved sessions change.
 
-**Graph focus.** Single keys act on the selected node.
+**Main pane and sidebar focus.** Single keys act on the selected node. The
+node keys work with focus on the sidebar or on the main pane, in either mode.
 
 | Key | Action |
 |---|---|
-| arrows or `h j k l` | Move between nodes |
-| `Enter` or `o` | Open the full output of the node |
-| `i` | Show or hide the inspector. Under 100 columns it opens as a box over the graph; `i` or `Esc` closes it |
+| arrows or `h j k l` | Graph mode: move between nodes. Activity mode: select the previous or next card. Sidebar: move through the nodes, then the saved sessions |
+| `PgUp` / `PgDn`, `Ctrl+U` / `Ctrl+D` | Activity mode: scroll the feed a page |
+| `G` | Activity mode: jump to the newest item and follow it again |
+| `Space` | Activity mode: expand or collapse the selected card (its last 15 output lines) |
+| `g` | Switch the main pane between Activity and Graph (text in the prompt) |
+| `b` | Hide or show the sidebar; under 100 columns it opens as a box (`Esc` or `b` closes it) |
+| `Enter` or `o` | Open the full output of the node (in the sidebar, on a saved session: resume it) |
+| `i` | Show or hide the inspector. In Graph mode with a main pane of 100 columns or more it sits beside the graph; otherwise, and in Activity mode, it opens as a box; `i` or `Esc` closes it |
 | `a` | Pick the role for the selected node |
 | `A` | Accept all suggestions that are defined roles |
 | `K` | Choose the plugin skills of the selected node (see [How the lead picks skills](#how-the-lead-picks-skills)) |
@@ -176,7 +231,7 @@ it. It stays hidden until the graph or the saved sessions change.
 | `S` | Stop all running nodes |
 | `f` | Add a fix node after Build & test has failed |
 | `/` or `c` | Go to the prompt (`/` also types the slash) |
-| `Tab` | Go to the prompt |
+| `Tab` / `Shift+Tab` | Next / previous focus area (see above) |
 | `?` | Help |
 | `q` | Quit (asks first while nodes run) |
 

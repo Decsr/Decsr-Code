@@ -33,7 +33,7 @@ const (
 	wsMinW         = 60
 	wsMinH         = 16
 	wsInspectorW   = 38
-	wsInspectorMin = 100 // inspector is shown by default from this width
+	wsInspectorMin = 100 // the inspector is shown beside the graph from this main-pane width
 	wsMaxOutput    = 2000
 )
 
@@ -303,7 +303,8 @@ type wsFocus int
 
 const (
 	wsFocusPrompt wsFocus = iota
-	wsFocusGraph
+	wsFocusGraph          // the main pane: the activity feed or the graph
+	wsFocusSidebar
 )
 
 type wsOverlay int
@@ -527,6 +528,16 @@ type workspaceModel struct {
 	installGen    int
 	cancelInstall context.CancelFunc
 
+	// layout: sidebar and activity feed
+	showGraph    bool                    // the main pane shows the graph; false = the activity feed
+	sbFlip       bool                    // hides the sidebar when wide, shows it as a box when narrow
+	sbSess       int                     // sidebar cursor on a saved session; -1 = on a node
+	sbSessions   []workspace.SessionInfo // saved sessions of the project, for the sidebar
+	feedFollow   bool                    // the feed shows its newest rows
+	feedTop      int                     // first visible feed row while not following
+	feedExpanded map[string]bool         // cards that show their output
+	feedCache    *feedCache
+
 	// graph
 	eng       *workspace.Engine
 	g         *workspace.Graph
@@ -619,6 +630,11 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...Work
 		formDesc:  newField("what this role does, in one line"),
 		textIn:    newField(""),
 		outVP:     viewport.New(78, 20),
+
+		sbSess:       -1,
+		feedFollow:   true,
+		feedExpanded: map[string]bool{},
+		feedCache:    &feedCache{},
 	}
 	m.resize()
 	if _, err := workspace.MigrateLegacy(root); err != nil {
@@ -690,6 +706,9 @@ func (m *workspaceModel) setNotice(s string, isErr bool) {
 
 func (m *workspaceModel) setFocus(f wsFocus) {
 	m.focus = f
+	if f != wsFocusSidebar {
+		m.sbSess = -1
+	}
 	if f == wsFocusPrompt {
 		m.input.Focus()
 	} else {
@@ -728,11 +747,17 @@ func (m *workspaceModel) saveSession() {
 	m.refreshSaved()
 }
 
-func (m *workspaceModel) refreshSaved() { m.nSaved = workspace.CountSessions(m.root) }
+func (m *workspaceModel) refreshSaved() {
+	m.nSaved = workspace.CountSessions(m.root)
+	m.sbSessions = workspace.ListSessions(m.root)
+}
 
 // say adds a chat line to the session. who: lead | system | error.
 func (m *workspaceModel) say(who, text string) {
 	m.scroll = 0
+	if who == "you" {
+		m.feedFollow = true
+	}
 	m.sess.addLine(who, text)
 }
 
@@ -741,10 +766,18 @@ func (m *workspaceModel) say(who, text string) {
 func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		if (m.width >= wsInspectorMin) != (msg.Width >= wsInspectorMin) {
-			m.inspFlip = false // the flip means "hide" when wide and "open" when narrow
-		}
+		was := m.inspDefault()
+		sbWas := m.width >= wsSidebarMin
 		m.width, m.height = msg.Width, msg.Height
+		if was != m.inspDefault() {
+			m.inspFlip = false // the flip means "hide" when shown by default and "open" otherwise
+		}
+		if sbWas != (m.width >= wsSidebarMin) {
+			m.sbFlip = false // the flip means "hide" when wide and "open" when narrow
+		}
+		if m.focus == wsFocusSidebar && !m.sidebarVisible() {
+			m.setFocus(wsFocusGraph)
+		}
 		m.resize()
 		if m.screen == wsScreenOutput {
 			m.refreshOutput()
@@ -811,7 +844,7 @@ func (m workspaceModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.focus == wsFocusGraph {
+	if m.focus != wsFocusPrompt {
 		if isBurst(msg) {
 			return m.insertBurst(msg), nil
 		}
@@ -912,11 +945,20 @@ func (m workspaceModel) promptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	switch k {
-	case "pgup":
-		m.scroll += 3
-		return m, nil
-	case "pgdown":
-		m.scroll = max(m.scroll-3, 0)
+	case "pgup", "pgdown":
+		if !m.showGraph {
+			_, h := m.feedPaneSize()
+			page := max(h-2, 1)
+			if k == "pgup" {
+				page = -page
+			}
+			return m.feedScrollBy(page), nil
+		}
+		if k == "pgup" {
+			m.scroll += 3
+		} else {
+			m.scroll = max(m.scroll-3, 0)
+		}
 		return m, nil
 	case "?":
 		if empty {
@@ -932,11 +974,9 @@ func (m workspaceModel) promptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		m.setFocus(wsFocusGraph)
-		return m, nil
+		return m.cycleFocus(1), nil
 	case "shift+tab":
-		m.setFocus(wsFocusGraph)
-		return m, nil
+		return m.cycleFocus(-1), nil
 	case "esc":
 		switch {
 		case open:
@@ -1240,6 +1280,8 @@ func (m workspaceModel) attachGraph(g *workspace.Graph, fresh bool) (workspaceMo
 	m.screen = wsScreenMain
 	m.overlay = wsOverlayNone
 	m.scroll = 0
+	m.sbSess = -1
+	m.feedFollow = true
 	return m, tea.Batch(wsWaitEvent(m.eng), m.startTick())
 }
 
@@ -1258,6 +1300,8 @@ func (m workspaceModel) resetSession(s *workspace.Session) workspaceModel {
 	m.screen = wsScreenMain
 	m.overlay = wsOverlayNone
 	m.scroll = 0
+	m.sbSess, m.sbFlip = -1, false
+	m.feedFollow, m.feedExpanded = true, map[string]bool{}
 	m.input.Reset()
 	m.input.Placeholder = wsInputHint
 	m.setFocus(wsFocusPrompt)
@@ -1415,7 +1459,11 @@ func (m *workspaceModel) refreshOutput() {
 func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 	switch k {
-	case "tab", "shift+tab", "c":
+	case "tab":
+		return m.cycleFocus(1), nil
+	case "shift+tab":
+		return m.cycleFocus(-1), nil
+	case "c":
 		m.setFocus(wsFocusPrompt)
 		return m, nil
 	case "/":
@@ -1433,19 +1481,79 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.inspFlip = !m.inspFlip
 		return m, nil
 	case "esc":
-		m.inspFlip = m.inspFlip && m.width >= wsInspectorMin // closes the narrow inspector box
+		m.inspFlip = m.inspFlip && m.inspDefault() // closes the inspector box
+		if m.sidebarOverlay() {
+			m.sbFlip = false
+			if m.focus == wsFocusSidebar {
+				m.setFocus(wsFocusGraph)
+			}
+		}
 		return m, nil
+	case "g":
+		m.showGraph = !m.showGraph
+		m.inspFlip = false
+		return m, nil
+	case "b":
+		m.sbFlip = !m.sbFlip
+		switch {
+		case m.sidebarVisible():
+			m.setFocus(wsFocusSidebar)
+		case m.focus == wsFocusSidebar:
+			m.setFocus(wsFocusGraph)
+		}
+		return m, nil
+	case "G":
+		if !m.showGraph {
+			m.feedFollow = true
+		}
+		return m, nil
+	case "pgup", "pgdown", "ctrl+u", "ctrl+d":
+		if !m.showGraph && m.focus == wsFocusGraph {
+			_, h := m.feedPaneSize()
+			page := max(h-2, 1)
+			if k == "pgup" || k == "ctrl+u" {
+				page = -page
+			}
+			return m.feedScrollBy(page), nil
+		}
+		return m, nil
+	}
+	dirs := map[string]string{"up": "up", "k": "up", "down": "down", "j": "down", "left": "left", "h": "left", "right": "right", "l": "right"}
+	if m.focus == wsFocusSidebar {
+		switch d := dirs[k]; {
+		case d == "up":
+			return m.sbMove(-1), nil
+		case d == "down":
+			return m.sbMove(1), nil
+		case k == "enter" && m.sbSess >= 0:
+			return m.sbOpenSession()
+		}
 	}
 	if m.eng == nil || !m.hasNodes() {
 		return m, nil
 	}
-	dirs := map[string]string{"up": "up", "k": "up", "down": "down", "j": "down", "left": "left", "h": "left", "right": "right", "l": "right"}
 	if d, ok := dirs[k]; ok {
-		m.sel = canvasNeighbor(m.g, m.sel, d)
+		switch {
+		case m.focus == wsFocusSidebar:
+		case !m.showGraph:
+			switch d {
+			case "up":
+				return m.feedSelect(-1), nil
+			case "down":
+				return m.feedSelect(1), nil
+			}
+		default:
+			m.sel = canvasNeighbor(m.g, m.sel, d)
+		}
 		return m, nil
 	}
 	n := m.selNode()
 	switch k {
+	case " ", "space":
+		if !m.showGraph && n != nil {
+			m.feedExpanded[n.ID] = !m.feedExpanded[n.ID]
+			m = m.feedReveal(n.ID)
+		}
 	case "a":
 		return m.openPicker(n)
 	case "A":
@@ -1495,6 +1603,9 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setNotice("Added "+id+". Assign it, run it, then run Build & test again (or press R).", false)
 	case "o", "enter":
 		if n != nil {
+			if m.sidebarOverlay() {
+				m.sbFlip = false
+			}
 			m.screen = wsScreenOutput
 			m.outNode = n.ID
 			m.outFollow = true
@@ -1502,6 +1613,42 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// cycleFocus moves the focus along prompt, sidebar (when shown) and main.
+func (m workspaceModel) cycleFocus(dir int) workspaceModel {
+	order := []wsFocus{wsFocusPrompt}
+	if m.sidebarVisible() {
+		order = append(order, wsFocusSidebar)
+	}
+	order = append(order, wsFocusGraph)
+	i := 0
+	for j, f := range order {
+		if f == m.focus {
+			i = j
+		}
+	}
+	next := order[(i+dir+len(order))%len(order)]
+	if m.focus == wsFocusSidebar && m.sidebarOverlay() {
+		m.sbFlip = false // leaving the box closes it
+	}
+	m.setFocus(next)
+	return m
+}
+
+// sbOpenSession loads the saved session under the sidebar cursor, as /resume
+// does.
+func (m workspaceModel) sbOpenSession() (tea.Model, tea.Cmd) {
+	sessions := m.otherSessions()
+	if m.sbSess < 0 || m.sbSess >= len(sessions) {
+		return m, nil
+	}
+	if m.busy() {
+		return m.refuseBusy()
+	}
+	id := sessions[m.sbSess].ID
+	m.sbSess, m.sbFlip = -1, false
+	return m.loadSession(id)
 }
 
 func (m workspaceModel) openPicker(n *workspace.Node) (tea.Model, tea.Cmd) {
@@ -2019,7 +2166,7 @@ func (m workspaceModel) guidanceParts() (short, long string, isErr bool) {
 	}
 	via := ""
 	if m.focus == wsFocusPrompt {
-		via = "Tab to the graph, then "
+		via = "Tab to the nodes, then "
 	}
 	_, running, done, failed := g.Counts()
 	if failed > 0 {
@@ -2147,7 +2294,26 @@ func (m workspaceModel) graphHints() []keyHint {
 	if n := m.selNode(); n != nil && n.Kind == workspace.KindWork && (n.Status == workspace.StatusTodo || n.Status == workspace.StatusFailed) {
 		hs = append(hs, keyHint{"K", "skills"})
 	}
-	return append(hs, keyHint{"Tab", "prompt"}, keyHint{"←↑↓→", "move"}, keyHint{"?", "help"})
+	switch {
+	case m.focus == wsFocusSidebar && m.sbSess >= 0:
+		hs = []keyHint{{"Enter", "resume"}}
+		hs = append(hs, keyHint{"↑↓", "move"}, keyHint{"Tab", "main"}, keyHint{"b", "hide"}, keyHint{"?", "help"})
+		return hs
+	case m.focus == wsFocusSidebar:
+		close := keyHint{"b", "hide"}
+		if m.sidebarOverlay() {
+			close = keyHint{"Esc", "close"}
+		}
+		hs = append(hs, keyHint{"↑↓", "move"}, keyHint{"Tab", "main"}, close)
+	case m.feedMode():
+		if n := m.selNode(); n != nil {
+			hs = append(hs, keyHint{"Space", "expand"})
+		}
+		hs = append(hs, keyHint{"↑↓", "cards"}, keyHint{"PgUp/PgDn", "scroll"}, keyHint{"g", "graph"}, keyHint{"Tab", "prompt"})
+	default:
+		hs = append(hs, keyHint{"g", "activity"}, keyHint{"←↑↓→", "move"}, keyHint{"Tab", "prompt"})
+	}
+	return append(hs, keyHint{"?", "help"})
 }
 
 func (m workspaceModel) hintLine() string {
@@ -2156,12 +2322,16 @@ func (m workspaceModel) hintLine() string {
 	switch {
 	case m.splitting:
 		hs = []keyHint{{"Esc", "cancel"}, {"Ctrl+C", "quit"}}
-	case m.focus == wsFocusGraph:
+	case m.focus != wsFocusPrompt:
 		hs = m.graphHints()
 	case m.paletteOpen():
 		hs = []keyHint{{"↑↓", "choose"}, {"Tab", "complete"}, {"Enter", "run"}, {"Esc", "close"}}
 	default:
-		hs = []keyHint{{"Enter", "send"}, {"/", "commands"}, {"Tab", "graph"}}
+		next := "main"
+		if m.sidebarVisible() {
+			next = "sidebar"
+		}
+		hs = []keyHint{{"Enter", "send"}, {"/", "commands"}, {"Tab", next}}
 		if m.suggestion() != "" {
 			hs = append([]keyHint{{"Enter", "send"}, {"→", "accept suggestion"}}, hs[1:]...)
 		}
@@ -2296,9 +2466,15 @@ func paneLabel(text string, focused bool) string {
 	return "  " + st.Render(text)
 }
 
+// inspDefault reports whether the inspector sits beside the graph unless the
+// user hides it: only in graph mode with room for both.
+func (m workspaceModel) inspDefault() bool {
+	return m.showGraph && m.mainWidth() >= wsInspectorMin
+}
+
 // showInspector reports whether the inspector sits beside the graph.
 func (m workspaceModel) showInspector() bool {
-	return m.width >= wsInspectorMin && !m.inspFlip
+	return m.inspDefault() && !m.inspFlip
 }
 
 // graphRows is the height the graph pane wants: its label, the cards and a
@@ -2317,20 +2493,18 @@ func (m workspaceModel) graphRows() int {
 // mainPanes draws the graph pane and the inspector in exactly mainH lines.
 // The panes have no frame; a single faint divider separates them.
 func (m workspaceModel) mainPanes(mainH int) []string {
-	w := m.width
+	w := m.mainWidth()
 	g := m.g
-	models := map[string]string{}
-	runners := map[string]string{}
-	for _, r := range workspace.Roles(m.cfg) {
-		models[r.Name] = shortModel(r.Agent.Runner, r.Agent.Model)
-		runners[r.Name] = r.Agent.Runner
-	}
+	models, runners := m.roleLooks()
 	spin := pixelSpinner.Frames[m.spin%len(pixelSpinner.Frames)]
 
 	n := m.selNode()
 	tail := m.outputTail(m.sel, mainH)
 	graphPane := func(cw int) []string {
-		out := []string{paneLabel("Graph", m.focus == wsFocusGraph)}
+		if !m.showGraph {
+			return m.feedPane(cw, mainH)
+		}
+		out := []string{paneLabel("Graph", m.focus == wsFocusGraph) + lipgloss.NewStyle().Foreground(colMuted).Render(" · g activity")}
 		var body []string
 		if len(g.Nodes) == 0 {
 			body = m.emptyPane(cw-4, mainH-1)
@@ -2363,8 +2537,9 @@ func (m workspaceModel) mainPanes(mainH int) []string {
 			}
 			main = append(main, padRight(ansi.Truncate(c, cw, ""), cw)+div+" "+ansi.Truncate(p, iw, ""))
 		}
-	case w < wsInspectorMin && m.inspFlip:
-		// Narrow terminal: the inspector is a box over the graph.
+	case !m.inspDefault() && m.inspFlip:
+		// No room beside the graph, or the activity feed: the inspector is a
+		// box over the pane.
 		bw := min(w, 60)
 		bh := max(mainH-2, min(mainH, 5))
 		body := inspBody(bw-4, bh-2)
@@ -2426,15 +2601,57 @@ func (m workspaceModel) paletteLines(maxRows int) []string {
 	return pal
 }
 
+// feedMode reports whether the main pane shows the activity feed.
+func (m workspaceModel) feedMode() bool { return !m.showGraph }
+
+// mainLayout returns the rows around the main area: the chat strip under the
+// graph (none in the feed, where the chat is part of it) and the rows the
+// header, title, status, prompt box and hints take together.
+func (m workspaceModel) mainLayout(box []string) (chatRows, fixed int) {
+	if !m.feedMode() {
+		chatRows = m.chatRows()
+	}
+	fixed = 1 + 1 + chatRows + len(box) + 1 // header, status, chat, prompt, hints
+	if !m.sidebarInline() {
+		fixed++ // the title line; the sidebar carries it otherwise
+	}
+	return chatRows, fixed
+}
+
+// mainHeight is the height of the main area (the sidebar and the pane).
+func (m workspaceModel) mainHeight() int {
+	_, fixed := m.mainLayout(m.promptBox())
+	return max(m.height-fixed, 1)
+}
+
+// mainArea draws the sidebar, a divider and the main pane in mainH rows.
+func (m workspaceModel) mainArea(mainH int) []string {
+	main := m.mainPanes(mainH)
+	switch {
+	case m.sidebarInline():
+		sw := m.sidebarW()
+		side := m.sidebarRows(sw, mainH)
+		div := lipgloss.NewStyle().Foreground(colBorder).Render("│")
+		out := make([]string, mainH)
+		for i := range out {
+			out[i] = padRight(ansi.Truncate(side[i], sw, ""), sw) + div + main[i]
+		}
+		return out
+	case m.sidebarOverlay():
+		box := m.sidebarOverlayBox(mainH)
+		return strings.Split(overlayAt(strings.Join(main, "\n"), box, 1, 0, m.width, mainH), "\n")[:mainH]
+	}
+	return main
+}
+
 func (m workspaceModel) mainView() string {
 	w, h := m.width, m.height
 	box := m.promptBox()
-	chatRows := m.chatRows()
-	fixed := 2 + 1 + chatRows + len(box) + 1 // header and title, status, chat, prompt, hints
+	chatRows, fixed := m.mainLayout(box)
 	pal := m.paletteLines(h - fixed - 6)
 	mainH := h - fixed - len(pal)
 	// Rows the graph does not need go to the chat, as far as it has lines.
-	if spare := mainH - m.graphRows(); spare > 0 && m.hasNodes() {
+	if spare := mainH - m.graphRows(); spare > 0 && m.hasNodes() && !m.feedMode() {
 		need := len(m.transcriptLines(w-2, true)) - chatRows
 		grow := min(min(spare, need), wsChatExtraLimit)
 		if grow > 0 {
@@ -2443,10 +2660,15 @@ func (m workspaceModel) mainView() string {
 		}
 	}
 
-	parts := []string{m.headerLine(), m.titleLine()}
-	parts = append(parts, m.mainPanes(mainH)...)
+	parts := []string{m.headerLine()}
+	if !m.sidebarInline() {
+		parts = append(parts, m.titleLine())
+	}
+	parts = append(parts, m.mainArea(mainH)...)
 	parts = append(parts, m.statusLine())
-	parts = append(parts, m.chatStrip(chatRows)...)
+	if !m.feedMode() {
+		parts = append(parts, m.chatStrip(chatRows)...)
+	}
 	parts = append(parts, pal...) // directly above the prompt box
 	parts = append(parts, box...)
 	parts = append(parts, m.hintLine())

@@ -372,6 +372,7 @@ func (e *Engine) startLocked(parent context.Context, n *Node) started {
 	n.Summary = ""
 	n.Files = nil
 	n.Observed = nil
+	n.FileStats = nil
 	n.Warnings = nil
 	n.InputTokens, n.OutputTokens, n.Estimated = 0, 0, false
 	e.cancels[n.ID] = cancel
@@ -447,6 +448,7 @@ func (e *Engine) runNode(s started) {
 		n.Summary = res.Summary
 		n.Files = append([]string(nil), res.Files...)
 		n.Observed = append([]string(nil), res.Observed...)
+		n.FileStats = append([]FileStat(nil), res.FileStats...)
 		n.Warnings = append([]string(nil), res.Warnings...)
 		fin = Event{NodeID: id, Type: EventDone, Text: n.Summary}
 		overlaps = e.markOverlapsLocked(n)

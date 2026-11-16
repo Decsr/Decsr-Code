@@ -497,3 +497,49 @@ func TestIsolatorBaseIsPlainCommit(t *testing.T) {
 		t.Errorf("base lacks the uncommitted change: %q", got)
 	}
 }
+
+func TestIsolatorFinishStats(t *testing.T) {
+	repo := newRepo(t) // a.go holds "var A = 1"
+	iso := newIso(t, repo)
+	root, _, err := iso.Start("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeT(t, root, "a.go", "package a\n\nvar A = 2\nvar B = 3\n")
+	writeT(t, root, "new.txt", "one\ntwo\nthree\n")
+	if err := os.WriteFile(filepath.Join(root, "pic.bin"), []byte{0, 1, 2, 0, 3}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := iso.FinishStats("T1", "stats")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]FileStat{}
+	for _, s := range stats {
+		got[s.Path] = s
+	}
+	if s := got["new.txt"]; s.Added != 3 || s.Removed != 0 || s.Binary {
+		t.Errorf("new.txt = %+v", s)
+	}
+	if !got["new.txt"].New || got["a.go"].New {
+		t.Errorf("New flags wrong: %+v", got)
+	}
+	if s := got["a.go"]; s.Added != 2 || s.Removed != 1 {
+		t.Errorf("a.go = %+v", s)
+	}
+	if s := got["pic.bin"]; !s.Binary {
+		t.Errorf("pic.bin = %+v, want binary", s)
+	}
+}
+
+func TestIsolatorFinishStatsEmptyWithoutChanges(t *testing.T) {
+	repo := newRepo(t)
+	iso := newIso(t, repo)
+	if _, _, err := iso.Start("T1"); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := iso.FinishStats("T1", "nothing")
+	if err != nil || len(stats) != 0 {
+		t.Errorf("stats = %v, err = %v", stats, err)
+	}
+}

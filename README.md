@@ -68,6 +68,9 @@ A final **Build & test** node checks the result. Nothing runs until you press
 add your own under `agents:` in `.decsr/project.yaml`. In a git repository each
 node runs in its own worktree and branch; `/merge` brings the result into your
 checkout (`workspace.isolation: shared` turns this off).
+From 100 columns a sidebar lists the nodes and saved sessions beside an
+activity feed with one card per node (`g` switches to the graph); see
+[`doc/workspace.md`](doc/workspace.md#layout).
 
 **Pull requests:** `/pr` pushes the session branch and opens a pull request with `gh`; `/pr watch` turns failing CI and review comments into fix nodes (see [`doc/workspace.md`](doc/workspace.md#pull-requests)).
 

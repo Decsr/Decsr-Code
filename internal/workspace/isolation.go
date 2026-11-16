@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -259,36 +260,75 @@ func (i *Isolator) Discard(id string) {
 // conflict the merge is aborted, the branch and worktree stay, and the error
 // names the conflicting files.
 func (i *Isolator) Finish(id, title string) error {
+	_, err := i.FinishStats(id, title)
+	return err
+}
+
+// FinishStats is Finish that also returns the lines the node added and
+// removed per file; it is empty when the node changed nothing.
+func (i *Isolator) FinishStats(id, title string) ([]FileStat, error) {
 	path := i.nodePath(id)
 	branch := nodeBranch(i.session, id)
 	if _, err := git(path, "add", "-A"); err != nil {
-		return err
+		return nil, err
 	}
 	staged, err := git(path, "diff", "--cached", "--name-only")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if staged == "" {
 		i.removeNode(id)
-		return nil
+		return nil, nil
 	}
 	msg := id + ": " + strings.Join(strings.Fields(title), " ")
 	if _, err := git(path, append(commitArgs(path), "commit", "--no-verify", "-m", msg)...); err != nil {
-		return err
+		return nil, err
 	}
+	stats := commitStats(path)
 	if _, err := git(i.integ, append(commitArgs(i.integ), "merge", "--no-ff", "--no-edit", branch)...); err != nil {
 		files, _ := git(i.integ, "diff", "--name-only", "--diff-filter=U")
 		_, _ = git(i.integ, "merge", "--abort")
 		if files == "" {
-			return err
+			return nil, err
 		}
-		return fmt.Errorf("merge conflict with earlier nodes in: %s — the branch %s is kept; run the node again to retry on top of the latest work",
+		return nil, fmt.Errorf("merge conflict with earlier nodes in: %s — the branch %s is kept; run the node again to retry on top of the latest work",
 			strings.Join(strings.Split(files, "\n"), ", "), branch)
 	}
 	i.removeNode(id)
-	return nil
+	return stats, nil
+}
+
+// commitStats is the numstat of the last commit in dir; binary files show
+// "-" for both counts. A failure gives no stats.
+func commitStats(dir string) []FileStat {
+	out, err := git(dir, "diff", "--numstat", "--no-renames", "HEAD^", "HEAD")
+	if err != nil || out == "" {
+		return nil
+	}
+	created := map[string]bool{}
+	if added, err := git(dir, "diff", "--name-only", "--diff-filter=A", "--no-renames", "HEAD^", "HEAD"); err == nil && added != "" {
+		for _, p := range strings.Split(added, "\n") {
+			created[p] = true
+		}
+	}
+	var stats []FileStat
+	for _, l := range strings.Split(out, "\n") {
+		f := strings.SplitN(l, "\t", 3)
+		if len(f) != 3 {
+			continue
+		}
+		st := FileStat{Path: f[2], New: created[f[2]]}
+		if f[0] == "-" && f[1] == "-" {
+			st.Binary = true
+		} else {
+			st.Added, _ = strconv.Atoi(f[0])
+			st.Removed, _ = strconv.Atoi(f[1])
+		}
+		stats = append(stats, st)
+	}
+	return stats
 }
 
 // RemoveSessionWorktrees removes every worktree of a session. Branches are

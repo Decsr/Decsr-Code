@@ -33,26 +33,36 @@ const maxFailureBytes = 4000
 
 // Node is one sub-task in the graph.
 type Node struct {
-	ID            string    `json:"id"` // "T1", "T2", …, "CHECK", "F1"
-	Title         string    `json:"title"`
-	Description   string    `json:"description"`
-	Kind          Kind      `json:"kind"`
-	Role          string    `json:"role,omitempty"` // assigned role; "" = unassigned
-	SuggestedRole string    `json:"suggested_role,omitempty"`
-	DependsOn     []string  `json:"depends_on,omitempty"`
-	Status        Status    `json:"status"`
-	Commands      []string  `json:"commands,omitempty"` // check nodes
-	Summary       string    `json:"summary,omitempty"`
-	Files         []string  `json:"files,omitempty"`
-	Observed      []string  `json:"observed,omitempty"` // changed on disk by the agent's own tools
-	Warnings      []string  `json:"warnings,omitempty"`
-	Skills        []string  `json:"skills,omitempty"` // plugin skill ids the lead chose for this node
-	Error         string    `json:"error,omitempty"`
-	InputTokens   int       `json:"input_tokens,omitempty"`
-	OutputTokens  int       `json:"output_tokens,omitempty"`
-	Estimated     bool      `json:"estimated,omitempty"`
-	StartedAt     time.Time `json:"started_at,omitempty"`
-	EndedAt       time.Time `json:"ended_at,omitempty"`
+	ID            string     `json:"id"` // "T1", "T2", …, "CHECK", "F1"
+	Title         string     `json:"title"`
+	Description   string     `json:"description"`
+	Kind          Kind       `json:"kind"`
+	Role          string     `json:"role,omitempty"` // assigned role; "" = unassigned
+	SuggestedRole string     `json:"suggested_role,omitempty"`
+	DependsOn     []string   `json:"depends_on,omitempty"`
+	Status        Status     `json:"status"`
+	Commands      []string   `json:"commands,omitempty"` // check nodes
+	Summary       string     `json:"summary,omitempty"`
+	Files         []string   `json:"files,omitempty"`
+	Observed      []string   `json:"observed,omitempty"`   // changed on disk by the agent's own tools
+	FileStats     []FileStat `json:"file_stats,omitempty"` // lines added and removed per file, set when the node ran in a worktree
+	Warnings      []string   `json:"warnings,omitempty"`
+	Skills        []string   `json:"skills,omitempty"` // plugin skill ids the lead chose for this node
+	Error         string     `json:"error,omitempty"`
+	InputTokens   int        `json:"input_tokens,omitempty"`
+	OutputTokens  int        `json:"output_tokens,omitempty"`
+	Estimated     bool       `json:"estimated,omitempty"`
+	StartedAt     time.Time  `json:"started_at,omitempty"`
+	EndedAt       time.Time  `json:"ended_at,omitempty"`
+}
+
+// FileStat is the change one node made to one file, from git's numstat.
+type FileStat struct {
+	Path    string `json:"path"`
+	Added   int    `json:"added,omitempty"`
+	Removed int    `json:"removed,omitempty"`
+	Binary  bool   `json:"binary,omitempty"`
+	New     bool   `json:"new,omitempty"` // the node created the file
 }
 
 // AllFiles is Files followed by the Observed paths not already in Files.
@@ -298,6 +308,7 @@ func (g *Graph) Clone() *Graph {
 		nn.Commands = append([]string(nil), n.Commands...)
 		nn.Files = append([]string(nil), n.Files...)
 		nn.Observed = append([]string(nil), n.Observed...)
+		nn.FileStats = append([]FileStat(nil), n.FileStats...)
 		nn.Warnings = append([]string(nil), n.Warnings...)
 		nn.Skills = append([]string(nil), n.Skills...)
 		c.Nodes[i] = &nn
@@ -450,6 +461,7 @@ func (g *Graph) Append(add *Graph, nextID int) (newNext int, idMap map[string]st
 		c.Commands = append([]string(nil), n.Commands...)
 		c.Files = append([]string(nil), n.Files...)
 		c.Observed = append([]string(nil), n.Observed...)
+		c.FileStats = append([]FileStat(nil), n.FileStats...)
 		c.Warnings = append([]string(nil), n.Warnings...)
 		c.Skills = append([]string(nil), n.Skills...)
 		g.Nodes = append(g.Nodes, &c)

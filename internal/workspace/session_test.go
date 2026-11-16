@@ -548,3 +548,33 @@ func TestNewEngineKeepsFileSave(t *testing.T) {
 		t.Fatalf("%v %v", got, err)
 	}
 }
+
+func TestFileStatsPersistAndOldSessionsLoad(t *testing.T) {
+	root := t.TempDir()
+	s := NewSession()
+	s.AddLine("you", "x")
+	nd := n("T1")
+	nd.FileStats = []FileStat{{Path: "a.go", Added: 4, Removed: 2}, {Path: "b.png", Binary: true}}
+	s.Graph = &Graph{Nodes: []*Node{nd, n("T2")}}
+	if err := s.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadSession(root, s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Graph.Node("T1").FileStats, nd.FileStats) {
+		t.Errorf("FileStats = %+v", got.Graph.Node("T1").FileStats)
+	}
+	data, _ := os.ReadFile(filepath.Join(SessionsDir(root), s.ID+".json"))
+	if strings.Count(string(data), "file_stats") != 1 {
+		t.Error("an empty FileStats must be omitted from the JSON")
+	}
+	old := strings.Replace(string(data), "file_stats", "other_field", 1)
+	if err := os.WriteFile(filepath.Join(SessionsDir(root), s.ID+".json"), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadSession(root, s.ID); err != nil {
+		t.Errorf("old file without file_stats: %v", err)
+	}
+}

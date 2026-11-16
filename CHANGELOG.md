@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Workspace layout: a left sidebar (from 100 columns; `b` shows it as a box on
+  narrow terminals) with the session title, one two-row entry per node (status,
+  runner, model, age) and the other saved sessions, and an activity feed as the
+  default main pane: the conversation and one card per started node with its
+  duration, summary, changed files with `+added −removed` counts, error and
+  next keys. `g` switches to the node graph, `Space` expands a card, `G` jumps
+  to the newest item, and `Tab` cycles prompt, sidebar and main pane. Nodes
+  that ran in a worktree now store `file_stats` (lines added and removed per
+  file) in the session. See `doc/workspace.md`.
 - `ui.icons` (`unicode`, `ascii` or `nerd`; default `unicode`) picks the runner
   glyphs shown on Workspace node cards and in the inspector. See
   `doc/workspace.md`.

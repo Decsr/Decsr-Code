@@ -1,0 +1,295 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/Decsr/Decsr-Code/internal/workspace"
+)
+
+const (
+	wsSidebarMin      = 100 // the sidebar is inline from this width
+	wsSidebarSessions = 5   // other saved sessions listed under the nodes
+	wsSidebarSessMinH = 14  // fewest rows for the sessions block to show
+	wsSidebarOverlayW = 34
+)
+
+// sidebarW is the width of the inline sidebar: about 22% of the terminal,
+// between 28 and 34 cells.
+func (m workspaceModel) sidebarW() int { return min(max(m.width*22/100, 28), 34) }
+
+// sidebarInline reports whether the sidebar sits left of the main pane.
+func (m workspaceModel) sidebarInline() bool { return m.width >= wsSidebarMin && !m.sbFlip }
+
+// sidebarOverlay reports whether the sidebar is a box over a narrow screen.
+func (m workspaceModel) sidebarOverlay() bool { return m.width < wsSidebarMin && m.sbFlip }
+
+// sidebarVisible reports whether the sidebar is on screen in either form.
+func (m workspaceModel) sidebarVisible() bool { return m.sidebarInline() || m.sidebarOverlay() }
+
+// mainWidth is the width of the main pane: the terminal minus the sidebar and
+// its divider.
+func (m workspaceModel) mainWidth() int {
+	if m.sidebarInline() {
+		return m.width - m.sidebarW() - 1
+	}
+	return m.width
+}
+
+// sbAge is the short time since t: now, 2m, 1h, 3d.
+func sbAge(now, t time.Time) string {
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+// otherSessions are the saved sessions of the project besides the open one,
+// at most wsSidebarSessions.
+func (m workspaceModel) otherSessions() []workspace.SessionInfo {
+	cur := m.sess.snapshot().ID
+	var out []workspace.SessionInfo
+	for _, s := range m.sbSessions {
+		if s.ID != cur {
+			out = append(out, s)
+			if len(out) == wsSidebarSessions {
+				break
+			}
+		}
+	}
+	return out
+}
+
+// sbSeg renders text with the selected-row background when on is set.
+func sbSeg(text string, fg lipgloss.Color, bold, on bool) string {
+	st := lipgloss.NewStyle().Foreground(fg).Bold(bold)
+	if on {
+		st = st.Background(colSel)
+	}
+	return st.Render(text)
+}
+
+// sbRow joins left and right into a w-cell row; the selected row is filled with
+// colSel across the whole width.
+func sbRow(left, right string, w int, on bool) string {
+	room := w - 1 - ansi.StringWidth(right)
+	if right != "" {
+		room--
+	}
+	left = ansi.Truncate(left, max(room, 1), "…")
+	gap := max(w-ansi.StringWidth(left)-ansi.StringWidth(right), 0)
+	fill := strings.Repeat(" ", gap)
+	if on {
+		fill = lipgloss.NewStyle().Background(colSel).Render(fill)
+	}
+	return left + fill + right
+}
+
+// nodeRows draws one node of the sidebar as two rows of w cells.
+func (m workspaceModel) nodeRows(n *workspace.Node, w int, on bool, models, runners map[string]string) [2]string {
+	glyph, _ := nodeStatusGlyph(m.g, n)
+	if n.Status == workspace.StatusRunning {
+		glyph = pixelSpinner.Frames[m.spin%len(pixelSpinner.Frames)]
+	}
+	l1 := sbSeg(" ", colText, false, on) + sbSeg(glyph, statusLabelColor(m.g, n), true, on) + sbSeg(" ", colText, false, on) +
+		sbSeg(n.ID, colMuted, false, on) + sbSeg(" ", colText, false, on) + sbSeg(workspace.Sanitize(n.Title), colText, false, on)
+	var l2, age string
+	switch {
+	case n.Kind == workspace.KindCheck:
+		l2 = sbSeg("    checks", colMuted, false, on)
+	case n.Role == "":
+		if n.SuggestedRole != "" {
+			l2 = sbSeg("    → "+n.SuggestedRole, colMuted, false, on)
+		} else {
+			l2 = sbSeg("    unassigned", colWarn, false, on)
+		}
+	default:
+		badge := lipgloss.NewStyle().Foreground(runnerColor(runners[n.Role]))
+		if on {
+			badge = badge.Background(colSel)
+		}
+		l2 = sbSeg("    ", colMuted, false, on) + badge.Render(runnerGlyph(runners[n.Role], m.cfg.UI.Icons))
+		if md := models[n.Role]; md != "" {
+			l2 += sbSeg(" "+md, colMuted, false, on)
+		}
+	}
+	switch n.Status {
+	case workspace.StatusRunning:
+		age = "now"
+	case workspace.StatusFailed:
+		age = "failed"
+	case workspace.StatusDone:
+		if !n.EndedAt.IsZero() {
+			age = sbAge(m.now(), n.EndedAt)
+		}
+	}
+	return [2]string{sbRow(l1, "", w, on), sbRow(l2, sbSeg(age, colMuted, false, on), w, on)}
+}
+
+// sidebarRows is the sidebar in exactly h rows of w cells: the session title
+// and progress, the node rows (scrolled to keep the selected one in view) and,
+// below a divider, the other saved sessions.
+func (m workspaceModel) sidebarRows(w, h int) []string {
+	dim := lipgloss.NewStyle().Foreground(colMuted)
+	titleCol := colText
+	if m.focus == wsFocusSidebar {
+		titleCol = colAccent
+	}
+	title := workspace.Sanitize(m.sess.snapshot().Title)
+	if title == "" {
+		title = "new session"
+	}
+	out := []string{" " + lipgloss.NewStyle().Foreground(titleCol).Bold(true).Render(truncateOneLine(title, w-2)), " " + dim.Render(truncateOneLine(m.sidebarProgress(), w-2))}
+
+	sessions := m.otherSessions()
+	block := 0
+	if len(sessions) > 0 && h >= wsSidebarSessMinH {
+		block = 2 + len(sessions)
+	}
+	area := max(h-len(out)-block, 0)
+	models, runners := m.roleLooks()
+	var rows []string
+	selStart, selEnd := 0, 0
+	if m.g != nil {
+		for _, n := range m.g.Nodes {
+			on := n.ID == m.sel && m.sbSess < 0
+			r := m.nodeRows(n, w, on, models, runners)
+			if on {
+				selStart, selEnd = len(rows), len(rows)+2
+			}
+			rows = append(rows, r[0], r[1])
+		}
+	}
+	top := 0
+	if len(rows) > area {
+		top = max(selEnd-area, 0)
+		top = min(top, selStart)
+		top = min(top, len(rows)-area)
+	}
+	end := min(top+area, len(rows))
+	out = append(out, rows[top:end]...)
+	for len(out) < h-block {
+		out = append(out, "")
+	}
+	if block > 0 {
+		out = append(out, lipgloss.NewStyle().Foreground(colBorder).Render(strings.Repeat("─", w)), " "+dim.Render("Sessions"))
+		for i, s := range sessions {
+			on := m.sbSess == i && m.focus == wsFocusSidebar
+			t := workspace.Sanitize(s.Title)
+			if t == "" {
+				t = "untitled"
+			}
+			total := s.Todo + s.Running + s.Done + s.Failed
+			right := ""
+			if total > 0 {
+				right = sbSeg(fmt.Sprintf("%d/%d", s.Done, total), colMuted, false, on)
+			}
+			left := sbSeg(" ○ "+t, colMuted, false, on)
+			out = append(out, sbRow(left, right, w, on))
+		}
+	}
+	return out[:min(len(out), h)]
+}
+
+// sidebarProgress is the dim "2/5 · 1 failed" line under the title.
+func (m workspaceModel) sidebarProgress() string {
+	if m.g == nil || len(m.g.Nodes) == 0 {
+		return "no nodes yet"
+	}
+	_, running, done, failed := m.g.Counts()
+	s := fmt.Sprintf("%d/%d", done, len(m.g.Nodes))
+	if running > 0 {
+		s += fmt.Sprintf(" · %d running", running)
+	}
+	if failed > 0 {
+		s += fmt.Sprintf(" · %d failed", failed)
+	}
+	return s
+}
+
+// overlayAt draws box over base with its top-left corner at (x, y).
+func overlayAt(base, box string, x, y, w, h int) string {
+	lines := strings.Split(base, "\n")
+	for len(lines) < h {
+		lines = append(lines, "")
+	}
+	bl := strings.Split(box, "\n")
+	bw := 0
+	for _, l := range bl {
+		bw = max(bw, ansi.StringWidth(l))
+	}
+	for i, l := range bl {
+		if y+i >= len(lines) {
+			break
+		}
+		lines[y+i] = strings.Repeat(" ", x) + padRight(l, bw) + "\x1b[0m" + strings.Repeat(" ", max(w-x-bw, 0))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// sidebarOverlayBox is the sidebar as a rounded box for narrow screens.
+func (m workspaceModel) sidebarOverlayBox(mainH int) string {
+	bw := min(wsSidebarOverlayW, m.width-4)
+	bh := max(mainH, 5)
+	return wsBox("Nodes", bw, m.sidebarRows(bw-4, bh-2))
+}
+
+// sbMove moves the sidebar cursor one row: through the nodes in order, then
+// the other sessions. dir is -1 or 1.
+func (m workspaceModel) sbMove(dir int) workspaceModel {
+	sessions := m.otherSessions()
+	nodes := []*workspace.Node(nil)
+	if m.g != nil {
+		nodes = m.g.Nodes
+	}
+	idx := -1
+	for i, n := range nodes {
+		if n.ID == m.sel {
+			idx = i
+		}
+	}
+	switch {
+	case m.sbSess >= 0:
+		next := m.sbSess + dir
+		switch {
+		case next < 0 && len(nodes) > 0:
+			m.sbSess = -1
+			m.sel = nodes[len(nodes)-1].ID
+		case next < 0:
+		default:
+			m.sbSess = min(next, len(sessions)-1)
+		}
+	case dir > 0 && idx == len(nodes)-1 && len(sessions) > 0 && m.sbSessionsShown():
+		m.sbSess = 0
+	case len(nodes) > 0:
+		if idx < 0 {
+			idx = 0
+		} else {
+			idx = min(max(idx+dir, 0), len(nodes)-1)
+		}
+		m.sel = nodes[idx].ID
+	}
+	if m.sbSess < 0 && m.sel != "" && !m.showGraph {
+		m = m.feedReveal(m.sel)
+	}
+	return m
+}
+
+// sbSessionsShown reports whether the sessions block fits in the sidebar.
+func (m workspaceModel) sbSessionsShown() bool {
+	h := m.mainHeight()
+	if m.sidebarOverlay() {
+		h = max(h, 5) - 2
+	}
+	return h >= wsSidebarSessMinH
+}
