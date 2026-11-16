@@ -55,6 +55,8 @@ type Session struct {
 	Coordinator *bool `json:"coordinator,omitempty"`
 	// Reviews are the lead's batch reviews, oldest first, at most MaxReviews.
 	Reviews []Review `json:"reviews,omitempty"`
+	// InboxDismissed are the IDs of the inbox info items the user cleared with x.
+	InboxDismissed []string `json:"inbox_dismissed,omitempty"`
 }
 
 // DiffNote is a review note on one line of a node's diff. Side is "new" for an

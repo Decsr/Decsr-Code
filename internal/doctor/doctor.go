@@ -110,6 +110,17 @@ func Run(d Deps) []Result {
 	return rs
 }
 
+// BackendUsable reports whether at least one runner is usable: the required
+// "backend" check of Run, without the other checks.
+func BackendUsable(d Deps) bool {
+	for _, r := range checkRunners(d) {
+		if r.Name == "backend" {
+			return r.Status == OK
+		}
+	}
+	return false
+}
+
 // Failed reports whether any required check failed.
 func Failed(rs []Result) bool {
 	for _, r := range rs {

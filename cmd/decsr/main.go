@@ -86,6 +86,8 @@ func main() {
 		automationCmd(os.Args[2:])
 	case "doctor":
 		doctorCmd(os.Args[2:])
+	case "setup":
+		setupCmd(os.Args[2:])
 	case "connect":
 		connectCmd(os.Args[2:])
 	case "disconnect":
@@ -117,6 +119,7 @@ func usage() {
 	  automation run <name> [--tmux]      Run one automation now (--tmux: in a detached session, as cron does)
 	  automation install|uninstall [name] Add or remove the crontab lines of the automations
 	  doctor                              Check git, config, runners and optional tools
+	  setup                               Pick a runner, connect a key if needed, check the setup, then open the Workspace
 	  connect <deepseek|openai|openrouter|groq|custom> [--no-test]
 	                                      Save an API key (hidden input, or piped on stdin) and pick the roles that use it
 	  connect --list                      List saved providers (masked keys) and API keys set in the environment
@@ -271,6 +274,11 @@ func runCmdWith(args []string, wsOpts tui.WorkspaceOptions) {
 	if *reqPath == "" && !*dryRun && *ui != "plain" {
 		var result tui.StartupResult
 		_ = tui.SaveRecentProject(root) // so /project can come back to this project
+		if firstRunWanted(wsOpts, func() bool { return runnerUsable(root) }) {
+			if fr, frErr := tui.RunFirstRun(root, cfg, firstRunDeps(root)); frErr == nil {
+				cfg = fr.Cfg
+			}
+		}
 		for {
 			wsResult, err := tui.RunWorkspace(root, cfg, wsOpts)
 			wsOpts = tui.WorkspaceOptions{} // only the first Workspace opens on the session list

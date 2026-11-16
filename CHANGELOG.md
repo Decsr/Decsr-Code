@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Inbox and go-to palette in the Workspace. The sidebar shows `● 3 need you`
+  while nodes wait on a question, a block or a usage limit, a lead review waits
+  for `y`/`n`, a node failed or stalled for 5 minutes, or a plugin question is
+  open; `N` lists them with budget warnings and failed automation runs, `Enter`
+  goes to the item and `x` clears an info item (saved in the session). `Ctrl+K`
+  opens one search over inbox items, commands, nodes, sessions and projects
+  with fuzzy matching. See `doc/workspace.md`.
+- First-run setup: when no runner is usable at startup, `decsr` opens a
+  three-step screen to pick a runner, connect an API key if needed and see a
+  short doctor result before the Workspace. The choice becomes the global
+  default of all roles. `Esc` skips it; `decsr setup` opens it any time.
 - `ui.theme: auto | dark | light` selects the colour theme. `auto` asks the
   terminal for its background at startup and falls back to dark when it does
   not answer. The Workspace now works on light terminals. `decsr doctor` warns

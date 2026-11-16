@@ -94,6 +94,8 @@ activity feed with one card per node (`g` switches to the graph); see
 
 **Usage limits:** a node that hits a provider rate limit waits (`◷ waiting · resets 14:30`) instead of failing; at autonomy level 2 and 3 it retries after the reset, up to 3 times (see [`doc/workspace.md`](doc/workspace.md#usage-limits)).
 
+**Inbox and palette:** the sidebar shows `● 3 need you`; `N` lists what needs you (questions, limits, reviews, failures, stalls, plugin questions) and info (budget, failed automations), and `Ctrl+K` searches inbox items, commands, nodes, sessions and projects (see [`doc/workspace.md`](doc/workspace.md#inbox)).
+
 **Automations:** `.decsr/automations.yaml` defines scheduled, unattended runs (task or issue query, autonomy L2/L3, budget); `decsr automation install` writes the crontab lines and `decsr automation run <name> --tmux` starts one in a detached tmux session (see [`doc/automations.md`](doc/automations.md)).
 
 **Needs-you notifications:** when a split waits for roles, a node or Build &
@@ -310,6 +312,8 @@ curl -fsSL https://raw.githubusercontent.com/Decsr/Decsr-Code/main/scripts/insta
 Installs the latest release to `~/.local/bin` (no sudo) after verifying its checksum. Set `DECSR_VERSION=v0.6.0` to pin a release or `DECSR_INSTALL_DIR` to change the directory.
 
 Then run `decsr doctor` to check your setup: git, config, runners and API keys, plus optional tools such as `tmux` and `gh`. It prints a fix hint for every problem and exits with 1 if a required check fails.
+
+On the first start, when no runner is usable, `decsr` opens a short setup: pick a runner, connect an API key if it needs one, see a doctor result, then land in the Workspace. `Esc` skips it. Run `decsr setup` to open it again at any time.
 
 ### Option 2 — Homebrew (once the tap is published)
 

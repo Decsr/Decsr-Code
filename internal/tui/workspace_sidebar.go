@@ -186,7 +186,11 @@ func (m workspaceModel) sidebarRows(w, h int) []string {
 	if title == "" {
 		title = "new session"
 	}
-	out := []string{" " + lipgloss.NewStyle().Foreground(titleCol).Bold(true).Render(truncateOneLine(title, w-2)), " " + dim.Render(truncateOneLine(m.sidebarProgress(), w-2))}
+	var out []string
+	if line := m.inboxSidebarLine(); line != "" {
+		out = append(out, line)
+	}
+	out = append(out, " "+lipgloss.NewStyle().Foreground(titleCol).Bold(true).Render(truncateOneLine(title, w-2)), " "+dim.Render(truncateOneLine(m.sidebarProgress(), w-2)))
 
 	sessions := m.otherSessions()
 	block := 0

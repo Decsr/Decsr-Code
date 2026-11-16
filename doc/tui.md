@@ -268,6 +268,23 @@ switches to it, and `Enter` on a session opens the Workspace on that session.
 `r` resumes the interrupted task, `?` opens help. Below 100 columns the two
 columns stack.
 
+## First-run setup
+
+`decsr` opens a three-step setup before the Workspace when no runner is usable
+(the same rule as `decsr doctor`'s required backend check). It never opens
+inside an automation. `decsr setup` opens it any time.
+
+1. Pick a runner. Each row shows what was found: a CLI on PATH, an API key from
+   the environment or saved, a local server running. A CLI that is not installed
+   shows an install hint and cannot be chosen.
+2. An API runner without a key asks for it with the connect card, tests it and
+   saves it. Other runners skip this step.
+3. The choice is saved as the global default of all roles in
+   `~/.decsr/config.yaml`, replacing the models set for another runner, and a
+   compact doctor result is shown. `Enter` opens the Workspace.
+
+`Esc` skips the setup for this run; on the key step it goes back.
+
 ## Setup screens
 
 **Global Settings** chooses the provider, model and reasoning effort for all

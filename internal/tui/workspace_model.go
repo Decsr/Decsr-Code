@@ -385,6 +385,8 @@ const (
 	wsOverlayInfo
 	wsOverlaySkills
 	wsOverlayConnect
+	wsOverlayInbox
+	wsOverlayPalette
 )
 
 // wsConfirm is a pending y/n question. kind: quit | menu | clear | delsession
@@ -663,6 +665,13 @@ type workspaceModel struct {
 	infoText []string
 	infoTop  int
 
+	// inbox (N) and go-to palette (Ctrl+K)
+	inboxIdx    int
+	inboxAutos  []inboxAutoRun // last automation runs, read when the inbox or palette opens
+	palIn       textinput.Model
+	palIdx      int
+	palProjects []wsProject
+
 	// skill picker (K)
 	skillNode  string
 	skillIdx   int
@@ -715,6 +724,7 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...Work
 		formName:  newField("snake_case_name"),
 		formDesc:  newField("what this role does, in one line"),
 		textIn:    newField(""),
+		palIn:     newField("search"),
 		outVP:     viewport.New(78, 20),
 
 		sbSess:       -1,
@@ -950,6 +960,9 @@ func (m workspaceModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.showHelp = false
 		}
 		return m, nil
+	}
+	if k == "ctrl+k" && m.overlay == wsOverlayNone && m.screen == wsScreenMain && !m.splitting {
+		return m.openPalette(), nil
 	}
 	if m.overlay != wsOverlayNone {
 		return m.overlayKey(msg)
@@ -1649,6 +1662,8 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		m.showHelp = true
 		return m, nil
+	case "N":
+		return m.openInbox(), nil
 	case "y", "n":
 		if m.pendingReview() >= 0 && m.focus != wsFocusPrompt {
 			return m.reviewResolve(k == "y")
@@ -2020,6 +2035,12 @@ func (m workspaceModel) overlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case wsOverlayConnect:
 		return m.connectKey(msg)
 
+	case wsOverlayInbox:
+		return m.inboxKey(k)
+
+	case wsOverlayPalette:
+		return m.paletteKey(msg)
+
 	case wsOverlayInfo:
 		switch k {
 		case "esc", "q", "enter":
@@ -2302,6 +2323,10 @@ func (m workspaceModel) overlayBox() string {
 		return m.conn.box(w)
 	case wsOverlaySessions, wsOverlayProjects, wsOverlayProfiles, wsOverlayText, wsOverlayInfo:
 		return m.listBox()
+	case wsOverlayInbox:
+		return m.inboxBox()
+	case wsOverlayPalette:
+		return m.paletteBox()
 	}
 	return ""
 }
@@ -2591,6 +2616,9 @@ func (m workspaceModel) graphHints() []keyHint {
 	default:
 		hs = append(hs, keyHint{"g", "activity"}, keyHint{"←↑↓→", "move"}, keyHint{"Tab", "prompt"})
 	}
+	if len(m.inboxNeeds()) > 0 {
+		hs = append(hs, keyHint{"N", "inbox"})
+	}
 	return append(hs, keyHint{"?", "help"})
 }
 
@@ -2613,7 +2641,7 @@ func (m workspaceModel) hintLine() string {
 		if m.sidebarVisible() {
 			next = "sidebar"
 		}
-		hs = []keyHint{{"Enter", "send"}, {"/", "commands"}, {"Tab", next}}
+		hs = []keyHint{{"Enter", "send"}, {"/", "commands"}, {"Ctrl+K", "go to"}, {"Tab", next}}
 		if m.suggestion() != "" {
 			hs = append([]keyHint{{"Enter", "send"}, {"→", "accept suggestion"}}, hs[1:]...)
 		}

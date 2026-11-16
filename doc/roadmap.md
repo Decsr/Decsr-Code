@@ -246,11 +246,11 @@ first start easy.
 
 **Done when**
 
-- [ ] The sidebar count and the `N` list show all listed item types and clear
+- [x] The sidebar count and the `N` list show all listed item types and clear
       as specified.
-- [ ] Ctrl+K finds items of every kind.
-- [ ] The first-run setup opens only when no runner is usable.
-- [ ] `decsr setup` opens the first-run setup.
+- [x] Ctrl+K finds items of every kind.
+- [x] The first-run setup opens only when no runner is usable.
+- [x] `decsr setup` opens the first-run setup.
 
 **Builds on.** Waiting nodes, reviews, limits, automations, notifications,
 `decsr connect`, `decsr doctor`.

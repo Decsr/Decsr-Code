@@ -237,6 +237,7 @@ the area that has focus.
 | `Esc` | Hide the suggestion; close the command list; otherwise go to the main pane (when it has nodes) |
 | `PgUp` / `PgDn` | Scroll the activity feed (the conversation in Graph mode) |
 | `?` | Help (only when the prompt is empty) |
+| `Ctrl+K` | Open the go-to palette (see [Palette](#palette)); works in every focus area |
 | `Ctrl+C` | Quit (press twice) |
 
 **Suggestions.** An empty prompt shows a dim italic suggestion in place of
@@ -279,6 +280,7 @@ node keys work with focus on the sidebar or on the main pane, in either mode.
 | `s` | Stop the selected node |
 | `S` | Stop all running nodes |
 | `f` | Add a fix node after Build & test has failed |
+| `N` | Open the inbox: what needs you (see [Inbox](#inbox)) |
 | `/` or `c` | Go to the prompt (`/` also types the slash) |
 | `Tab` / `Shift+Tab` | Next / previous focus area (see above) |
 | `?` | Help |
@@ -300,6 +302,87 @@ The old `n` key (new task) is gone; use `/clear`.
 
 Quitting while nodes run asks for confirmation, then stops them and kills the
 agent processes.
+
+## Inbox
+
+The first line of the sidebar shows `● 3 need you` in the warning colour while
+something needs you, and nothing when it does not. `N` (graph, activity or
+sidebar focus; in the prompt `N` is text) opens the inbox, a list of what needs
+you and, under `Info`, what is only worth a look:
+
+```
+╭─ Needs you · 4 ──────────────────────────────────────────╮
+│ ▌? T3 asks     Which JSON field name for the commit?  2m │
+│  ◷ T5 limit    claude · resets 14:30           retry 1/3 │
+│  ◆ Lead review 3 changes waiting for y / n            5m │
+│  ! T2 failed   go test: expected key "commit"        12m │
+│                                                          │
+│  Info                                                    │
+│  · Budget      $4.10 of $5.00 (82%)                      │
+│  · deps-bump   automation failed: T1 failed           1h │
+╰──────────────────────────────────────────────────────────╯
+```
+
+Needs you (the count in the sidebar):
+
+- a node that asks a question or is blocked (`T3 asks`, `T3 blocked`)
+- a node that waits for a usage limit, with the reset time and `retry n/3`
+- a lead review that waits for `y` or `n`
+- a failed node (not one you stopped)
+- a running node with no activity for 5 minutes or more
+- a plugin question the lead asked and nobody answered
+
+Info (not counted):
+
+- the budget, once the spending reaches the warn percent
+- the last run of each automation (from `.decsr/automations/<name>.log`) when
+  it failed, needs you, timed out or hit the budget
+
+Items that need you are not stored: the list is derived from the session each
+time it is drawn, so an item goes away by itself when you answer the node,
+retry it, apply the review or answer the plugin question. An info item stays
+until you clear it. Clearing is saved in the session (`inbox_dismissed`) under
+an ID that contains the value, so a new budget level (the percent in steps of
+10) or a new automation run shows again.
+
+| Key | Action |
+|---|---|
+| `Up` / `Down`, `k` / `j` | Move |
+| `Enter` | Go to the item: a node is selected and the feed scrolls to it; a review is focused in the feed; a plugin question opens; a budget item opens `/budget`; an automation opens the last 20 lines of its log |
+| `x` | Clear the selected info item |
+| `Esc`, `N` | Close |
+
+The notifications you already get (`needs you`, failed) are unchanged; the inbox
+only adds the list.
+
+## Palette
+
+`Ctrl+K` opens "Go to" from any focus area, including the prompt (there it
+replaces the terminal's delete-to-end-of-line; the text in the prompt is not
+touched). Type to search; the groups always come in this order and a group
+without a match is hidden (`No matches` when all are empty):
+
+1. Needs you: the inbox items (a search also finds the info ones)
+2. Commands: every slash command, custom and plugin ones included, with its
+   description
+3. Nodes: ID, title and status
+4. Sessions: the saved sessions of this project
+5. Projects: the recent projects that still exist
+
+An empty query lists what needs you and the first 5 rows of each other group.
+Matching is fuzzy: the letters of the query must appear in order, ignoring
+case. Contiguous matches, prefixes and word starts rank higher. A description
+or a path matches only when it contains the query.
+
+| Key | Action |
+|---|---|
+| `Up` / `Down` | Move |
+| `Enter` | Inbox item: the same as in the inbox. Command: runs now only if it is on a fixed list of read-only ones (`/help`, `/status`, `/cost`, `/budget`, `/roles`, `/resume`, `/project`, `/profile`); every other command, such as `/pr`, `/merge`, `/clear`, `/compact`, `/plugin`, `/review` or a custom one, is put into the prompt as `/cmd ` for you to complete and send. Node: select it. Session: load it, as `/resume` does. Project: switch to it, as `/project` does |
+| `Esc`, `Ctrl+K` | Close |
+
+Loading a session and switching project are refused while nodes run
+(`stop the running nodes first`), as with `/resume` and `/project`. The `/`
+and `@` lists in the prompt are unchanged.
 
 ## Commands
 
