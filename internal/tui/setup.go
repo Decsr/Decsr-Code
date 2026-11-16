@@ -2323,7 +2323,11 @@ func (m SetupModel) viewAPIModels(kind providerKind, active, inactive, dim lipgl
 		return []string{dim.Render("  loading models…")}
 	}
 	if len(m.apiModels[key]) == 0 {
-		return []string{dim.Render("  no model list — type a model id (or add an API key with k in the provider row):"), "  " + m.typed.View()}
+		hint := "  no model list — the provider did not return models; type a model id:"
+		if runner.KeySource(m.entry(kind).credName(), "") == "" {
+			hint = "  no model list — add an API key with k in the provider row, or type a model id:"
+		}
+		return []string{dim.Render(hint), "  " + m.typed.View()}
 	}
 	return renderWindowedList(m.apiModels[key], m.modelIdx, m.section == sectionModel, active, inactive, dim)
 }

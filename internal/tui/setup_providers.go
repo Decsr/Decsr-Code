@@ -396,7 +396,11 @@ func (m SetupModel) indexOfKey(key string) int {
 func (m SetupModel) urlEditBox() string {
 	ue := m.urlEdit
 	dim := lipgloss.NewStyle().Foreground(colMuted)
-	body := []string{dim.Render("Base URL (https; http only for localhost) · empty resets"), ue.in.View(), "", dim.Render("Enter save · Esc cancel")}
+	emptyHint := "empty resets to the default"
+	if ue.entry.custom() {
+		emptyHint = "required"
+	}
+	body := []string{dim.Render("Base URL (https; http only for localhost) · " + emptyHint), ue.in.View(), "", dim.Render("Enter save · Esc cancel")}
 	if ue.err != "" {
 		body = append(body, "", lipgloss.NewStyle().Foreground(colFail).Render("! "+ue.err))
 	}
