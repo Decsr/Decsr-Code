@@ -20,6 +20,7 @@ type wsPRState struct {
 	working   bool // a /pr command or a poll is in flight
 	gen       int
 	passedSHA string // head commit whose passing checks were announced
+	autoFix   bool   // level 3 started the loop: its fix nodes run without asking
 }
 
 // wsPRMsg is every asynchronous result of the pull request loop.
@@ -110,6 +111,7 @@ func (m workspaceModel) onPRMsg(msg wsPRMsg) (tea.Model, tea.Cmd) {
 	case "ensured":
 		m.pr.working = false
 		if msg.err != nil {
+			m.pr.autoFix = false
 			m.say("error", oneLine(msg.err.Error()))
 			return m, nil
 		}
@@ -126,6 +128,7 @@ func (m workspaceModel) onPRMsg(msg wsPRMsg) (tea.Model, tea.Cmd) {
 		}
 		m.pr.watching = true
 		m.pr.gen++
+		m.autoPRNote(st)
 		m.say("system", fmt.Sprintf("Watching the pull request every %d s: failing CI and review comments become fix nodes. /pr stop ends it.", int(m.prClient().Cfg.PollInterval()/time.Second)))
 		return m, m.prPoll()
 	case "tick":
@@ -229,7 +232,7 @@ func (m workspaceModel) addPRFix(f workspace.FixRequest, why string) (workspaceM
 	switch {
 	case role == "":
 		m.say("system", fmt.Sprintf("%s Added %s; assign a role to it (a), then press r to run.", why, id))
-	case m.cfg.Workspace.PRAutoFix:
+	case m.prAutoFix():
 		if err := m.eng.Run(m.runCtx, id); err != nil {
 			m.say("system", fmt.Sprintf("%s Added %s; it could not start (%s): press r to run.", why, id, oneLine(err.Error())))
 			return m, nil

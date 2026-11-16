@@ -75,6 +75,13 @@ type WorkspaceConfig struct {
 	// budget that raises a warning; 0 = 80.
 	BudgetUSD     float64 `yaml:"budget_usd,omitempty"`
 	BudgetWarnPct int     `yaml:"budget_warn_pct,omitempty"`
+
+	// Autonomy is how much the Workspace does on its own: 1 manual (also 0 or
+	// empty), 2 assisted, 3 unattended (needs a budget and worktree isolation).
+	// MaxAutoFixes is the number of fix nodes level 2 and 3 add after a failed
+	// Build & test per session; 0 = 2.
+	Autonomy     int `yaml:"autonomy,omitempty"`
+	MaxAutoFixes int `yaml:"max_auto_fixes,omitempty"`
 }
 
 // UIConfig holds presentation settings.
@@ -555,6 +562,12 @@ func merge(dst *Config, src Config) {
 	}
 	if src.Workspace.BudgetWarnPct > 0 {
 		dst.Workspace.BudgetWarnPct = src.Workspace.BudgetWarnPct
+	}
+	if src.Workspace.Autonomy > 0 {
+		dst.Workspace.Autonomy = src.Workspace.Autonomy
+	}
+	if src.Workspace.MaxAutoFixes > 0 {
+		dst.Workspace.MaxAutoFixes = src.Workspace.MaxAutoFixes
 	}
 	if len(src.Pricing) > 0 {
 		if dst.Pricing == nil {

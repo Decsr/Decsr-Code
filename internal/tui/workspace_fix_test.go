@@ -453,16 +453,17 @@ func TestWorkspacePaletteScrollsToLastCommand(t *testing.T) {
 	h := newWSHarness(t)
 	h.size(80, 24)
 	h.key("/")
-	h.want("↓ 14 more")
-	h.wantNot("↑ 1")
 	cmds := h.m.cmdMatches("/")
+	more := fmt.Sprintf("%d more", len(cmds)-3) // three rows are visible
+	h.want("↓ " + more)
+	h.wantNot("↑ 1")
 	last := cmds[len(cmds)-1].name
 	h.wantNot(last + " ")
 	for range len(cmds) - 1 {
 		h.key("down")
 	}
 	h.want("▸ " + last)
-	h.want("↑ 14 more")
+	h.want("↑ " + more)
 	h.wantNot("more\n")
 	h.key("up")
 	h.want("▸ " + cmds[len(cmds)-2].name)

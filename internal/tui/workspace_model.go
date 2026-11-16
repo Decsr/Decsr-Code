@@ -529,6 +529,8 @@ type workspaceModel struct {
 	iso          *workspace.Isolator // worktree isolation of this session; nil = shared checkout
 	isoAnnounced bool                // the isolation line was shown
 	pr           wsPRState           // pull request loop (/pr)
+	autoPaused   bool                // S paused the automation of /autonomy
+	autoWarned   bool                // the lowered level 3 was announced
 
 	// plugin install started from the dialog
 	installing    string // plugin being installed; "" for none
@@ -1179,8 +1181,12 @@ func (m workspaceModel) onSplitDone(msg wsSplitDoneMsg) (tea.Model, tea.Cmd) {
 	for _, w := range msg.g.SplitWarnings {
 		m.say("system", workspace.Sanitize(w))
 	}
-	m.notifySplitDone()
-	return m.askPlugins(), cmd
+	if m.autoActive() == autoManual {
+		m.notifySplitDone()
+	}
+	m = m.askPlugins()
+	m, autoCmd := m.autoAfterGraph()
+	return m, tea.Batch(cmd, autoCmd)
 }
 
 // restoreTask puts the task being split back into the input for editing.
@@ -1312,6 +1318,7 @@ func (m workspaceModel) resetSession(s *workspace.Session) workspaceModel {
 	m.sel = ""
 	m.sess = newWsSess(m.root, s)
 	m.iso, m.isoAnnounced = nil, false
+	m.autoPaused, m.autoWarned = false, false
 	m.prStop()
 	m.outputs = map[string][]string{}
 	m.partial = map[string]string{}
@@ -1376,7 +1383,8 @@ func (m workspaceModel) onEvent(msg wsEventMsg) (tea.Model, tea.Cmd) {
 	if m.screen == wsScreenOutput {
 		m.refreshOutput()
 	}
-	return m, tea.Batch(wsWaitEvent(m.eng), m.startTick(), m.prAfterEvent(ev))
+	m, autoCmd := m.autoAfterEvent(ev)
+	return m, tea.Batch(wsWaitEvent(m.eng), m.startTick(), m.prAfterEvent(ev), autoCmd)
 }
 
 // wsMaxOutputBytes caps the stored output of one node.
@@ -1585,6 +1593,7 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if n == nil {
 			return m, nil
 		}
+		m.autoPaused = false
 		if m.installing != "" {
 			m.setNotice("Wait for the plugin install to finish, then run the node", true)
 			return m, nil
@@ -1597,6 +1606,7 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setNotice("Started "+n.ID, false)
 		return m, m.startTick()
 	case "R":
+		m.autoPaused = false
 		return m.runAll()
 	case "s":
 		if n != nil && n.Status == workspace.StatusRunning {
@@ -1607,6 +1617,7 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "S":
 		eng := m.eng
+		m.autoPause()
 		m.setNotice("Stopping all nodes…", false)
 		return m, func() tea.Msg { eng.StopAll(); return wsStoppedMsg{} }
 	case "f":

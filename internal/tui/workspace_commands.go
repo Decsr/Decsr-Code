@@ -44,6 +44,7 @@ func (m workspaceModel) commandList() []wsCommand {
 		{name: "/merge", desc: "merge this session's worktree branch into your branch", run: workspaceModel.cmdMerge},
 		{name: "/pr", args: "[watch|stop]", desc: "push the session branch and open a pull request; watch fixes CI and review comments", run: workspaceModel.cmdPR},
 		{name: "/issue", args: "<number|URL|bead-id> [--force]", desc: "start a task from a GitHub issue or a bead", run: workspaceModel.cmdIssue},
+		{name: "/import", args: "speckit [--phase N] [path]", desc: "add the open tasks of a Spec Kit tasks.md to the graph", run: workspaceModel.cmdImport},
 		{name: "/resume", desc: "continue a saved session of this project", run: workspaceModel.cmdResume},
 		{name: "/project", desc: "switch to another project", run: workspaceModel.cmdProject},
 		{name: "/profile", desc: "save or apply a set of role settings", run: workspaceModel.cmdProfile},
@@ -56,6 +57,7 @@ func (m workspaceModel) commandList() []wsCommand {
 		{name: "/plugin", aliases: []string{"/plugins"}, args: "[available|install <name>|enable|disable <name>|reload]", desc: "list plugins, see or install catalog plugins, enable, disable or reload", run: workspaceModel.cmdPlugin},
 		{name: "/status", desc: "project, session, roles and limits", run: workspaceModel.cmdStatus},
 		{name: "/cost", desc: "tokens per node and per role", run: workspaceModel.cmdCost},
+		{name: "/autonomy", args: "[1|2|3]", desc: "how much runs by itself: 1 manual, 2 assisted, 3 unattended", run: workspaceModel.cmdAutonomy},
 		{name: "/budget", args: "[amount|off]", desc: "spending per runner; set this session's budget", run: workspaceModel.cmdBudget},
 		{name: "/export", desc: "write this session to a markdown file", run: workspaceModel.cmdExport},
 		{name: "/config", aliases: []string{"/menu"}, desc: "settings, project setup, classic pipeline", run: func(m workspaceModel, _ string) (tea.Model, tea.Cmd) {

@@ -800,3 +800,19 @@ func TestMerge_UITmux(t *testing.T) {
 		t.Error("empty layer cleared tmux")
 	}
 }
+
+func TestMerge_WorkspaceAutonomy(t *testing.T) {
+	var dst Config
+	merge(&dst, Config{Workspace: WorkspaceConfig{Autonomy: 2, MaxAutoFixes: 4}})
+	if dst.Workspace.Autonomy != 2 || dst.Workspace.MaxAutoFixes != 4 {
+		t.Fatalf("autonomy %d, max auto fixes %d", dst.Workspace.Autonomy, dst.Workspace.MaxAutoFixes)
+	}
+	merge(&dst, Config{})
+	if dst.Workspace.Autonomy != 2 || dst.Workspace.MaxAutoFixes != 4 {
+		t.Error("an empty layer reset the autonomy")
+	}
+	merge(&dst, Config{Workspace: WorkspaceConfig{Autonomy: 3}})
+	if dst.Workspace.Autonomy != 3 || dst.Workspace.MaxAutoFixes != 4 {
+		t.Errorf("autonomy %d, max auto fixes %d", dst.Workspace.Autonomy, dst.Workspace.MaxAutoFixes)
+	}
+}

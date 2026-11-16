@@ -49,6 +49,8 @@ type Session struct {
 	BudgetUSD  float64    `json:"budget_usd,omitempty"`    // /budget override of workspace.budget_usd; 0 = use the config
 	Issue      *IssueRef  `json:"issue,omitempty"`         // issue the session was started from
 	Notes      []DiffNote `json:"notes,omitempty"`         // review notes on node diffs, not sent yet
+	Autonomy   int        `json:"autonomy,omitempty"`      // /autonomy override of workspace.autonomy; 0 = use the config
+	AutoFixes  int        `json:"auto_fixes,omitempty"`    // fix nodes added automatically after a failed Build & test
 }
 
 // DiffNote is a review note on one line of a node's diff. Side is "new" for an

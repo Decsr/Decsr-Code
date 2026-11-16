@@ -289,6 +289,7 @@ prompt and lands there.
 | `/merge` | Merge the session's branch into your current branch (see [Isolation](#isolation)) |
 | `/pr` | Push the session branch and open (or update) a pull request; `/pr watch` also turns failing CI and review comments into fix nodes, `/pr stop` ends it (see [Pull requests](#pull-requests)) |
 | `/issue <N\|URL\|bead-id> [--force]` | Fetch a GitHub issue or a bead and send it to the lead as the task (see [Start from an issue](#start-from-an-issue)) |
+| `/import speckit [--phase N] [path]` | Add the open tasks of a Spec Kit `tasks.md` to the graph (see [Import from Spec Kit](#import-from-spec-kit)) |
 | `/resume` | Pick a saved session of this project |
 | `/project` | Switch to another project (see [Switching project](#switching-project)) |
 | `/profile` | Save or apply a profile of role settings (see [Profiles](#profiles)) |
@@ -827,6 +828,57 @@ The pull request of that session links the issue: `Closes #42` on its own line
 (`Closes owner/repo#42` for another repository), or `Refs <bead-id>` for a bead.
 DECSR does not change the bead's status.
 
+## Import from Spec Kit
+
+`/import speckit [--phase N] [path]` turns the task list of a
+[Spec Kit](https://github.com/github/spec-kit) feature into nodes, without a
+lead split:
+
+```
+/import speckit                     # the newest specs/*/tasks.md
+/import speckit specs/003-login     # a feature directory or a tasks.md
+/import speckit --phase 2           # only "Phase 2"; dependencies start fresh
+```
+
+Without a path the most recently modified `specs/*/tasks.md` is used and the
+chat says which. The command is refused while nodes run.
+
+The parser reads what `/speckit.tasks` writes: `## Phase N: Name` headings and
+lines like `- [ ] T012 [P] [US1] Create User model in src/models/user.py`.
+Lines in `[x]` are skipped and counted, checkpoint lines, notes and fenced
+examples are ignored. Each open task becomes a work node:
+
+- Title: `T012 Create User model in src/models/user.py` (the Spec Kit ID first,
+  cut to about 80 characters). The node ID stays `T<n>` like any other node.
+- Description: the full task line, the phase, and
+  `Spec: specs/<feature>/spec.md, plan: specs/<feature>/plan.md` so the worker
+  reads them.
+- The graph title is the first heading of `spec.md` (or the directory name).
+  Nodes are added to the current session, or start the graph when it is empty.
+  The Build & test node is added or updated as after a lead split.
+
+Dependencies follow Spec Kit's implement rules (phase by phase, `[P]` tasks run
+together, sequential tasks in order):
+
+1. A task depends on every imported task of the previous imported phase.
+2. Inside a phase a task without `[P]` waits for the task before it and for the
+   `[P]` tasks directly before it, so a service waits for its models.
+3. A `[P]` task depends on the previous phase only.
+4. `(depends on T012, T013)` in a task adds those tasks when they are imported.
+
+With `--phase N` only that phase is imported, so rule 1 has nothing to refer to.
+
+Roles are suggestions, shown as `-> role`; press `A` to accept them, as after a
+lead split. A task that mentions tests (`test`, `_test.go`, `test_*.py`,
+`*.spec.ts`) suggests `qa` when that role exists, everything else `coder`.
+
+An import follows the autonomy level like a lead split: at level 2 and 3 the
+suggested roles that are defined are accepted and the run starts.
+
+Limits: a list of more than 40 tasks is imported anyway, with a hint to import
+it phase by phase. Checkbox state is only read; finished nodes are not ticked
+back in `tasks.md`.
+
 ## Pull requests
 
 `/pr` publishes the session as a GitHub pull request, and `/pr watch` keeps it
@@ -905,6 +957,42 @@ runs, it finishes with a warning instead of passing silently. If it fails, selec
 fix node (`F1`, `F2`, ...; a number is never reused in a session, not even after
 `/compact`) that receives the failure output, suggested role
 `coder_fixer`. Assign it, run it, and Build & test is queued again behind it.
+
+## Autonomy levels
+
+By default nothing runs until you press `r` or `R`. `workspace.autonomy` (or
+`/autonomy` for one session) lets DECSR do more by itself, one step at a time.
+Raise the level only when you trust Build & test to catch a bad result.
+
+| Level | Name | What runs by itself |
+|---|---|---|
+| 1 | manual (default) | Nothing. You accept roles, run nodes, `/merge` and `/pr`. |
+| 2 | assisted | After a split (also from `/issue` and `/import speckit`): accepts every suggested role that is defined, as `A` does, and runs everything, as `R` does. Nodes whose suggested role is not defined stay unassigned and you get a "needs you" note. When Build & test fails it adds one fix node, as `f` does, and runs it; Build & test then runs again behind it. At most `workspace.max_auto_fixes` (default 2) per session; after that it sends a failure note and stops. |
+| 3 | unattended | Level 2, and when Build & test passes it pushes the branch, opens or updates the pull request (`/pr`) and starts `/pr watch` with the fix nodes of CI and review comments running without asking, for this session only (the config `pr_auto_fix` is not changed). |
+
+```yaml
+workspace:
+  autonomy: 2        # 1 | 2 | 3; 0 or empty = 1
+  max_auto_fixes: 2  # automatic fix nodes per session after a failed Build & test
+```
+
+`/autonomy` shows the level and what it does; `/autonomy 2` sets it for the
+session (saved with the session, over the config value). The prompt box shows
+`L2 assisted` or `L3 unattended` above level 1. Every automatic action adds a
+dim line to the conversation that starts with `auto ›`, for example
+`auto › accepted 4 roles and started the run` or
+`auto › Build & test failed, added F1 (1/2)`.
+
+Safety rules:
+
+- Automation never runs `/merge` and never merges the pull request.
+- Level 3 needs a budget (`workspace.budget_usd` above 0, or `/budget`) and
+  worktree isolation. `/autonomy 3` without them is refused and sets level 2.
+  A configured level 3 without them is announced once and behaves as level 2.
+- A reached budget stops automation at every level: no new fix nodes and no
+  push. DECSR says so and sends a note.
+- `S` (stop all) pauses automation until you run a node (`r`, `R`) or set
+  `/autonomy` again. The prompt box shows `auto paused` meanwhile.
 
 ## Notifications
 

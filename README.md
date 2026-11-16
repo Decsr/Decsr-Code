@@ -74,9 +74,13 @@ activity feed with one card per node (`g` switches to the graph); see
 
 **Start from an issue:** `/issue <N|URL|bead-id>` (or `decsr issue <ref>`) sends a GitHub issue or a bead to the lead as the task; the pull request then says `Closes #N` (see [`doc/workspace.md`](doc/workspace.md#start-from-an-issue)).
 
+**Import from Spec Kit:** `/import speckit [--phase N] [path]` adds the open tasks of a Spec Kit `tasks.md` to the graph with phase and `[P]` dependencies (see [`doc/workspace.md`](doc/workspace.md#import-from-spec-kit)).
+
 **Diff and review notes:** `d` on a node shows what it changed (`D` the whole session); `c` puts a note on a line and `S` sends the notes to the agent as a new node (see [`doc/workspace.md`](doc/workspace.md#diff-and-review-notes)).
 
 **Cost and budget:** add `pricing:` to the config and set `workspace.budget_usd`; the Workspace shows cost in a bottom bar, warns at 80% and stops starting nodes at the budget; `/budget` shows the spending (see [`doc/workspace.md`](doc/workspace.md#cost-and-budget)).
+
+**Autonomy levels:** `workspace.autonomy` or `/autonomy 1|2|3` lets the Workspace accept roles, run, add fix nodes after a failed Build & test (level 2) and open and watch the pull request (level 3, needs a budget); it never merges (see [`doc/workspace.md`](doc/workspace.md#autonomy-levels)).
 
 **Pull requests:** `/pr` pushes the session branch and opens a pull request with `gh`; `/pr watch` turns failing CI and review comments into fix nodes (see [`doc/workspace.md`](doc/workspace.md#pull-requests)).
 

@@ -394,6 +394,9 @@ func (m workspaceModel) promptChips() string {
 	case m.eng != nil || c.Workspace.Isolation == workspace.IsolationShared:
 		chips = append(chips, "shared")
 	}
+	if chip := m.autoChip(); chip != "" {
+		chips = append(chips, chip)
+	}
 	pm := c.Agents["pm"]
 	model := shortModel(pm.Runner, effectiveModel(c, pm))
 	if model == "" {

@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Autonomy levels in the Workspace: `workspace.autonomy` (1 manual, 2 assisted,
+  3 unattended) and `/autonomy` accept roles and run after a split, add up to
+  `workspace.max_auto_fixes` fix nodes after a failed Build & test and, at level
+  3 (needs a budget and worktree isolation), open and watch the pull request.
+  It never merges, and `S` pauses it.
+- `/import speckit [--phase N] [path]` adds the open tasks of a Spec Kit
+  `tasks.md` to the Workspace graph, with phase and `[P]` dependencies and
+  suggested roles.
 - Diff view with line notes in the Workspace: `d` opens the diff of a node
   (its commit, or the live worktree while it runs), `D` the diff of the whole
   session. Put a note on a line with `c` and press `S` to send the notes as one
