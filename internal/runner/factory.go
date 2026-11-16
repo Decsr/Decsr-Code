@@ -40,24 +40,11 @@ func New(cfg config.AgentConfig, skillLoader *skills.Loader, promptLanguage stri
 	case "lmstudio":
 		base = NewLMStudioRunner(cfg.Model)
 
-	case "openai":
-		base = &OpenAIRunner{Provider: "openai", Model: cfg.Model, BaseURL: cfg.BaseURL, APIKeyEnv: cfg.APIKeyEnv}
-
-	case "deepseek":
-		d := &OpenAIRunner{Provider: "deepseek", Model: cfg.Model, BaseURL: cfg.BaseURL, APIKeyEnv: cfg.APIKeyEnv}
-		if d.BaseURL == "" {
-			d.BaseURL = deepSeekBaseURL
-		}
-		if d.APIKeyEnv == "" {
-			d.APIKeyEnv = deepSeekKeyEnv
-		}
-		if d.Model == "" {
-			d.Model = deepSeekModel
-		}
-		base = d
+	case "openai", "deepseek", "openrouter", "groq":
+		base = newPresetRunner(cfg)
 
 	default:
-		return nil, fmt.Errorf("runner: unknown runner %q (supported: opencode, claude, ollama, mlx, codex, copilot, lmstudio, openai, deepseek)", cfg.Runner)
+		return nil, fmt.Errorf("runner: unknown runner %q (supported: opencode, claude, ollama, mlx, codex, copilot, lmstudio, openai, deepseek, openrouter, groq)", cfg.Runner)
 	}
 
 	if skillLoader != nil {
@@ -117,4 +104,26 @@ func contains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// newPresetRunner builds the runner for a preset name. base_url, api_key_env
+// and model from the config override the preset; provider names a saved custom
+// provider (runner: openai) whose base URL is used when base_url is empty.
+func newPresetRunner(cfg config.AgentConfig) *OpenAIRunner {
+	p, _ := PresetByName(cfg.Runner)
+	r := &OpenAIRunner{Provider: cfg.Runner, Model: cfg.Model, BaseURL: cfg.BaseURL, APIKeyEnv: cfg.APIKeyEnv, CredName: cfg.Provider}
+	if cfg.Provider != "" && !IsPreset(cfg.Provider) {
+		// A saved custom provider: its own base URL, and no preset defaults.
+		return r
+	}
+	if r.BaseURL == "" {
+		r.BaseURL = p.BaseURL
+	}
+	if r.APIKeyEnv == "" {
+		r.APIKeyEnv = p.KeyEnv
+	}
+	if r.Model == "" {
+		r.Model = p.DefaultModel
+	}
+	return r
 }

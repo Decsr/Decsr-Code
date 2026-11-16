@@ -15,6 +15,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/lang"
 	"github.com/Decsr/Decsr-Code/internal/plugins"
+	"github.com/Decsr/Decsr-Code/internal/runner"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -54,6 +55,7 @@ func (m workspaceModel) commandList() []wsCommand {
 			m.pickNode = ""
 			return m, nil
 		}},
+		{name: "/connect", args: "[provider]", desc: "save an API key for DeepSeek, OpenAI, OpenRouter, Groq or a custom provider", run: workspaceModel.cmdConnect},
 		{name: "/plugin", aliases: []string{"/plugins"}, args: "[available|install <name>|enable|disable <name>|reload]", desc: "list plugins, see or install catalog plugins, enable, disable or reload", run: workspaceModel.cmdPlugin},
 		{name: "/status", desc: "project, session, roles and limits", run: workspaceModel.cmdStatus},
 		{name: "/cost", desc: "tokens per node and per role", run: workspaceModel.cmdCost},
@@ -1041,4 +1043,66 @@ func (m workspaceModel) pluginWarnings() []string {
 		out = append(out, "! "+workspace.Sanitize(w))
 	}
 	return out
+}
+
+// ── /connect ─────────────────────────────────────────────────────────────────
+
+func (m workspaceModel) cmdConnect(args string) (tea.Model, tea.Cmd) {
+	start := strings.ToLower(strings.TrimSpace(args))
+	if start != "" && start != "custom" && !runner.IsPreset(start) {
+		known := false
+		for _, o := range connectOptions() {
+			known = known || o.name == start
+		}
+		if !known {
+			m.say("error", fmt.Sprintf("unknown provider %q (try deepseek, openai, openrouter, groq or custom)", start))
+			return m, nil
+		}
+	}
+	c := newConnectModel(start, true, m.deps.probeKey, m.deps.useProvider)
+	m.conn = &c
+	m.overlay = wsOverlayConnect
+	return m, nil
+}
+
+func (m workspaceModel) connectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.conn == nil {
+		m.overlay = wsOverlayNone
+		return m, nil
+	}
+	c, cmd := m.conn.update(msg)
+	m.conn = &c
+	return m, cmd
+}
+
+func (m workspaceModel) onConnectMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case connectClosedMsg:
+		m.conn, m.overlay = nil, wsOverlayNone
+		return m, nil
+	case connectSavedMsg:
+		m.conn, m.overlay = nil, wsOverlayNone
+		if msg.err != nil {
+			m.say("error", oneLine(msg.err.Error()))
+			return m, nil
+		}
+		m.say("system", connectSummary(msg))
+		if msg.cfg != nil {
+			m.cfg = m.withPluginAgents(*msg.cfg)
+			if m.eng != nil {
+				if err := m.eng.Replace(func(g *workspace.Graph) { workspace.Reconcile(g, m.cfg) }); err != nil {
+					m.say("error", oneLine(err.Error()))
+				}
+				m.g = m.eng.Snapshot()
+			}
+			m.say("system", fmt.Sprintf("%s / %s now runs %s", msg.runner, msg.model, msg.scope))
+		}
+		return m, nil
+	}
+	if m.conn == nil {
+		return m, nil
+	}
+	c, cmd := m.conn.update(msg)
+	m.conn = &c
+	return m, cmd
 }

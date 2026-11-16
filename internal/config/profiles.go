@@ -25,6 +25,7 @@ var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 var knownRunners = map[string]bool{
 	"": true, "opencode": true, "claude": true, "ollama": true, "mlx": true,
 	"codex": true, "copilot": true, "lmstudio": true, "openai": true, "deepseek": true,
+	"openrouter": true, "groq": true,
 }
 
 // KnownRunner reports whether name is a runner the factory accepts.
@@ -74,7 +75,7 @@ func ListProfiles() []string {
 func profileAgent(ac AgentConfig) AgentConfig {
 	return AgentConfig{
 		Runner: ac.Runner, Model: ac.Model, Effort: ac.Effort,
-		BaseURL: ac.BaseURL, APIKeyEnv: ac.APIKeyEnv,
+		BaseURL: ac.BaseURL, APIKeyEnv: ac.APIKeyEnv, Provider: ac.Provider,
 		Description: ac.Description, ReadOnly: ac.ReadOnly, UserSkills: ac.UserSkills,
 	}
 }

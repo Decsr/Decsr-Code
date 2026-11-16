@@ -132,7 +132,7 @@ func TestAPIRunners(t *testing.T) {
 	d.Agents = []Agent{
 		{Name: "coder", Runner: "deepseek"},                                          // default DEEPSEEK_API_KEY, unset
 		{Name: "qa", Runner: "openai", BaseURL: "https://x/v1", APIKeyEnv: "MY_KEY"}, // fine
-		{Name: "pm", Runner: "openai", APIKeyEnv: "MY_KEY"},                          // missing base_url
+		{Name: "pm", Runner: "openai", APIKeyEnv: "MY_KEY"},                          // preset base_url
 		{Name: "sec", Runner: "openai", BaseURL: "https://x/v1", APIKeyEnv: "OTHER"}, // key unset
 	}
 	rs := Run(d)
@@ -143,7 +143,7 @@ func TestAPIRunners(t *testing.T) {
 	if strings.Contains(out, "sekret-value") {
 		t.Fatal("key value leaked into output")
 	}
-	for _, want := range []string{"DEEPSEEK_API_KEY is not set (agents: coder)", "OTHER is not set (agents: sec)", "MY_KEY is set (agents: pm, qa)", "base_url is not set (agents: pm)"} {
+	for _, want := range []string{"DEEPSEEK_API_KEY is not set and no saved key (agents: coder)", "OTHER is not set and no saved key (agents: sec)", "key: env MY_KEY (agents: pm, qa)", "decsr connect deepseek"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
@@ -286,5 +286,31 @@ func TestNotifyCheck(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAPIKeySourceAndCredsWarning(t *testing.T) {
+	d := baseDeps()
+	d.Agents = []Agent{{Name: "coder", Runner: "deepseek"}, {Name: "qa", Runner: "groq"}, {Name: "pm", Runner: "openai", Provider: "acme"}}
+	d.PresetKeyEnv = func(n string) string {
+		return map[string]string{"deepseek": "DEEPSEEK_API_KEY", "groq": "GROQ_API_KEY", "openai": "OPENAI_API_KEY"}[n]
+	}
+	d.KeySource = func(cred, env string) string {
+		switch cred {
+		case "deepseek":
+			return "saved (~/.decsr/credentials.json)"
+		case "groq":
+			return "env GROQ_API_KEY"
+		}
+		return ""
+	}
+	d.CredsErr = func() error { return errors.New("credentials file is accessible by other users") }
+	var buf bytes.Buffer
+	Print(&buf, Run(d))
+	out := buf.String()
+	for _, want := range []string{"key: saved (~/.decsr/credentials.json) (agents: coder)", "key: env GROQ_API_KEY (agents: qa)", "decsr connect custom", "credentials file", "chmod 600"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
 	}
 }

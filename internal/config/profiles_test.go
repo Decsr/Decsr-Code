@@ -325,3 +325,29 @@ func TestLoadUserSkill(t *testing.T) {
 		}
 	}
 }
+
+func TestUseProviderGlobal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if err := UseProviderGlobal("deepseek", "", "deepseek-v4-flash", false); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Agents["pm"].Runner != "deepseek" || cfg.Agents["coder"].Runner != "" {
+		t.Errorf("lead only: %+v", cfg.Agents)
+	}
+	if err := UseProviderGlobal("openai", "acme", "m1", true); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = Load(t.TempDir())
+	for _, r := range []string{"pm", "coder", "qa", "security"} {
+		a := cfg.Agents[r]
+		if a.Runner != "openai" || a.Provider != "acme" || a.Model != "m1" {
+			t.Errorf("%s = %+v", r, a)
+		}
+	}
+}

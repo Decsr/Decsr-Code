@@ -38,6 +38,7 @@ type Agent struct {
 	Runner    string // "" means the default runner
 	BaseURL   string
 	APIKeyEnv string
+	Provider  string // saved custom provider (runner openai)
 }
 
 // Layer is one config source and whether it was found.
@@ -61,6 +62,14 @@ type Deps struct {
 	ConfigErr error // error from loading the effective config
 	Notify    NotifyInfo
 	GOOS      string // "" means the running OS
+
+	// KeySource says where an API key comes from ("env NAME", "saved (...)" or
+	// ""); nil checks only the environment. CredsErr reports a credentials file
+	// with loose permissions. PresetKeyEnv gives a preset's key variable. None
+	// of them ever returns the key itself.
+	KeySource    func(credName, envName string) string
+	CredsErr     func() error
+	PresetKeyEnv func(name string) string
 }
 
 // NotifyInfo is the notification config the "notify" check reports on.
@@ -234,6 +243,17 @@ func checkRunners(d Deps) []Result {
 		}
 		rs = append(rs, part...)
 	}
+	if d.CredsErr != nil {
+		for _, g := range groups {
+			if !isAPIRunner(g.name) {
+				continue
+			}
+			if err := d.CredsErr(); err != nil {
+				rs = append(rs, Result{Name: "credentials file", Status: Warn, Detail: err.Error(), Hint: "chmod 600 ~/.decsr/credentials.json"})
+			}
+			break
+		}
+	}
 	if anyOK {
 		rs = append(rs, Result{Name: "backend", Status: OK, Required: true, Detail: "at least one runner is usable"})
 	} else {
@@ -246,7 +266,7 @@ func checkRunner(d Deps, g runnerGroup) []Result {
 	name := "runner " + g.name
 	who := agentNames(g.agents)
 	switch g.name {
-	case "openai", "deepseek":
+	case "openai", "deepseek", "openrouter", "groq":
 		return checkAPIRunner(d, g, name, who)
 	}
 	if err := d.Reachable(g.name); err != nil {
@@ -268,45 +288,80 @@ func runnerHint(runner string) string {
 	}
 }
 
+// isAPIRunner reports whether name is a hosted API runner.
+func isAPIRunner(name string) bool {
+	switch name {
+	case "openai", "deepseek", "openrouter", "groq":
+		return true
+	}
+	return false
+}
+
+func (d Deps) presetEnv(name string) string {
+	if d.PresetKeyEnv != nil {
+		return d.PresetKeyEnv(name)
+	}
+	if name == "deepseek" {
+		return deepSeekKeyEnv
+	}
+	return ""
+}
+
+func (d Deps) keySource(credName, env string) string {
+	if d.KeySource != nil {
+		return d.KeySource(credName, env)
+	}
+	if env != "" && d.Getenv(env) != "" {
+		return "env " + env
+	}
+	return ""
+}
+
 func checkAPIRunner(d Deps, g runnerGroup, name, who string) []Result {
-	// Distinct key variables, in order of first use; the key value is never read out.
-	envs := map[string][]Agent{}
-	var order []string
-	var noURL []Agent
+	// Distinct key sources, in order of first use; the key value is never read out.
+	type keyID struct{ cred, env string }
+	groups := map[keyID][]Agent{}
+	var order []keyID
 	for _, a := range g.agents {
+		cred := a.Provider
+		if cred == "" {
+			cred = g.name
+		}
 		env := a.APIKeyEnv
-		if env == "" && g.name == "deepseek" {
-			env = deepSeekKeyEnv
+		if env == "" {
+			env = d.presetEnv(cred)
 		}
-		if _, ok := envs[env]; !ok {
-			order = append(order, env)
+		id := keyID{cred, env}
+		if _, ok := groups[id]; !ok {
+			order = append(order, id)
 		}
-		envs[env] = append(envs[env], a)
-		if g.name == "openai" && a.BaseURL == "" {
-			noURL = append(noURL, a)
-		}
+		groups[id] = append(groups[id], a)
 	}
 	var rs []Result
 	keysOK := true
-	for _, env := range order {
-		as := envs[env]
-		switch {
-		case env == "":
-			keysOK = false
-			rs = append(rs, Result{Name: name + " key", Status: Fail, Detail: "no api_key_env set (agents: " + agentNames(as) + ")", Hint: "set `api_key_env` for these agents to the name of the env var holding the key"})
-		case d.Getenv(env) == "":
-			keysOK = false
-			rs = append(rs, Result{Name: name + " key", Status: Fail, Detail: env + " is not set (agents: " + agentNames(as) + ")", Hint: "export " + env + "=<your key>"})
-		default:
-			rs = append(rs, Result{Name: name + " key", Status: OK, Detail: env + " is set (agents: " + agentNames(as) + ")"})
+	for _, id := range order {
+		as := groups[id]
+		if src := d.keySource(id.cred, id.env); src != "" {
+			rs = append(rs, Result{Name: name + " key", Status: OK, Detail: "key: " + src + " (agents: " + agentNames(as) + ")"})
+			continue
 		}
-	}
-	if len(noURL) > 0 {
 		keysOK = false
-		rs = append(rs, Result{Name: name + " base_url", Status: Fail, Detail: "base_url is not set (agents: " + agentNames(noURL) + ")", Hint: "set `base_url` for these agents, e.g. https://openrouter.ai/api/v1"})
+		connect := id.cred
+		if !isAPIRunner(id.cred) {
+			connect = "custom"
+		}
+		hint := "run `decsr connect " + connect + "`"
+		detail := "no API key (agents: " + agentNames(as) + ")"
+		if id.env != "" {
+			hint += " or export " + id.env + "=<your key>"
+			detail = id.env + " is not set and no saved key (agents: " + agentNames(as) + ")"
+		} else {
+			hint += " or set `api_key_env` for these agents"
+		}
+		rs = append(rs, Result{Name: name + " key", Status: Fail, Detail: detail, Hint: hint})
 	}
-	if g.name == "deepseek" && keysOK {
-		if err := d.Reachable("deepseek"); err != nil {
+	if g.name != "openai" && keysOK {
+		if err := d.Reachable(g.name); err != nil {
 			rs = append(rs, Result{Name: name, Status: Warn, Detail: err.Error(), Hint: "check your network and that the key is valid"})
 		} else {
 			rs = append(rs, Result{Name: name, Status: OK, Detail: "reachable (agents: " + who + ")"})

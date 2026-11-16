@@ -132,7 +132,7 @@ func TestWorkspacePaletteEnterRule(t *testing.T) {
 	h := newWSHarness(t)
 	typeOnly(h, "/co")
 	h.key("enter")
-	h.want("! /co matches several commands: /compact, /config, /cost — keep typing or press Tab")
+	h.want("! /co matches several commands: /compact, /config, /connect, /cost — keep typing or press Tab")
 
 	// Exact name runs.
 	h = newWSHarness(t)
@@ -149,7 +149,7 @@ func TestWorkspacePaletteEnterRule(t *testing.T) {
 	// An arrow-selected highlight runs.
 	h = newWSHarness(t)
 	typeOnly(h, "/co")
-	h.key("down", "enter") // /compact, /cost, /config: the second one is /cost
+	h.key("down", "down", "enter") // /compact, /connect, /cost, /config: the third one is /cost
 	if h.m.overlay != wsOverlayInfo || h.m.infoName != "Cost" {
 		t.Fatalf("the highlighted /cost did not run:\n%s", h.view())
 	}

@@ -28,6 +28,9 @@ func applyProjectSetupWithError(root string, msg setupDoneMsg) (config.Config, e
 		if ov.effort != "" {
 			ac.Effort = ov.effort
 		}
+		if ov.runner != "" {
+			ac.Provider, ac.BaseURL = ov.provider, ov.baseURL
+		}
 		projectAgents[role] = ac
 	}
 
@@ -39,11 +42,13 @@ func applyProjectSetupWithError(root string, msg setupDoneMsg) (config.Config, e
 			ac.Description = old.Description
 			ac.ReadOnly = old.ReadOnly
 			ac.UserSkills = old.UserSkills
-			ac.BaseURL = old.BaseURL
+			if ac.Runner == "" {
+				ac.BaseURL, ac.Provider = old.BaseURL, old.Provider
+			}
 			ac.APIKeyEnv = old.APIKeyEnv
 			projectAgents[role] = ac
-		} else if (!config.IsBuiltinRole(role) && role != "pr") || old.Description != "" || old.ReadOnly || len(old.UserSkills) > 0 || old.BaseURL != "" || old.APIKeyEnv != "" {
-			projectAgents[role] = config.AgentConfig{Description: old.Description, ReadOnly: old.ReadOnly, UserSkills: old.UserSkills, BaseURL: old.BaseURL, APIKeyEnv: old.APIKeyEnv}
+		} else if (!config.IsBuiltinRole(role) && role != "pr") || old.Description != "" || old.ReadOnly || len(old.UserSkills) > 0 || old.BaseURL != "" || old.Provider != "" || old.APIKeyEnv != "" {
+			projectAgents[role] = config.AgentConfig{Description: old.Description, ReadOnly: old.ReadOnly, UserSkills: old.UserSkills, BaseURL: old.BaseURL, Provider: old.Provider, APIKeyEnv: old.APIKeyEnv}
 		}
 	}
 	if len(projectAgents) > 0 {
@@ -90,13 +95,14 @@ func saveGlobalSetup(baseAgents map[string]config.AgentConfig, msg setupDoneMsg)
 	globalAgents := make(map[string]config.AgentConfig, len(baseAgents))
 	for role, ac := range baseAgents {
 		ac.Runner = msg.provider
+		ac.Provider, ac.BaseURL = msg.providerName, msg.baseURL
 		if msg.model != "" {
 			ac.Model = msg.model
 		}
 		ac.Effort = msg.effort
 		globalAgents[role] = ac
 	}
-	return config.SaveGlobal(config.Config{Agents: globalAgents})
+	return config.SaveGlobalEndpoints(config.Config{Agents: globalAgents})
 }
 
 // modelSetupModel is a standalone Bubble Tea model that shows only the per-agent
@@ -118,7 +124,7 @@ func newModelSetupModel(root string, cfg config.Config) modelSetupModel {
 		projectOverrides = projectCfg.Agents
 	}
 	setup := NewSetupModelWithOverrides(currentRunner, currentModel, currentEffort,
-		cfg.Project.Language, cfg.Project.Name, projectOverrides)
+		cfg.Project.Language, cfg.Project.Name, projectOverrides).WithGlobalAgents(cfg.Agents)
 	setup.root = root
 	return modelSetupModel{setup: setup, root: root, cfg: cfg, width: 80, height: 24}
 }

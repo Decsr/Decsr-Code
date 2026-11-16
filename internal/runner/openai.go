@@ -8,48 +8,50 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 
+	"github.com/Decsr/Decsr-Code/internal/credentials"
 	"github.com/Decsr/Decsr-Code/internal/tokenutil"
 )
 
-const (
-	deepSeekBaseURL   = "https://api.deepseek.com"
-	deepSeekKeyEnv    = "DEEPSEEK_API_KEY"
-	deepSeekModel     = "deepseek-v4-flash"
-	apiErrBodyMaxSize = 500
-)
-
-// deepSeekFallbackModels is shown in setup when the models endpoint is
-// unreachable.
-var deepSeekFallbackModels = []string{"deepseek-v4-flash", "deepseek-v4-pro"}
+const apiErrBodyMaxSize = 500
 
 // OpenAIRunner calls any OpenAI-compatible chat completions API in text mode:
 // the prompt goes in as-is and plain text comes back (no tools, no agent loop).
-// Provider ("openai" or "deepseek") names the runner in errors. The API key is
-// read from the environment variable named APIKeyEnv and is never stored.
+// Provider names the runner in errors. The API key comes from the environment
+// variable named APIKeyEnv, else from the saved credential CredName (default:
+// Provider); it is never part of the config. When BaseURL is empty, a saved
+// custom provider's base URL is used.
 type OpenAIRunner struct {
 	Provider  string
 	Model     string
 	BaseURL   string
 	APIKeyEnv string
+	CredName  string
 }
 
-// apiKey returns the key from the configured env var, or an error naming it.
+func (r *OpenAIRunner) credName() string {
+	if r.CredName != "" {
+		return r.CredName
+	}
+	return r.Provider
+}
+
+// apiKey returns the key from the env var or the saved credential.
 func (r *OpenAIRunner) apiKey() (string, error) {
-	return apiKeyFromEnv(r.Provider, r.APIKeyEnv)
+	key, _, err := ResolveKey(r.credName(), r.APIKeyEnv)
+	return key, err
 }
 
-func apiKeyFromEnv(provider, envName string) (string, error) {
-	if envName == "" {
-		return "", fmt.Errorf("%s: api_key_env is not set — set it to the name of the environment variable holding the API key", provider)
+// baseURL is the configured endpoint, else the saved provider's.
+func (r *OpenAIRunner) baseURL() string {
+	if strings.TrimSpace(r.BaseURL) != "" {
+		return r.BaseURL
 	}
-	key := os.Getenv(envName)
-	if key == "" {
-		return "", fmt.Errorf("%s: API key not set — export %s", provider, envName)
+	if c, ok, err := credentials.Get(r.credName()); err == nil && ok {
+		return c.BaseURL
 	}
-	return key, nil
+	return ""
 }
 
 func (r *OpenAIRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan Token, error) {
@@ -60,8 +62,9 @@ func (r *OpenAIRunner) Complete(ctx context.Context, req CompletionRequest) (<-c
 	if model == "" {
 		return nil, fmt.Errorf("%s: model is not set — set `model` for this agent", r.Provider)
 	}
-	if strings.TrimSpace(r.BaseURL) == "" {
-		return nil, fmt.Errorf("%s: base_url is not set — set `base_url` for this agent (e.g. https://openrouter.ai/api/v1)", r.Provider)
+	base := r.baseURL()
+	if strings.TrimSpace(base) == "" {
+		return nil, fmt.Errorf("%s: base_url is not set — set `base_url` for this agent (e.g. https://openrouter.ai/api/v1) or run \"decsr connect custom\"", r.Provider)
 	}
 	key, err := r.apiKey()
 	if err != nil {
@@ -82,7 +85,7 @@ func (r *OpenAIRunner) Complete(ctx context.Context, req CompletionRequest) (<-c
 		return nil, fmt.Errorf("%s: marshal request: %w", r.Provider, err)
 	}
 
-	endpoint := strings.TrimRight(r.BaseURL, "/") + "/chat/completions"
+	endpoint := strings.TrimRight(base, "/") + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("%s: create request: %w", r.Provider, err)
@@ -223,50 +226,4 @@ type openAIChatChunk struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 	} `json:"usage"`
-}
-
-// DeepSeekFallbackModels returns the static DeepSeek model list.
-func DeepSeekFallbackModels() []string {
-	return append([]string(nil), deepSeekFallbackModels...)
-}
-
-// DeepSeekListModels returns the model IDs offered by the DeepSeek API. It
-// falls back to a static list when the key is missing or the request fails.
-func DeepSeekListModels() ([]string, error) {
-	fallback := DeepSeekFallbackModels()
-	key, err := apiKeyFromEnv("deepseek", deepSeekKeyEnv)
-	if err != nil {
-		return fallback, err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, deepSeekBaseURL+"/models", nil)
-	if err != nil {
-		return fallback, err
-	}
-	req.Header.Set("Authorization", "Bearer "+key)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fallback, fmt.Errorf("deepseek not reachable: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fallback, fmt.Errorf("deepseek /models returned HTTP %d", resp.StatusCode)
-	}
-	var result struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fallback, err
-	}
-	var names []string
-	for _, m := range result.Data {
-		names = append(names, m.ID)
-	}
-	if len(names) == 0 {
-		return fallback, nil
-	}
-	return names, nil
 }

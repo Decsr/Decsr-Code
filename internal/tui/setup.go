@@ -16,6 +16,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/artifacts"
 	"github.com/Decsr/Decsr-Code/internal/config"
+	"github.com/Decsr/Decsr-Code/internal/credentials"
 	"github.com/Decsr/Decsr-Code/internal/lang"
 	"github.com/Decsr/Decsr-Code/internal/prompts"
 	"github.com/Decsr/Decsr-Code/internal/runner"
@@ -34,9 +35,27 @@ const (
 	providerCopilot
 	providerLMStudio
 	providerDeepSeek
+	providerOpenAI
+	providerOpenRouter
+	providerGroq
 )
 
-var providerLabels = []string{"OpenCode", "Claude", "Ollama", "oMLX", "Codex", "Copilot", "LM Studio", "DeepSeek"}
+var providerLabels = []string{"OpenCode", "Claude", "Ollama", "oMLX", "Codex", "Copilot", "LM Studio", "DeepSeek", "OpenAI", "OpenRouter", "Groq"}
+
+// apiPresetName is the runner/preset name of an API provider, "" for the rest.
+func apiPresetName(p providerKind) string {
+	switch p {
+	case providerDeepSeek:
+		return "deepseek"
+	case providerOpenAI:
+		return "openai"
+	case providerOpenRouter:
+		return "openrouter"
+	case providerGroq:
+		return "groq"
+	}
+	return ""
+}
 
 func providerFromString(s string) providerKind {
 	switch s {
@@ -54,6 +73,12 @@ func providerFromString(s string) providerKind {
 		return providerLMStudio
 	case "deepseek":
 		return providerDeepSeek
+	case "openai":
+		return providerOpenAI
+	case "openrouter":
+		return providerOpenRouter
+	case "groq":
+		return providerGroq
 	default:
 		return providerOpenCode
 	}
@@ -75,6 +100,12 @@ func providerToString(p providerKind) string {
 		return "lmstudio"
 	case providerDeepSeek:
 		return "deepseek"
+	case providerOpenAI:
+		return "openai"
+	case providerOpenRouter:
+		return "openrouter"
+	case providerGroq:
+		return "groq"
 	default:
 		return "opencode"
 	}
@@ -96,15 +127,19 @@ const (
 // ── per-agent override ───────────────────────────────────────────────────────
 
 type agentSetupOverride struct {
-	runner string
-	model  string
-	effort string
+	runner   string
+	provider string // saved custom provider name (runner openai)
+	baseURL  string // base_url override of a preset
+	model    string
+	effort   string
 }
 
 // ── messages ──────────────────────────────────────────────────────────────────
 
 type setupDoneMsg struct {
 	provider       string
+	providerName   string // saved custom provider name, "" for the rest
+	baseURL        string // base_url override of a preset, "" for none
 	model          string
 	effort         string
 	progLanguage   string
@@ -168,6 +203,14 @@ type deepseekModelsListMsg struct {
 	err    error
 }
 
+// apiModelsListMsg carries the /models list of OpenAI, OpenRouter, Groq or a
+// saved custom provider (key is the providerEntry key).
+type apiModelsListMsg struct {
+	key    string
+	models []string
+	err    error
+}
+
 // pingResultMsg carries the result of an async model reachability test.
 type pingResultMsg struct {
 	err error
@@ -218,6 +261,28 @@ type SetupModel struct {
 
 	deepseekModels        []string
 	deepseekModelsLoading bool
+
+	// Models of the other API providers (OpenAI, OpenRouter, Groq, saved custom
+	// providers), listed from /models once a key exists. Keyed by
+	// providerEntry.key.
+	apiModels        map[string][]string
+	apiModelsLoading map[string]bool
+
+	// entries is the provider row; providerKind indexes into it.
+	entries []providerEntry
+	// baseURLs holds the global base_url override of each preset, by runner.
+	baseURLs map[string]string
+	// typed is the model id typed when an API provider lists no models.
+	typed textinput.Model
+
+	// connect is the masked API-key input opened with k.
+	connect *connectModel
+	// connectAgent is true when connect was opened from the per-agent runner step.
+	connectAgent bool
+	// urlEdit is the Base URL input opened with u.
+	urlEdit *urlEdit
+	// agentBaseURL is the preset base_url override of the agent being edited.
+	agentBaseURL string
 
 	// Programming language selection.
 	progLanguages []string
@@ -313,6 +378,10 @@ func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs 
 		lmstudioModelsLoading: true,
 		deepseekModels:        runner.DeepSeekFallbackModels(),
 		deepseekModelsLoading: true,
+		apiModels:             make(map[string][]string),
+		apiModelsLoading:      make(map[string]bool),
+		baseURLs:              make(map[string]string),
+		entries:               loadEntries(),
 		providerAvailability:  make(map[providerKind]error),
 		progLanguages:         append([]string{progLangAuto}, config.SupportedProgrammingLanguages...),
 		projectNameInput:      nameInput,
@@ -325,7 +394,23 @@ func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs 
 		height:                24,
 	}
 
+	typed := textinput.New()
+	typed.Prompt = ""
+	typed.CharLimit = 200
+	typed.Placeholder = "model id"
+	typed.Focus()
+	m.typed = typed
+	for _, e := range m.entries {
+		if e.isAPI() && !e.missing && e.runner != "deepseek" {
+			m.apiModelsLoading[e.key()] = true
+		}
+	}
+
 	m.provider = providerFromString(currentRunner)
+	m.applyGlobalEndpoint(agentCfgs, currentRunner)
+	if m.entry(m.provider).isAPI() {
+		m.typed.SetValue(currentModel)
+	}
 
 	if currentModel != "" {
 		for i, mdl := range m.activeModels() {
@@ -343,7 +428,8 @@ func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs 
 			mdl := ac.Model
 			eff := ac.Effort
 			if r != currentRunner || mdl != currentModel || eff != "" {
-				m.agentOverrides[role] = agentSetupOverride{runner: r, model: mdl, effort: eff}
+				m.kindOf(r, ac.Provider)
+				m.agentOverrides[role] = agentSetupOverride{runner: r, provider: ac.Provider, baseURL: ac.BaseURL, model: mdl, effort: eff}
 			}
 		}
 	}
@@ -389,6 +475,10 @@ func NewSetupModelWithOverrides(currentRunner, currentModel, currentEffort, curr
 		if ac.Effort != "" {
 			ov.effort = ac.Effort
 		}
+		if ov.runner != "" {
+			ov.provider, ov.baseURL = ac.Provider, ac.BaseURL
+			m.kindOf(ov.runner, ov.provider)
+		}
 		if ov.runner != "" || ov.model != "" || ov.effort != "" {
 			m.agentOverrides[role] = ov
 		}
@@ -419,7 +509,7 @@ func (m SetupModel) providerUnavailable(p providerKind) bool {
 // direction (+1 or -1), or the starting kind when none is found. Used to
 // skip unavailable providers when cycling with left/right.
 func (m SetupModel) nextAvailableProvider(start providerKind, dir int) providerKind {
-	n := providerKind(len(providerLabels))
+	n := providerKind(len(m.entries))
 	for step := 1; step < int(n); step++ {
 		candidate := providerKind((int(start) + dir*step + int(n)) % int(n))
 		if !m.providerUnavailable(candidate) {
@@ -445,9 +535,26 @@ func (m SetupModel) modelsForProvider(p providerKind) []string {
 		return m.lmstudioModels
 	case providerDeepSeek:
 		return m.deepseekModels
+	case providerOpenAI, providerOpenRouter, providerGroq:
+		return m.apiModels[m.entry(p).key()]
 	default:
+		if int(p) >= len(providerLabels) {
+			return m.apiModels[m.entry(p).key()]
+		}
 		return m.models
 	}
+}
+
+// agentModel is the model chosen in the per-agent model step: the picked list
+// row, or the typed id when the provider lists none.
+func (m SetupModel) agentModel() string {
+	if m.typedMode(m.agentEditProv) {
+		return m.typedModel()
+	}
+	if models := m.modelsForProvider(m.agentEditProv); m.agentEditIdx < len(models) {
+		return models[m.agentEditIdx]
+	}
+	return ""
 }
 
 // ── effort choices ───────────────────────────────────────────────────────────
@@ -525,12 +632,11 @@ func (m *SetupModel) startEffortLoad() tea.Cmd {
 // startAgentEffortLoad fetches effort options for the model currently being
 // edited in the per-agent panel.
 func (m *SetupModel) startAgentEffortLoad() tea.Cmd {
-	provider := providerToString(m.agentEditProv)
-	models := m.modelsForProvider(m.agentEditProv)
-	if m.agentEditIdx >= len(models) {
+	provider := m.entry(m.agentEditProv).runner
+	model := m.agentModel()
+	if model == "" {
 		return nil
 	}
-	model := models[m.agentEditIdx]
 	key := effortKey(provider, model)
 	if m.agentEffortFor == key && !m.agentEffortLoading {
 		return nil
@@ -565,7 +671,18 @@ func (m SetupModel) selectedEffort() string {
 }
 
 func (m SetupModel) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, fetchOpenCodeModels(), fetchOllamaModels(), fetchMLXModels(), fetchCodexModels(), fetchClaudeModels(), fetchCopilotModels(), fetchLMStudioModels(), fetchDeepSeekModels(), checkProviderAvailability())
+	return tea.Batch(m.spinner.Tick, fetchOpenCodeModels(), fetchOllamaModels(), fetchMLXModels(), fetchCodexModels(), fetchClaudeModels(), fetchCopilotModels(), fetchLMStudioModels(), m.fetchAPIModelsCmd(), checkProviderAvailability())
+}
+
+// fetchAPIModelsCmd lists the models of every API entry that has a name.
+func (m SetupModel) fetchAPIModelsCmd() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, e := range m.entries {
+		if e.isAPI() && !e.missing {
+			cmds = append(cmds, fetchEntryModels(e, m.baseURLOverride(e)))
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 // ── Update ────────────────────────────────────────────────────────────────────
@@ -810,6 +927,62 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 			m.viewport.SetContent(m.renderContent())
 		}
 
+	case apiModelsListMsg:
+		m.apiModelsLoading[msg.key] = false
+		if len(msg.models) > 0 {
+			prevModel := ""
+			cur := m.apiModels[msg.key]
+			sel := m.entry(m.provider).key() == msg.key
+			switch {
+			case sel && m.modelIdx < len(cur):
+				prevModel = cur[m.modelIdx]
+			case sel && len(cur) == 0:
+				prevModel = m.typedModel()
+			}
+			m.apiModels[msg.key] = msg.models
+			if sel {
+				m.modelIdx = findModelIndex(msg.models, prevModel)
+			}
+		}
+		if m.ready {
+			m.viewport.SetContent(m.renderContent())
+		}
+
+	case connectProbeMsg, connectTickMsg:
+		if m.connect != nil {
+			c, cmd := m.connect.update(msg)
+			m.connect = &c
+			cmds = append(cmds, cmd)
+		}
+
+	case connectClosedMsg:
+		m.connect = nil
+		m.revertNewRow()
+
+	case connectSavedMsg:
+		m.connect = nil
+		if msg.err != nil {
+			m.setSaveStatus("✗ "+msg.err.Error(), false)
+		} else {
+			m.setSaveStatus(connectSummary(msg), true)
+			cmds = append(cmds, m.clearSaveStatusLater())
+		}
+		m.pingErr = nil
+		m.reloadEntries()
+		if msg.err == nil && !runner.IsPreset(msg.name) {
+			m.selectByName(msg.name)
+		}
+		m.revertNewRow()
+		for _, e := range m.entries {
+			if e.credName() == msg.name {
+				cmds = append(cmds, m.startEntryFetch(e, m.baseURLOverride(e)))
+			}
+		}
+		cmds = append(cmds, m.spinner.Tick)
+		if m.ready {
+			m.viewport.SetContent(m.renderContent())
+		}
+
 	case providerAvailabilityMsg:
 		if m.providerAvailability == nil {
 			m.providerAvailability = make(map[providerKind]error)
@@ -844,7 +1017,18 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 }
 
 func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
+	if m.connect != nil {
+		c, cmd := m.connect.update(msg)
+		m.connect = &c
+		return m, cmd
+	}
+	if m.urlEdit != nil {
+		return m.handleURLEditKey(msg)
+	}
 	if msg.String() == "ctrl+s" {
+		if m.globalOnly && m.entry(m.provider).isNew {
+			return m.openConnect(false), nil
+		}
 		return m.startValidation()
 	}
 	if m.saving {
@@ -937,7 +1121,14 @@ func (m SetupModel) handleProviderKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		m.provider = m.nextAvailableProvider(m.provider, -1)
 	case "right", "l":
 		m.provider = m.nextAvailableProvider(m.provider, +1)
+	case "k":
+		return m.openConnect(false), nil
+	case "u":
+		return m.openURLEdit(m.provider, false), nil
 	case "tab", "down", "enter":
+		if m.entry(m.provider).isNew {
+			return m.openConnect(false), nil
+		}
 		m.section = sectionModel
 		m.ensureSectionVisible()
 	case "shift+tab":
@@ -951,22 +1142,58 @@ func (m SetupModel) handleProviderKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		m.ensureSectionVisible()
 	}
 	if m.provider != prev {
-		m.modelIdx = 0
-		m.pingErr = nil
-		m.effort = setupEffortDefault
-		m.effortTouched = true
-		m.effortIdx = 0
-		m.effortOptions = nil
-		m.effortFor = ""
-		m.effortUnsupported = ""
+		m.resetForNewProvider()
 	}
 	return m, cmd
 }
 
+// openConnect opens the masked key input for the selected API provider, or the
+// custom-provider flow on the "+ custom…" row. agent says it was opened from
+// the per-agent runner step.
+func (m SetupModel) openConnect(agent bool) SetupModel {
+	p := m.provider
+	if agent {
+		p = m.agentEditProv
+	}
+	e := m.entry(p)
+	name := e.credName()
+	switch {
+	case e.isNew:
+		name = "custom"
+	case name == "" || e.missing:
+		return m
+	}
+	c := newConnectModel(name, false, nil, nil)
+	m.connect = &c
+	m.connectAgent = agent
+	return m
+}
+
+// revertNewRow leaves the "+ custom…" row after the overlay closed without a
+// provider being added.
+func (m *SetupModel) revertNewRow() {
+	if m.entry(m.provider).isNew {
+		m.provider = m.revertKind()
+	}
+	if m.entry(m.agentEditProv).isNew {
+		m.agentEditProv = m.revertKind()
+	}
+}
+
+// apiKeyLine says where the selected API provider's key comes from.
+func (m SetupModel) apiKeyLine() string { return m.keyLineFor(m.entry(m.provider)) }
+
 func (m SetupModel) handleModelKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 
 	models := m.activeModels()
+	if m.typedMode(m.provider) {
+		return m.handleTypedModelKeys(msg)
+	}
 	switch msg.String() {
+	case "K":
+		return m.openConnect(false), nil
+	case "u":
+		return m.openURLEdit(m.provider, false), nil
 	case "up", "k":
 		if m.modelIdx > 0 {
 			m.modelIdx--
@@ -999,6 +1226,30 @@ func (m SetupModel) handleModelKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// handleTypedModelKeys edits the model id typed when the provider lists none.
+// Letters go to the input, so u and K are not shortcuts here; use the provider
+// row for the base URL and the key.
+func (m SetupModel) handleTypedModelKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
+	switch msg.String() {
+	case "up", "shift+tab":
+		m.section = sectionProvider
+		m.ensureSectionVisible()
+		return m, nil
+	case "tab", "enter", "down":
+		m.pingErr = nil
+		m.resetEffortForNewModel()
+		m.section = sectionEffort
+		cmd := m.startEffortLoad()
+		m.ensureSectionVisible()
+		return m, cmd
+	}
+	var cmd tea.Cmd
+	m.typed, cmd = m.typed.Update(msg)
+	m.pingErr = nil
+	m.resetEffortForNewModel()
+	return m, cmd
 }
 
 // resetEffortForNewModel drops the loaded effort levels of the previous model.
@@ -1119,13 +1370,16 @@ func (m SetupModel) handleAgentSetupKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		m.agentEffortFor = ""
 		m.agentEffortOptions = nil
 		m.agentEffortLoading = false
+		m.agentBaseURL = ""
 		if ov, ok := m.agentOverrides[role]; ok {
-			m.agentEditProv = providerFromString(ov.runner)
+			m.agentEditProv = m.kindOf(ov.runner, ov.provider)
+			m.agentBaseURL = ov.baseURL
 			if ov.effort != "" {
 				m.agentEditEffort = normalizeSetupEffort(ov.effort)
 			}
 		} else {
 			m.agentEditProv = m.provider
+			m.agentBaseURL = m.baseURLOverride(m.entry(m.provider))
 		}
 		m.agentEditIdx = 0
 		m.ensureSectionVisible()
@@ -1154,11 +1408,21 @@ func (m SetupModel) handleAgentEditKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		switch msg.String() {
 		case "left", "h":
 			m.agentEditProv = m.nextAvailableProvider(m.agentEditProv, -1)
+			m.agentBaseURL = ""
 		case "right", "l":
 			m.agentEditProv = m.nextAvailableProvider(m.agentEditProv, +1)
+			m.agentBaseURL = ""
+		case "k":
+			return m.openConnect(true), nil
+		case "u":
+			return m.openURLEdit(m.agentEditProv, true), nil
 		case "enter":
+			if m.entry(m.agentEditProv).isNew {
+				return m.openConnect(true), nil
+			}
 			m.agentEditStep = 1
 			m.agentEditIdx = 0
+			m.typed.SetValue("")
 			// Pre-select current model if exists.
 			role := m.agentRoles[m.agentCursor]
 			if ov, ok := m.agentOverrides[role]; ok {
@@ -1167,6 +1431,9 @@ func (m SetupModel) handleAgentEditKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 						m.agentEditIdx = i
 						break
 					}
+				}
+				if m.kindOf(ov.runner, ov.provider) == m.agentEditProv {
+					m.typed.SetValue(ov.model)
 				}
 			}
 			m.ensureSectionVisible()
@@ -1177,7 +1444,14 @@ func (m SetupModel) handleAgentEditKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 	if m.agentEditStep == 1 {
 		// Step 1: pick model.
 		models := m.modelsForProvider(m.agentEditProv)
+		if m.typedMode(m.agentEditProv) && msg.String() != "enter" {
+			var cmd tea.Cmd
+			m.typed, cmd = m.typed.Update(msg)
+			return m, cmd
+		}
 		switch msg.String() {
+		case "u":
+			return m.openURLEdit(m.agentEditProv, true), nil
 		case "up", "k":
 			if m.agentEditIdx > 0 {
 				m.agentEditIdx--
@@ -1189,14 +1463,11 @@ func (m SetupModel) handleAgentEditKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		case "enter":
 			// Move to effort. Keep the existing effort only when the model did
 			// not change; otherwise start from the global effort.
-			modelStr := ""
-			if m.agentEditIdx < len(models) {
-				modelStr = models[m.agentEditIdx]
-			}
+			modelStr := m.agentModel()
 			role := m.agentRoles[m.agentCursor]
 			effort := normalizeSetupEffort(m.effort)
 			if ov, ok := m.agentOverrides[role]; ok {
-				if ov.model == modelStr && providerFromString(ov.runner) == m.agentEditProv && ov.effort != "" {
+				if ov.model == modelStr && m.kindOf(ov.runner, ov.provider) == m.agentEditProv && ov.effort != "" {
 					effort = normalizeSetupEffort(ov.effort)
 				}
 			}
@@ -1234,16 +1505,18 @@ func (m SetupModel) handleAgentEditKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			return m, nil
 		}
 		role := m.agentRoles[m.agentCursor]
-		runnerStr := providerToString(m.agentEditProv)
-		modelStr := ""
-		if models := m.modelsForProvider(m.agentEditProv); m.agentEditIdx < len(models) {
-			modelStr = models[m.agentEditIdx]
-		}
+		ent := m.entry(m.agentEditProv)
+		runnerStr := ent.runner
+		modelStr := m.agentModel()
 		effortStr := setupEffortDefault
 		if m.agentEditEffortIdx >= 0 && m.agentEditEffortIdx < len(choices) {
 			effortStr = choices[m.agentEditEffortIdx]
 		}
-		m.agentOverrides[role] = agentSetupOverride{runner: runnerStr, model: modelStr, effort: effortStr}
+		baseURL := ""
+		if ent.isAPI() && !ent.custom() {
+			baseURL = m.agentBaseURL
+		}
+		m.agentOverrides[role] = agentSetupOverride{runner: runnerStr, provider: ent.provider, baseURL: baseURL, model: modelStr, effort: effortStr}
 		m.agentEditing = false
 		return m.commitProjectSelection(sectionAgentSetup)
 	case "backspace", "delete":
@@ -1258,6 +1531,11 @@ func (m SetupModel) handleAgentEditKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 // currentPayload snapshots the setup values for a save.
 func (m SetupModel) currentPayload() setupDoneMsg {
 	provider, model := m.selectedProviderModel()
+	ent := m.entry(m.provider)
+	baseURL := ""
+	if ent.isAPI() && !ent.custom() {
+		baseURL = m.baseURLs[ent.runner]
+	}
 
 	overrides := make(map[string]agentSetupOverride)
 	for k, v := range m.agentOverrides {
@@ -1270,6 +1548,8 @@ func (m SetupModel) currentPayload() setupDoneMsg {
 
 	return setupDoneMsg{
 		provider:       provider,
+		providerName:   ent.provider,
+		baseURL:        baseURL,
 		model:          model,
 		effort:         m.selectedEffort(),
 		progLanguage:   progLang,
@@ -1311,6 +1591,7 @@ func saveGlobalSetupKeepEffort(baseAgents map[string]config.AgentConfig, msg set
 	globalAgents := make(map[string]config.AgentConfig, len(baseAgents))
 	for role, ac := range baseAgents {
 		ac.Runner = msg.provider
+		ac.Provider, ac.BaseURL = msg.providerName, msg.baseURL
 		if msg.model != "" {
 			ac.Model = msg.model
 		}
@@ -1319,7 +1600,7 @@ func saveGlobalSetupKeepEffort(baseAgents map[string]config.AgentConfig, msg set
 		}
 		globalAgents[role] = ac
 	}
-	return config.SaveGlobal(config.Config{Agents: globalAgents})
+	return config.SaveGlobalEndpoints(config.Config{Agents: globalAgents})
 }
 
 // commitProjectSelection saves the current project values and advances.
@@ -1349,7 +1630,7 @@ func (m SetupModel) commitGlobalSelection(next setupSection) (SetupModel, tea.Cm
 	m.pingErr = nil
 	m.setSaveStatus("Saving…", true)
 	m.pendingSave = &pendingSave{msg: payload, next: next}
-	return m, tea.Batch(m.spinner.Tick, pingModel(payload.provider, payload.model))
+	return m, tea.Batch(m.spinner.Tick, pingModel(payload))
 }
 
 // startValidation saves all current values and closes the setup screen. Used by
@@ -1366,25 +1647,47 @@ func (m SetupModel) startValidation() (SetupModel, tea.Cmd) {
 	m.setSaveStatus("Saving…", true)
 	m.pendingSave = &pendingSave{msg: payload, close: true}
 
-	return m, tea.Batch(m.spinner.Tick, pingModel(payload.provider, payload.model))
+	return m, tea.Batch(m.spinner.Tick, pingModel(payload))
 }
 
 // selectedProviderModel returns the currently selected provider string and model name.
 func (m SetupModel) selectedProviderModel() (string, string) {
 	models := m.activeModels()
-	provider := providerToString(m.provider)
+	provider := m.entry(m.provider).runner
 	model := ""
-	if m.modelIdx < len(models) {
+	switch {
+	case m.typedMode(m.provider):
+		model = m.typedModel()
+	case m.modelIdx < len(models):
 		model = models[m.modelIdx]
 	}
 	return provider, model
 }
 
 // pingModel returns a tea.Cmd that tests provider/model reachability.
-func pingModel(provider, model string) tea.Cmd {
+func pingModel(p setupDoneMsg) tea.Cmd {
 	return func() tea.Msg {
-		return pingResultMsg{err: runner.Ping(provider, model)}
+		return pingResultMsg{err: pingSelection(p)}
 	}
+}
+
+// pingSelection tests the chosen provider: a custom provider or a preset with
+// a base_url override is probed at its own URL.
+func pingSelection(p setupDoneMsg) error {
+	if p.providerName != "" {
+		c, ok, err := credentials.Get(p.providerName)
+		if err != nil {
+			return err
+		}
+		if !ok || c.BaseURL == "" {
+			return nil // not saved: nothing to probe
+		}
+		return runner.PingAPI(p.providerName, c.BaseURL)
+	}
+	if p.baseURL != "" {
+		return runner.PingAPI(p.provider, p.baseURL)
+	}
+	return runner.Ping(p.provider, p.model)
 }
 
 // ── Viewport ──────────────────────────────────────────────────────────────────
@@ -1416,6 +1719,14 @@ func (m SetupModel) View() string {
 
 	if !m.ready {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "", footer)
+	}
+	if m.connect != nil {
+		body := lipgloss.Place(m.width, max(m.height-2, 4), lipgloss.Center, lipgloss.Center, m.connect.box(m.width))
+		return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	}
+	if m.urlEdit != nil {
+		body := lipgloss.Place(m.width, max(m.height-2, 4), lipgloss.Center, lipgloss.Center, m.urlEditBox())
+		return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left,
@@ -1508,7 +1819,8 @@ func (m SetupModel) renderProviderCard(contentWidth int, label, focusLabel, acti
 	offline := lipgloss.NewStyle().Foreground(p.dim).Strikethrough(true)
 
 	var providerTabs []string
-	for i, lbl := range providerLabels {
+	for i, ent := range m.entries {
+		lbl := ent.label
 		kind := providerKind(i)
 		unavailable := m.providerUnavailable(kind)
 		displayLbl := lbl
@@ -1535,9 +1847,22 @@ func (m SetupModel) renderProviderCard(contentWidth int, label, focusLabel, acti
 			providerTabs = append(providerTabs, inactive.Render("  "+lbl))
 		}
 	}
-	providerLine := "  " + strings.Join(providerTabs, "  ")
-
-	return setupCard("Default Provider", m.section == sectionProvider, contentWidth, []string{providerLine})
+	lines := packTabs(providerTabs, contentWidth-8)
+	sel := m.entry(m.provider)
+	if kl := m.apiKeyLine(); kl != "" {
+		style := lipgloss.NewStyle().Foreground(p.dim)
+		if strings.Contains(kl, "not set") {
+			style = lipgloss.NewStyle().Foreground(crt.warn)
+		}
+		lines = append(lines, "", "  "+style.Render(kl))
+	}
+	if bl := m.baseURLLine(sel, m.baseURLOverride(sel)); bl != "" {
+		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(p.dim).Render(bl))
+	}
+	if sel.missing {
+		lines = append(lines, "", "  "+lipgloss.NewStyle().Foreground(crt.warn).Render(missingHint(sel)))
+	}
+	return setupCard("Default Provider", m.section == sectionProvider, contentWidth, lines)
 }
 
 func (m SetupModel) renderModelCard(contentWidth int, label, focusLabel, active, inactive, dim lipgloss.Style) string {
@@ -1570,8 +1895,19 @@ func (m SetupModel) renderModelCard(contentWidth int, label, focusLabel, active,
 		modelLines = append(modelLines, dim.Render("  LM Studio local models (OpenAI-compatible API on :1234)"))
 		modelLines = append(modelLines, m.viewLMStudioModels(active, inactive, dim)...)
 	case providerDeepSeek:
-		modelLines = append(modelLines, dim.Render("  DeepSeek API (key from DEEPSEEK_API_KEY)"))
+		modelLines = append(modelLines, dim.Render("  DeepSeek API ("+m.apiKeyLine()+")"))
 		modelLines = append(modelLines, m.viewDeepSeekModels(active, inactive, dim)...)
+	case providerOpenAI, providerOpenRouter, providerGroq:
+		modelLines = append(modelLines, dim.Render("  "+m.entry(m.provider).label+" API ("+m.apiKeyLine()+")"))
+		modelLines = append(modelLines, m.viewAPIModels(m.provider, active, inactive, dim)...)
+	default:
+		if e := m.entry(m.provider); e.custom() {
+			modelLines = append(modelLines, dim.Render("  "+e.label+" API ("+m.apiKeyLine()+")"))
+			if e.missing {
+				modelLines = append(modelLines, dim.Render("  "+missingHint(e)))
+			}
+			modelLines = append(modelLines, m.viewAPIModels(m.provider, active, inactive, dim)...)
+		}
 	}
 
 	// Model validation status.
@@ -1741,7 +2077,8 @@ func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active,
 			agentLines = append(agentLines, "")
 
 			var tabs []string
-			for i, lbl := range providerLabels {
+			for i, ent := range m.entries {
+				lbl := ent.label
 				kind := providerKind(i)
 				unavailable := m.providerUnavailable(kind)
 				offline := lipgloss.NewStyle().Foreground(homePalette.dim).Strikethrough(true)
@@ -1760,23 +2097,28 @@ func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active,
 					tabs = append(tabs, inactive.Render("  "+lbl))
 				}
 			}
-			agentLines = append(agentLines, "  "+strings.Join(tabs, "  "))
+			agentLines = append(agentLines, packTabs(tabs, contentWidth-8)...)
+			agentLines = append(agentLines, m.agentEndpointLines(dim)...)
 			agentLines = append(agentLines, "")
 			agentLines = append(agentLines, dim.Render("  ←→ runner  Enter confirm  Esc cancel"))
 		case 1:
-			provLabel := providerLabels[m.agentEditProv]
+			provLabel := m.entry(m.agentEditProv).label
 			agentLines = append(agentLines, goldStyle.Render(fmt.Sprintf("  Select model for %s (%s):", role, provLabel)))
+			agentLines = append(agentLines, m.agentEndpointLines(dim)...)
 
 			models := m.modelsForProvider(m.agentEditProv)
-			if len(models) == 0 {
+			switch {
+			case m.typedMode(m.agentEditProv):
+				agentLines = append(agentLines, dim.Render("  no model list — type a model id:"), "  "+m.typed.View())
+			case len(models) == 0:
 				agentLines = append(agentLines, dim.Render("  no models available"))
-			} else {
+			default:
 				agentLines = append(agentLines, renderWindowedList(models, m.agentEditIdx, true, active, inactive, dim)...)
 			}
 			agentLines = append(agentLines, "")
 			agentLines = append(agentLines, dim.Render("  ↑↓ navigate  Enter select  Bksp reset  Esc back"))
 		case 2:
-			provLabel := providerLabels[m.agentEditProv]
+			provLabel := m.entry(m.agentEditProv).label
 			agentLines = append(agentLines, goldStyle.Render(fmt.Sprintf("  Select effort for %s (%s):", role, provLabel)))
 			if m.agentEffortLoading {
 				agentLines = append(agentLines, dim.Render("  "+m.spinner.View()+" loading effort levels…"))
@@ -1802,6 +2144,23 @@ func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active,
 	}
 
 	return setupCard("Agent Overrides", m.section == sectionAgentSetup, contentWidth, agentLines)
+}
+
+// agentEndpointLines are the dim key and base URL lines of the runner being
+// edited for an agent.
+func (m SetupModel) agentEndpointLines(dim lipgloss.Style) []string {
+	e := m.entry(m.agentEditProv)
+	var out []string
+	if kl := m.keyLineFor(e); kl != "" {
+		out = append(out, dim.Render("  "+kl))
+	}
+	if bl := m.baseURLLine(e, m.agentBaseURL); bl != "" {
+		out = append(out, dim.Render("  "+bl))
+	}
+	if e.missing {
+		out = append(out, dim.Render("  "+missingHint(e)))
+	}
+	return out
 }
 
 // setupCard wraps card lines in a pixel panel titled in its top border. The
@@ -1958,6 +2317,17 @@ func (m SetupModel) viewDeepSeekModels(active, inactive, dim lipgloss.Style) []s
 	return renderWindowedList(m.deepseekModels, m.modelIdx, m.section == sectionModel, active, inactive, dim)
 }
 
+func (m SetupModel) viewAPIModels(kind providerKind, active, inactive, dim lipgloss.Style) []string {
+	key := m.entry(kind).key()
+	if m.apiModelsLoading[key] {
+		return []string{dim.Render("  loading models…")}
+	}
+	if len(m.apiModels[key]) == 0 {
+		return []string{dim.Render("  no model list — type a model id (or add an API key with k in the provider row):"), "  " + m.typed.View()}
+	}
+	return renderWindowedList(m.apiModels[key], m.modelIdx, m.section == sectionModel, active, inactive, dim)
+}
+
 // ── Footer ───────────────────────────────────────────────────────────────────
 
 func (m SetupModel) renderFooter() string {
@@ -1966,18 +2336,29 @@ func (m SetupModel) renderFooter() string {
 	var hints []keyHint
 	switch {
 	case m.agentEditing && m.agentEditStep == 0:
+		hints = []keyHint{hint("←→", "runner")}
+		if m.entry(m.agentEditProv).isAPI() {
+			hints = append(hints, hint("k", "API key"))
+		}
+		if m.entry(m.agentEditProv).canEditURL() {
+			hints = append(hints, hint("u", "base URL"))
+		}
+		hints = append(hints, hint("Enter", "confirm"), hint("Esc", "cancel"))
+	case m.agentEditing && m.agentEditStep == 1 && m.typedMode(m.agentEditProv):
 		hints = []keyHint{
-			hint("←→", "runner"),
-			hint("Enter", "confirm"),
-			hint("Esc", "cancel"),
+			hint("type", "model id"),
+			hint("Enter", "select"),
+			hint("Esc", "back"),
 		}
 	case m.agentEditing && m.agentEditStep == 1:
 		hints = []keyHint{
 			hint("↑↓", "navigate"),
 			hint("Enter", "select"),
-			hint("Bksp", "reset"),
-			hint("Esc", "back"),
 		}
+		if m.entry(m.agentEditProv).canEditURL() {
+			hints = append(hints, hint("u", "base URL"))
+		}
+		hints = append(hints, hint("Bksp", "reset"), hint("Esc", "back"))
 	case m.agentEditing && m.agentEditStep == 2:
 		hints = []keyHint{
 			hint("↑↓", "effort"),
@@ -1985,22 +2366,46 @@ func (m SetupModel) renderFooter() string {
 			hint("Bksp", "reset"),
 			hint("Esc", "back"),
 		}
-	case m.section == sectionProvider:
+	case m.connect != nil:
 		hints = []keyHint{
-			hint("←→", "provider"),
+			hint("Enter", "test & save"),
+			hint("Esc", "cancel"),
+		}
+	case m.urlEdit != nil:
+		hints = []keyHint{
+			hint("Enter", "save"),
+			hint("empty", "reset"),
+			hint("Esc", "cancel"),
+		}
+	case m.section == sectionProvider:
+		hints = []keyHint{hint("←→", "provider"), hint("k", "API key")}
+		if m.entry(m.provider).canEditURL() {
+			hints = append(hints, hint("u", "base URL"))
+		}
+		hints = append(hints,
 			hint("Tab/↓", "models"),
 			hint("[]", "scroll"),
 			hint("Ctrl+S", "save & close"),
 			hint("Esc", "done"),
-		}
-	case m.section == sectionModel:
+		)
+	case m.section == sectionModel && m.typedMode(m.provider):
 		hints = []keyHint{
-			hint("↑↓", "navigate"),
+			hint("type", "model id"),
 			hint("Enter", "effort"),
-			hint("Tab", "next"),
+			hint("↑", "provider"),
 			hint("Ctrl+S", "save & close"),
 			hint("Esc", "done"),
 		}
+	case m.section == sectionModel:
+		hints = []keyHint{hint("↑↓", "navigate"), hint("Enter", "effort")}
+		if m.entry(m.provider).canEditURL() {
+			hints = append(hints, hint("u", "base URL"))
+		}
+		hints = append(hints,
+			hint("Tab", "next"),
+			hint("Ctrl+S", "save & close"),
+			hint("Esc", "done"),
+		)
 	case m.section == sectionEffort:
 		hints = []keyHint{
 			hint("↑↓", "effort"),
@@ -2108,13 +2513,6 @@ func fetchLMStudioModels() tea.Cmd {
 	}
 }
 
-func fetchDeepSeekModels() tea.Cmd {
-	return func() tea.Msg {
-		models, err := runner.DeepSeekListModels()
-		return deepseekModelsListMsg{models: models, err: err}
-	}
-}
-
 // checkProviderAvailability emits one providerAvailabilityMsg per provider
 // once each backend has been probed. Slow providers (HTTP timeouts) do not
 // block the others — each runs in its own goroutine via tea.Batch.
@@ -2123,6 +2521,11 @@ func checkProviderAvailability() tea.Cmd {
 	for i := range providerLabels {
 		kind := providerKind(i)
 		cmds = append(cmds, func() tea.Msg {
+			// An API provider without a key is not offline: the screen offers
+			// to add the key instead.
+			if name := apiPresetName(kind); name != "" && runner.KeySource(name, "") == "" {
+				return providerAvailabilityMsg{kind: kind}
+			}
 			return providerAvailabilityMsg{
 				kind: kind,
 				err:  runner.ProviderReachable(providerToString(kind)),
@@ -2145,9 +2548,18 @@ func findModelIndex(models []string, name string) int {
 	return 0
 }
 
+func (m SetupModel) apiLoading() bool {
+	for _, v := range m.apiModelsLoading {
+		if v {
+			return true
+		}
+	}
+	return false
+}
+
 // isLoadingModels returns true if any model list is still being fetched.
 func (m SetupModel) isLoadingModels() bool {
-	return m.modelsLoading || m.claudeModelsLoading || m.ollamaModelsLoading || m.mlxModelsLoading || m.codexModelsLoading || m.copilotModelsLoading || m.lmstudioModelsLoading || m.deepseekModelsLoading
+	return m.modelsLoading || m.claudeModelsLoading || m.ollamaModelsLoading || m.mlxModelsLoading || m.codexModelsLoading || m.copilotModelsLoading || m.lmstudioModelsLoading || m.deepseekModelsLoading || m.apiLoading()
 }
 
 // ensureSectionVisible scrolls the viewport so the focused section is visible.

@@ -34,8 +34,9 @@ func Ping(provider, model string) error {
 		return pingMLX(ctx, model)
 	case "lmstudio":
 		return pingHTTP(ctx, lmStudioBaseURL+"/v1/models", "lmstudio")
-	case "deepseek":
-		return pingAPI(ctx, "deepseek", deepSeekBaseURL, deepSeekKeyEnv)
+	case "deepseek", "openrouter", "groq":
+		pr, _ := PresetByName(provider)
+		return pingAPI(ctx, provider, pr.BaseURL, pr.KeyEnv)
 	case "openai":
 		// The generic runner's base_url and key variable live in the agent
 		// config, which Ping does not receive, so it cannot be checked here.
@@ -69,8 +70,9 @@ func ProviderReachable(provider string) error {
 		return pingHTTP(ctx, mlxBaseURL+"/v1/models", "omlx")
 	case "lmstudio":
 		return pingHTTP(ctx, lmStudioBaseURL+"/v1/models", "lmstudio")
-	case "deepseek":
-		return pingAPI(ctx, "deepseek", deepSeekBaseURL, deepSeekKeyEnv)
+	case "deepseek", "openrouter", "groq":
+		pr, _ := PresetByName(provider)
+		return pingAPI(ctx, provider, pr.BaseURL, pr.KeyEnv)
 	case "openai":
 		// The generic runner's base_url and key variable live in the agent
 		// config, which Ping does not receive, so it cannot be checked here.
@@ -183,10 +185,22 @@ func pingHTTP(ctx context.Context, url, label string) error {
 	return nil
 }
 
+// PingAPI checks an OpenAI-compatible endpoint at baseURL with the key of the
+// provider credName (a preset or a saved custom provider).
+func PingAPI(credName, baseURL string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)
+	defer cancel()
+	keyEnv := ""
+	if p, ok := PresetByName(credName); ok {
+		keyEnv = p.KeyEnv
+	}
+	return pingAPI(ctx, credName, baseURL, keyEnv)
+}
+
 // pingAPI checks a hosted OpenAI-compatible API: the key env var must be set
 // and GET <base>/models must answer 200.
 func pingAPI(ctx context.Context, label, baseURL, keyEnv string) error {
-	key, err := apiKeyFromEnv(label, keyEnv)
+	key, _, err := ResolveKey(label, keyEnv)
 	if err != nil {
 		return err
 	}

@@ -84,6 +84,10 @@ func main() {
 		memoryCmd(os.Args[2:])
 	case "doctor":
 		doctorCmd(os.Args[2:])
+	case "connect":
+		connectCmd(os.Args[2:])
+	case "disconnect":
+		disconnectCmd(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -107,6 +111,10 @@ func usage() {
 	  ls                                  List running decsr tmux sessions
 	  --tmux                              Run decsr inside a tmux session that survives a closed terminal (also: ui.tmux)
 	  doctor                              Check git, config, runners and optional tools
+	  connect <deepseek|openai|openrouter|groq|custom> [--no-test]
+	                                      Save an API key (hidden input, or piped on stdin) and pick the roles that use it
+	  connect --list                      List saved providers (masked keys) and API keys set in the environment
+	  disconnect <name> [--yes]           Delete a saved API key
 	  report                              Summarize last run artifacts
 	  monitor                             Open the control TUI against a running bus
 	  approve                             Create approval marker

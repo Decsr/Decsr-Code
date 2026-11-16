@@ -86,6 +86,12 @@ type wsDeps struct {
 	// cfg returns the live config for pricing and the budget; nil uses the
 	// config the engine was attached with.
 	cfg func() config.Config
+	// probeKey tests an API key with GET <base>/models (/connect); nil calls
+	// the real endpoint.
+	probeKey connectProbeFn
+	// useProvider writes runner/model for the lead or all roles into the
+	// global config and returns the reloaded config.
+	useProvider connectApplyFn
 }
 
 func (d *wsDeps) fillDefaults(root string) {
@@ -117,6 +123,14 @@ func (d *wsDeps) fillDefaults(root string) {
 	}
 	if d.installPlugin == nil {
 		d.installPlugin = plugins.Install
+	}
+	if d.useProvider == nil {
+		d.useProvider = func(runnerName, provider, model string, all bool) (config.Config, error) {
+			if err := config.UseProviderGlobal(runnerName, provider, model, all); err != nil {
+				return config.Config{}, err
+			}
+			return config.Load(root)
+		}
 	}
 }
 
@@ -268,6 +282,17 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 			setCfg(c)
 			return c, nil
 		},
+		useProvider: func(runnerName, provider, model string, all bool) (config.Config, error) {
+			if err := config.UseProviderGlobal(runnerName, provider, model, all); err != nil {
+				return config.Config{}, err
+			}
+			c, err := config.Load(root)
+			if err != nil {
+				return config.Config{}, err
+			}
+			setCfg(c)
+			return c, nil
+		},
 		checkCmds: checkCmds,
 		loadPlugins: func() plugins.Set {
 			set := plugins.Load(root)
@@ -327,6 +352,7 @@ const (
 	wsOverlayText
 	wsOverlayInfo
 	wsOverlaySkills
+	wsOverlayConnect
 )
 
 // wsConfirm is a pending y/n question. kind: quit | menu | clear | delsession
@@ -502,6 +528,7 @@ type workspaceModel struct {
 	focus         wsFocus
 	showHelp      bool
 	overlay       wsOverlay
+	conn          *connectModel // the /connect overlay
 	confirm       wsConfirm
 	openMenu      bool
 	switchTo      string
@@ -815,6 +842,8 @@ func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onEvent(msg)
 	case wsInstallMsg:
 		return m.onInstalled(msg)
+	case connectProbeMsg, connectTickMsg, connectSavedMsg, connectClosedMsg:
+		return m.onConnectMsg(msg)
 	case wsPRMsg:
 		return m.onPRMsg(msg)
 	case wsIssueMsg:
@@ -1841,6 +1870,9 @@ func (m workspaceModel) overlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case wsOverlayText:
 		return m.textKey(msg)
 
+	case wsOverlayConnect:
+		return m.connectKey(msg)
+
 	case wsOverlayInfo:
 		switch k {
 		case "esc", "q", "enter":
@@ -2116,6 +2148,11 @@ func (m workspaceModel) overlayBox() string {
 			return ""
 		}
 		return renderSkillPicker("Skills for "+n.ID+" · "+n.Title, m.skillItems, m.skillSel, m.skillIdx, w, h)
+	case wsOverlayConnect:
+		if m.conn == nil {
+			return ""
+		}
+		return m.conn.box(w)
 	case wsOverlaySessions, wsOverlayProjects, wsOverlayProfiles, wsOverlayText, wsOverlayInfo:
 		return m.listBox()
 	}

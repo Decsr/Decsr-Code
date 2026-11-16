@@ -295,6 +295,7 @@ prompt and lands there.
 | `/resume` | Pick a saved session of this project |
 | `/project` | Switch to another project (see [Switching project](#switching-project)) |
 | `/profile` | Save or apply a profile of role settings (see [Profiles](#profiles)) |
+| `/connect [provider]` | Save an API key for DeepSeek, OpenAI, OpenRouter, Groq or a custom provider (see [Connect a provider](#connect-a-provider)) |
 | `/roles` (`/agents`) | List all roles, with their skills, and create a new one |
 | `/plugin` (`/plugins`) | List plugins; `/plugin available`, `/plugin install <name>`, `/plugin enable <name>`, `/plugin disable <name>` and `/plugin reload` (see [Plugins](#plugins)) |
 | `/status` | Project path, language, profile, session, node counts, roles with runner/model/effort, parallel limit, custom commands and skills found |
@@ -390,6 +391,24 @@ is written. The summary line shows `profile: <name>` when one has been applied.
 A project file or profile can only add to the global configuration: it cannot
 clear a globally configured `skills` list (a non-empty list replaces it) or a
 `read_only: true` flag (a missing or `false` value changes nothing).
+
+## Connect a provider
+
+`/connect` opens a list of the API providers (DeepSeek, OpenAI, OpenRouter, Groq,
+saved custom providers and "custom provider…"), each marked `✓ saved`, `✓ env`
+or `not set`. `/connect deepseek` skips the list. After you choose one, paste
+the key into the masked input (it shows dots, never the key). `Enter` tests the
+key with `GET <base_url>/models` and saves it to `~/.decsr/credentials.json`;
+`Esc` cancels. A rejected key (401 or 403) is not saved; when the provider
+cannot be reached you can save the key anyway with `y`.
+
+On success the conversation shows `Connected deepseek (key saved, 12 models)`
+and the overlay asks what should use the provider: `1` the lead only, `2` all
+roles, `3` nothing now. When the provider has no default model you pick one from
+the models it returned. The choice is written to `~/.decsr/config.yaml` (runner
+and model only, never the key) and applies at once. The same command exists in
+the shell as `decsr connect`, and `/config` offers it with `k` on an API
+provider.
 
 ## Switching project
 

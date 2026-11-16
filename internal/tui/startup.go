@@ -178,7 +178,7 @@ func (m startupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if projectCfg.Agents != nil {
 					projectOverrides = projectCfg.Agents
 				}
-				setup := NewSetupModelWithOverrides(currentRunner, currentModel, currentEffort, m.cfg.Project.Language, m.cfg.Project.Name, projectOverrides)
+				setup := NewSetupModelWithOverrides(currentRunner, currentModel, currentEffort, m.cfg.Project.Language, m.cfg.Project.Name, projectOverrides).WithGlobalAgents(m.cfg.Agents)
 				setup.root = m.root
 				setup.width, setup.height = m.width, m.height
 				setup.syncViewport()
@@ -214,13 +214,14 @@ func (m startupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				globalAgents := make(map[string]config.AgentConfig)
 				for role, ac := range m.cfg.Agents {
 					ac.Runner = msg.provider
+					ac.Provider, ac.BaseURL = msg.providerName, msg.baseURL
 					if msg.model != "" {
 						ac.Model = msg.model
 					}
 					ac.Effort = msg.effort
 					globalAgents[role] = ac
 				}
-				_ = config.SaveGlobal(config.Config{
+				_ = config.SaveGlobalEndpoints(config.Config{
 					Agents: globalAgents,
 				})
 

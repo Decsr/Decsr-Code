@@ -132,8 +132,21 @@ Supports multiple runners out of the box:
 
 **API runners** (OpenAI-compatible HTTP APIs, text mode: plain chat completion, no tools):
 
-- **DeepSeek** (`deepseek`) — preset of the generic runner, defaults to `https://api.deepseek.com` and `DEEPSEEK_API_KEY`
-- **OpenAI-compatible** (`openai`) — any provider with a chat completions API (OpenAI, OpenRouter, Together, a self-hosted gateway); configured in yaml only, it is not offered in the setup screen
+- **DeepSeek** (`deepseek`), **OpenAI** (`openai`), **OpenRouter** (`openrouter`), **Groq** (`groq`) — presets with a default base URL and key variable
+- **Custom** — any provider with a chat completions API (Together, a self-hosted gateway); `runner: openai` with `base_url`, or a saved custom provider
+
+Connect a provider once and decsr keeps the key for you:
+
+```bash
+decsr connect deepseek          # asks for the key (hidden), tests it, saves it
+echo "$KEY" | decsr connect groq    # or pipe the key; it is never a command-line argument
+decsr connect --list            # saved providers with masked keys, plus keys set in the environment
+decsr disconnect deepseek       # delete a saved key
+```
+
+`decsr connect` tests the key with `GET <base_url>/models`, saves it in `~/.decsr/credentials.json` (directory `0700`, file `0600`; decsr refuses a file that is readable by others) and asks whether the lead, all roles or nothing should use the provider. In the Workspace use `/connect`, and in `/config` press `k` on an API provider. Providers (including saved custom ones and `+ custom…`) and base URLs (`u`) can also be set in `/config`.
+
+The alternative is an environment variable: `export DEEPSEEK_API_KEY=...` (`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`). The key is looked up in this order: the environment variable (`api_key_env`, else the preset's), then the saved credential. The key is never written to a yaml config; `decsr doctor` shows where each key comes from.
 
 ```yaml
 agents:
@@ -145,9 +158,13 @@ agents:
     base_url: https://openrouter.ai/api/v1
     api_key_env: OPENROUTER_API_KEY
     model: deepseek/deepseek-chat
+  docs:
+    runner: openai
+    provider: acme             # a custom provider saved with `decsr connect custom`; its base URL is used
+    model: acme-large
 ```
 
-The API key is read only from the environment variable named in `api_key_env` and is never written to the config. `base_url` and `model` are required for `openai`; `deepseek` fills in missing values with its defaults.
+`base_url`, `api_key_env` and `model` in the config override the preset. `openai` and the other presets without a default model need `model`.
 
 Each agent can use a different runner and model — configure globally (`~/.decsr/config.yaml`) or per-project (`.decsr/project.yaml`).
 

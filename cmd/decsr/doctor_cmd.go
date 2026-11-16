@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Decsr/Decsr-Code/internal/config"
+	"github.com/Decsr/Decsr-Code/internal/credentials"
 	"github.com/Decsr/Decsr-Code/internal/doctor"
 	"github.com/Decsr/Decsr-Code/internal/runner"
 )
@@ -41,7 +42,7 @@ func buildDoctorDeps(root string) doctor.Deps {
 	agents := make([]doctor.Agent, 0, len(names))
 	for _, n := range names {
 		a := cfg.Agents[n]
-		agents = append(agents, doctor.Agent{Name: n, Runner: a.Runner, BaseURL: a.BaseURL, APIKeyEnv: a.APIKeyEnv})
+		agents = append(agents, doctor.Agent{Name: n, Runner: a.Runner, BaseURL: a.BaseURL, APIKeyEnv: a.APIKeyEnv, Provider: a.Provider})
 	}
 
 	layers := []doctor.Layer{}
@@ -58,6 +59,12 @@ func buildDoctorDeps(root string) doctor.Deps {
 		Getenv:    os.Getenv,
 		Run:       runDoctorCmd,
 		Reachable: runner.ProviderReachable,
+		KeySource: runner.KeySource,
+		CredsErr:  credentials.Default().CheckPerms,
+		PresetKeyEnv: func(name string) string {
+			p, _ := runner.PresetByName(name)
+			return p.KeyEnv
+		},
 		Writable:  dirWritable,
 		Root:      root,
 		Home:      home,

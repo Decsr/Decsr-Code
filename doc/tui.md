@@ -253,9 +253,30 @@ closes.
 
 Project Setup edits per-agent overrides in three steps:
 
-1. **Runner** — OpenCode, Claude, Ollama, oMLX, Codex, Copilot, or LM Studio.
-2. **Model** — the provider's model list.
+1. **Runner** — OpenCode, Claude, Ollama, oMLX, Codex, Copilot, LM Studio,
+   DeepSeek, OpenAI, OpenRouter, Groq, each saved custom provider (shown as
+   `<name> (custom)`), or `+ custom…` to add one.
+2. **Model** — the provider's model list. An API provider whose `/models` list
+   is empty or fails shows a text input instead: type the model id.
 3. **Effort** — the levels supported by that model, or provider default.
+
+The provider row of Global Settings offers the same runners. A custom provider
+is stored as `runner: openai` plus `provider: <name>` and uses the base URL
+saved with it; switching to another runner removes `provider`. If the config
+names a custom provider that is no longer saved, it shows as `<name> (missing)`
+with the hint `decsr connect custom`.
+
+API providers have two more keys, on the provider row and in the per-agent
+runner step (in the model step `u` also works while a list is shown; with the
+typed model input use the provider row, because letters go to the input):
+
+| Key | Action |
+|---|---|
+| `k` | Add or replace the API key in a masked input, tested with `GET /models`. On `+ custom…` it asks for a name, base URL and key. The key is saved in `~/.decsr/credentials.json` (`0600`) and is never shown. |
+| `u` | Edit the base URL. https is required; http only for `localhost` and `127.0.0.1`. Enter saves, Esc cancels. For OpenAI, OpenRouter, Groq and DeepSeek the URL is the `base_url` override of the agent (of every agent in Global Settings) in `config.yaml` or `project.yaml`, written with the next Enter or Ctrl+S; an empty input removes the override. For a custom provider the URL is saved at once in `credentials.json` with the key unchanged, and cannot be empty. |
+
+The effective URL is shown under the API key line, with `(override)` when a
+config override is set. The model list is fetched again after a URL change.
 
 Saving the effort step writes that agent's override and returns to the agent
 list. Custom Workspace roles (see [workspace.md](workspace.md)) are listed after
@@ -273,3 +294,4 @@ The chosen effort is stored as `agents.<role>.effort` in
 | OpenCode | `opencode run -m provider/model#<level>` (cloud models only) |
 | Ollama | `/api/chat` → `"think": "<level>"` |
 | LM Studio / oMLX | `/v1/chat/completions` → `"reasoning_effort": "<level>"` |
+| DeepSeek / OpenAI / OpenRouter / Groq / custom providers | `/v1/chat/completions` → `"reasoning_effort": "<level>"` when `effort` is set in the config; the setup screen lists no levels for them |

@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `/config` lists every saved custom provider as `<name> (custom)` plus a
+  `+ custom…` entry (name, base URL, key) in the provider row and the per-agent
+  runner step, and selecting one writes `runner: openai` with `provider: <name>`.
+  `u` edits the base URL of OpenAI, OpenRouter, Groq, DeepSeek (saved as the
+  `base_url` override) and of custom providers (saved with the provider), and
+  the model list is fetched again. A provider whose model list is empty or
+  fails takes a typed model id.
+- Connect a provider: `decsr connect <deepseek|openai|openrouter|groq|custom>`
+  reads the API key hidden (or from stdin), tests it with `GET /models`, saves it
+  in `~/.decsr/credentials.json` (0600, refused when readable by others) and
+  can make the provider the lead's or every role's runner. `decsr connect
+  --list` and `decsr disconnect <name>` manage saved keys. `/connect` in the
+  Workspace and `k` in `/config` do the same with a masked input. `openai`,
+  `openrouter` and `groq` are new runner presets next to `deepseek`; the key is
+  taken from the environment variable first, then the saved credential, and
+  `decsr doctor` shows its source. `provider:` in an agent config picks a saved
+  custom provider.
 - Autonomy levels in the Workspace: `workspace.autonomy` (1 manual, 2 assisted,
   3 unattended) and `/autonomy` accept roles and run after a split, add up to
   `workspace.max_auto_fixes` fix nodes after a failed Build & test and, at level

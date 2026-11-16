@@ -223,6 +223,7 @@ type AgentConfig struct {
 	Description      string   `yaml:"description,omitempty"`        // role description (custom workspace roles)
 	Effort           string   `yaml:"effort,omitempty"`             // "" = unset, "default" = provider default
 	BaseURL          string   `yaml:"base_url,omitempty"`           // API runners (openai, deepseek): endpoint base, e.g. https://openrouter.ai/api/v1
+	Provider         string   `yaml:"provider,omitempty"`           // API runners: name of a saved custom provider (decsr connect custom) whose base_url is used when base_url is empty
 	APIKeyEnv        string   `yaml:"api_key_env,omitempty"`        // API runners: NAME of the env var holding the key; the key is never stored
 	MaxContextTokens int      `yaml:"max_context_tokens,omitempty"` // 0 = no limit (for local models)
 	ReadOnly         bool     `yaml:"read_only,omitempty"`          // workspace role that reports only and never writes files
@@ -266,7 +267,14 @@ func Save(root string, cfg Config) error {
 }
 
 // SaveGlobal writes cfg to ~/.decsr/config.yaml.
-func SaveGlobal(cfg Config) error {
+func SaveGlobal(cfg Config) error { return saveGlobal(cfg, false) }
+
+// SaveGlobalEndpoints is SaveGlobal that also writes base_url and provider of
+// every agent in cfg exactly as given, so an empty value removes it from the
+// file (a plain SaveGlobal keeps the old value when the new one is empty).
+func SaveGlobalEndpoints(cfg Config) error { return saveGlobal(cfg, true) }
+
+func saveGlobal(cfg Config, exactEndpoints bool) error {
 	dir, err := EnsureGlobalDir()
 	if err != nil {
 		return err
@@ -284,6 +292,14 @@ func SaveGlobal(cfg Config) error {
 		}
 	}
 	merge(&existing, cfg)
+	if exactEndpoints {
+		for role, ac := range cfg.Agents {
+			if cur, ok := existing.Agents[role]; ok {
+				cur.BaseURL, cur.Provider = ac.BaseURL, ac.Provider
+				existing.Agents[role] = cur
+			}
+		}
+	}
 	data, err := yaml.Marshal(existing)
 	if err != nil {
 		return err
@@ -602,6 +618,9 @@ func merge(dst *Config, src Config) {
 			}
 			if ac.APIKeyEnv != "" {
 				existing.APIKeyEnv = ac.APIKeyEnv
+			}
+			if ac.Provider != "" {
+				existing.Provider = ac.Provider
 			}
 			if ac.Description != "" {
 				existing.Description = ac.Description

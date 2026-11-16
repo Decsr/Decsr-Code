@@ -122,7 +122,7 @@ func TestOpenAIRunner_MissingKey(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "TEST_API_KEY") {
 		t.Fatalf("err = %v", err)
 	}
-	r.APIKeyEnv = ""
+	r.Provider, r.APIKeyEnv = "acme", ""
 	if _, err := r.Complete(context.Background(), CompletionRequest{}); err == nil || !strings.Contains(err.Error(), "api_key_env") {
 		t.Fatalf("err = %v", err)
 	}
