@@ -80,19 +80,19 @@ func TestWorkspaceWarnings(t *testing.T) {
 	g.Nodes[0].Status = workspace.StatusDone
 	g.Nodes[0].Role = "coder"
 	g.Nodes[0].Warnings = []string{"ignored write to .git/config", "second"}
-	out := plain(g, canvasOpts{width: 100, height: 20, selected: "T1"})
+	out := plain(g, canvasOpts{width: 140, height: 20, selected: "T1"})
 	if !strings.Contains(out, "✓ done ⚠") {
 		t.Fatalf("no warning mark in the title border:\n%s", out)
 	}
 	insp := ansi.Strip(renderInspector(g, g.Node("T1"), config.DefaultConfig(), plugins.Set{}, 36, 30, nil))
-	i, j := strings.Index(insp, "WARNINGS"), strings.Index(insp, "⚠ ignored write")
+	i, j := strings.Index(insp, "Warnings"), strings.Index(insp, "⚠ ignored write")
 	if i < 0 || j < i {
-		t.Fatalf("inspector lacks WARNINGS:\n%s", insp)
+		t.Fatalf("inspector lacks Warnings:\n%s", insp)
 	}
 	g.Nodes[0].Summary = "did it"
 	insp = ansi.Strip(renderInspector(g, g.Node("T1"), config.DefaultConfig(), plugins.Set{}, 36, 30, nil))
-	if strings.Index(insp, "WARNINGS") > strings.Index(insp, "SUMMARY") {
-		t.Fatalf("WARNINGS must come above SUMMARY:\n%s", insp)
+	if strings.Index(insp, "Warnings") > strings.Index(insp, "Summary") {
+		t.Fatalf("Warnings must come above Summary:\n%s", insp)
 	}
 
 	h := newWSHarness(t)
@@ -209,7 +209,7 @@ func TestWorkspacePaletteTouchesInput(t *testing.T) {
 			if strings.HasPrefix(strings.TrimSpace(l), "▸ /") || strings.HasPrefix(strings.TrimSpace(l), "/") {
 				last = i
 			}
-			if box < 0 && strings.HasPrefix(l, "┌") && i > 3 && last >= 0 {
+			if box < 0 && strings.HasPrefix(strings.TrimSpace(l), "╭") && i > 3 && last >= 0 {
 				box = i
 			}
 		}
@@ -264,12 +264,13 @@ func TestCanvasShowsShortModel(t *testing.T) {
 	ac.Runner, ac.Model = "claude", "anthropic/sonnet"
 	cfg.Agents["coder"] = ac
 	g := diamond()
-	models := map[string]string{}
+	models, runners := map[string]string{}, map[string]string{}
 	for _, r := range workspace.Roles(cfg) {
 		models[r.Name] = shortModel(r.Agent.Runner, r.Agent.Model)
+		runners[r.Name] = r.Agent.Runner
 	}
-	out := plain(g, canvasOpts{width: 100, height: 10, models: models})
-	if !strings.Contains(out, "coder · claude:sonnet") {
+	out := plain(g, canvasOpts{width: 100, height: 10, models: models, runners: runners})
+	if !strings.Contains(out, "✳ coder · sonnet") {
 		t.Fatalf("no short model:\n%s", out)
 	}
 }
@@ -283,14 +284,14 @@ func TestInspectorDescriptionUsesFreeSpace(t *testing.T) {
 	if strings.Count(out, "word") < 55 || strings.Contains(out, "…") {
 		t.Fatalf("description was cut although the pane is free:\n%s", out)
 	}
-	// With output on a running node the OUTPUT keeps four lines.
+	// With output on a running node the Output keeps four lines.
 	n.Status = workspace.StatusRunning
 	n.Role = "coder"
 	tail := []string{"o1", "o2", "o3", "o4", "o5", "o6"}
 	out = ansi.Strip(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, 34, 16, tail))
-	for _, want := range []string{"o3", "o4", "o5", "o6", "OUTPUT"} {
+	for _, want := range []string{"o3", "o4", "o5", "o6", "Output"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("OUTPUT lost %q:\n%s", want, out)
+			t.Fatalf("Output lost %q:\n%s", want, out)
 		}
 	}
 	assertFits(t, "inspector", out, 34, 16)
@@ -300,16 +301,16 @@ func TestWorkspaceFramesAndFit(t *testing.T) {
 	h := newWSHarness(t)
 	h.toGraph()
 	v := h.view()
-	for _, want := range []string{"┌─ GRAPH", "┌─ T1 "} {
+	for _, want := range []string{"Graph", "Inspector", "T1 · "} {
 		if !strings.Contains(v, want) {
-			t.Fatalf("missing frame %q:\n%s", want, v)
+			t.Fatalf("missing pane label %q:\n%s", want, v)
 		}
 	}
 	lines := strings.Split(v, "\n")
 	if len(lines) != 34 {
 		t.Fatalf("%d lines", len(lines))
 	}
-	for sel, wantTitle := range map[string]string{"T2": "┌─ T2 ", "CHECK": "┌─ CHECK "} {
+	for sel, wantTitle := range map[string]string{"T2": "T2 · ", "CHECK": "CHECK · "} {
 		h.m.sel = sel
 		if !strings.Contains(h.view(), wantTitle) {
 			t.Fatalf("inspector title for %s missing", sel)

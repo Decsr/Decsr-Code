@@ -192,7 +192,7 @@ func (r CopilotRunner) Complete(ctx context.Context, req CompletionRequest) (<-c
 		model = r.Model
 	}
 
-	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, userContent.String(), req.SystemPrompt, model, NormalizeEffort(req.Effort))
+	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, userContent.String(), req.SystemPrompt, model, NormalizeEffort(req.Effort), req.Dir)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +209,7 @@ func (r CopilotRunner) Complete(ctx context.Context, req CompletionRequest) (<-c
 // copilotMaxPromptBytes stays safely under Linux MAX_ARG_STRLEN (128 KiB).
 const copilotMaxPromptBytes = 100 * 1024
 
-func (r CopilotRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, model, effort string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
+func (r CopilotRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, model, effort, dir string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "copilot"
@@ -237,6 +237,7 @@ func (r CopilotRunner) startStreamingProcess(ctx context.Context, prompt, system
 	}
 
 	cmd := executil.CommandContext(ctx, bin, args...)
+	cmd.Dir = dir
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("copilot: stdout pipe: %w", err)

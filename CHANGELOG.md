@@ -8,10 +8,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ui.icons` (`unicode`, `ascii` or `nerd`; default `unicode`) picks the runner
+  glyphs shown on Workspace node cards and in the inspector. See
+  `doc/workspace.md`.
+- `/pr` pushes the session branch and creates (or finds) its pull request with
+  `gh`: title from the first task, Markdown body with the node table and Build
+  & test result. `/pr watch` polls the pull request: failing CI becomes a
+  `Fix CI` node with the log tail (once per head commit, up to
+  `workspace.max_ci_fixes`), new review comments become one `Address review
+  comments` node, and a merged fix node is pushed again. `/pr stop` ends it. New
+  `workspace` options: `pr_base`, `pr_remote`, `pr_poll_seconds`,
+  `max_ci_fixes`, `pr_auto_fix`. See `doc/workspace.md`.
+- "Needs you" notifications. The Workspace alerts you when a split waits for
+  roles, a plugin question waits for an answer, a node or Build & test fails,
+  Build & test passes, or a run ends. Channels: terminal bell, desktop
+  (`notify-send` or `osascript`), cmux and an optional webhook (`ntfy`, `slack`
+  or `discord` format). New `notifications` options: `disable_bell`,
+  `disable_desktop`, `webhook`, `webhook_format`. The classic pipeline uses the
+  same channels. `decsr doctor` reports the active channels. See
+  `doc/workspace.md`.
+- Workspace nodes can run in isolated git worktrees: each node gets its own
+  branch and worktree, finished nodes are merged into a session branch
+  `decsr/<session>`, and the new `/merge` command merges that branch into your
+  checkout. Set `workspace.isolation` to `worktree` or `shared`; empty picks
+  worktrees inside a git repository with a commit. See `doc/workspace.md`.
+- CLI runners (`claude`, `codex`, `copilot`, `opencode`) start their process in
+  the directory the worker was given (`CompletionRequest.Dir`).
 - `openai` runner for any OpenAI-compatible chat completions API and a
   `deepseek` preset (text mode, no tools). Set `base_url` and `api_key_env`
   per agent; the key is read from that environment variable and never stored.
   DeepSeek is also selectable in the setup screen.
+- `decsr doctor` checks git, the git repo, `.decsr` write access, config
+  layers, runner reachability and API keys (never printed), and optional tools
+  (`tmux`, `gh`, terminal). It prints a fix hint per problem and exits 1 when a
+  required check fails.
+- One-line install: `scripts/install.sh` downloads the latest release (or
+  `DECSR_VERSION`), verifies its checksum and installs `decsr` to
+  `~/.local/bin` (or `DECSR_INSTALL_DIR`).
+- Releases publish a Homebrew cask to `Decsr/homebrew-tap` when the
+  `HOMEBREW_TAP_GITHUB_TOKEN` secret is set (skipped otherwise).
+
+### Changed
+- A calmer Workspace look: no double borders (panes share one divider, rounded
+  borders only on node cards, overlays and the prompt), dim title-case labels
+  instead of all-caps ones, bold titles with dim metadata, a runner glyph and
+  short model on each node card and in the inspector, node cards that use the
+  free width, spare graph rows given to the conversation, a one-line header
+  with the progress on the right and a one-line failure banner, and a small
+  semantic colour set (accent, green, amber, red, dim).
+- Workspace nodes now run in their own git worktrees by default in a git
+  repository with a commit; set `workspace.isolation: shared` for the old
+  behaviour (all nodes in your checkout).
+
+### Fixed
+- The session branch no longer starts from the raw `git stash create` commit
+  ("WIP on …" and "index on …" commits): uncommitted changes at session start
+  are one plain commit on top of HEAD, so `/merge` and pull requests carry no
+  stash-shaped history.
 
 ## [0.6.0] - 2026-11-13
 

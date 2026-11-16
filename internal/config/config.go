@@ -31,6 +31,7 @@ type Config struct {
 	ModelMemory    ModelMemoryConfig      `yaml:"model_memory,omitempty"`
 	Notifications  NotifyConfig           `yaml:"notifications,omitempty"`
 	Workspace      WorkspaceConfig        `yaml:"workspace,omitempty"`
+	UI             UIConfig               `yaml:"ui,omitempty"`
 
 	// PluginAgents are the roles loaded from plugins, keyed "<plugin>:<agent>".
 	// They are filled in at run time and never written to a config file.
@@ -47,6 +48,24 @@ type PluginAgent struct {
 // WorkspaceConfig controls the node workspace.
 type WorkspaceConfig struct {
 	MaxParallel int `yaml:"max_parallel,omitempty"` // 0 = default (3)
+	// Isolation is "worktree" (each node works in its own git worktree),
+	// "shared" (all nodes work in the project checkout) or "" (auto: worktree
+	// inside a git repo with a commit, shared otherwise).
+	Isolation string `yaml:"isolation,omitempty"`
+
+	// Pull request loop (/pr).
+	PRBase        string `yaml:"pr_base,omitempty"`         // "" = the branch checked out in the project
+	PRRemote      string `yaml:"pr_remote,omitempty"`       // "" = origin
+	PRPollSeconds int    `yaml:"pr_poll_seconds,omitempty"` // 0 = 60; at least 15
+	MaxCIFixes    int    `yaml:"max_ci_fixes,omitempty"`    // 0 = 3
+	PRAutoFix     bool   `yaml:"pr_auto_fix,omitempty"`     // run the fix nodes of /pr watch without asking
+}
+
+// UIConfig holds presentation settings.
+type UIConfig struct {
+	// Icons picks the glyph set for runner identity: "unicode" (default),
+	// "ascii" or "nerd". "" = unicode.
+	Icons string `yaml:"icons,omitempty"`
 }
 
 // NotifyConfig controls external notifications (e.g. cmux alerts on approval
@@ -54,7 +73,11 @@ type WorkspaceConfig struct {
 // fire when the target tool is actually running, so the opt-out is expressed as
 // a "disable" flag to fit the layered config's "true overrides" merge rule.
 type NotifyConfig struct {
-	DisableCMux bool `yaml:"disable_cmux,omitempty"` // true = never send cmux notifications
+	DisableCMux    bool   `yaml:"disable_cmux,omitempty"`    // true = never send cmux notifications
+	DisableBell    bool   `yaml:"disable_bell,omitempty"`    // true = never ring the terminal bell
+	DisableDesktop bool   `yaml:"disable_desktop,omitempty"` // true = never send desktop notifications
+	Webhook        string `yaml:"webhook,omitempty"`         // URL that receives a POST per notification; "" = off
+	WebhookFormat  string `yaml:"webhook_format,omitempty"`  // "ntfy" (default) | "slack" | "discord"
 }
 
 // ModelMemoryConfig bounds how much memory local models may use. The two modes
@@ -468,9 +491,43 @@ func merge(dst *Config, src Config) {
 	if src.Notifications.DisableCMux {
 		dst.Notifications.DisableCMux = true
 	}
+	if src.Notifications.DisableBell {
+		dst.Notifications.DisableBell = true
+	}
+	if src.Notifications.DisableDesktop {
+		dst.Notifications.DisableDesktop = true
+	}
+	if src.Notifications.Webhook != "" {
+		dst.Notifications.Webhook = src.Notifications.Webhook
+	}
+	if src.Notifications.WebhookFormat != "" {
+		dst.Notifications.WebhookFormat = src.Notifications.WebhookFormat
+	}
+
+	if src.UI.Icons != "" {
+		dst.UI.Icons = src.UI.Icons
+	}
 
 	if src.Workspace.MaxParallel > 0 {
 		dst.Workspace.MaxParallel = src.Workspace.MaxParallel
+	}
+	if src.Workspace.Isolation != "" {
+		dst.Workspace.Isolation = src.Workspace.Isolation
+	}
+	if src.Workspace.PRBase != "" {
+		dst.Workspace.PRBase = src.Workspace.PRBase
+	}
+	if src.Workspace.PRRemote != "" {
+		dst.Workspace.PRRemote = src.Workspace.PRRemote
+	}
+	if src.Workspace.PRPollSeconds > 0 {
+		dst.Workspace.PRPollSeconds = src.Workspace.PRPollSeconds
+	}
+	if src.Workspace.MaxCIFixes > 0 {
+		dst.Workspace.MaxCIFixes = src.Workspace.MaxCIFixes
+	}
+	if src.Workspace.PRAutoFix {
+		dst.Workspace.PRAutoFix = true
 	}
 
 	if src.Agents != nil {

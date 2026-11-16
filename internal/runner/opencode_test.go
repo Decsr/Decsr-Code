@@ -66,7 +66,7 @@ func writeFakeOpenCode(t *testing.T, stdout string) string {
 
 func TestOpenCodeRunRaw_AnswerTextMentioningRateLimitIsNotRateLimit(t *testing.T) {
 	bin := writeFakeOpenCode(t, `{"type":"text","part":{"text":"To handle a rate limit, back off on HTTP 429 (too many requests)."}}`+"\n")
-	out, err := OpenCodeRunner{Binary: bin}.runRaw(context.Background(), "hi", "m", "")
+	out, err := OpenCodeRunner{Binary: bin}.runRaw(context.Background(), "hi", "m", "", "")
 	if err != nil {
 		t.Fatalf("answer text must not be classified as rate limit: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestOpenCodeRunRaw_AnswerTextMentioningRateLimitIsNotRateLimit(t *testing.T
 
 func TestOpenCodeRunRaw_ErrorEventIsRateLimit(t *testing.T) {
 	bin := writeFakeOpenCode(t, `{"type":"error","error":{"data":{"message":"429 too many requests"}}}`+"\n")
-	_, err := OpenCodeRunner{Binary: bin}.runRaw(context.Background(), "hi", "m", "")
+	_, err := OpenCodeRunner{Binary: bin}.runRaw(context.Background(), "hi", "m", "", "")
 	var rl *RateLimitError
 	if !errors.As(err, &rl) {
 		t.Fatalf("expected RateLimitError, got %v", err)
@@ -93,7 +93,7 @@ func TestOpenCodeRunRaw_AppliesEffortVariant(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := (OpenCodeRunner{Binary: bin}).runRaw(context.Background(), "hi", "prov/model", "high"); err != nil {
+	if _, err := (OpenCodeRunner{Binary: bin}).runRaw(context.Background(), "hi", "prov/model", "high", ""); err != nil {
 		t.Fatalf("runRaw: %v", err)
 	}
 	args, err := os.ReadFile(argsFile)
@@ -114,7 +114,7 @@ func TestOpenCodeRunRaw_LocalModelSkipsEffortVariant(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := (OpenCodeRunner{Binary: bin}).runRaw(context.Background(), "hi", "qwen2.5-coder:3b", "high"); err != nil {
+	if _, err := (OpenCodeRunner{Binary: bin}).runRaw(context.Background(), "hi", "qwen2.5-coder:3b", "high", ""); err != nil {
 		t.Fatalf("runRaw: %v", err)
 	}
 	args, err := os.ReadFile(argsFile)

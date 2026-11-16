@@ -5,8 +5,15 @@ prompt, a lead agent splits it into sub-tasks, you decide which agent does each
 one, and the assigned sub-tasks run in parallel. Every sub-task is a node in a
 graph, so you can see who does what and what is waiting on what.
 
-It is one screen: the node graph and the inspector on top, the last lines of
-the conversation under them, and the prompt at the bottom. Before the first
+It is one screen. The top line shows `◆ decsr`, the project and, when nodes run
+in worktrees, the session branch, with the progress (`2/5 done · 1 failed ·
+44.4k tok`) dim on the right; the session title is the bold line under it. Then
+come the node graph and the inspector, separated by one faint divider, the last
+lines of the conversation, the prompt in a rounded box and a hint bar. Panes
+have no frame: each is named by a dim label line (`Graph`, `Inspector`), and
+only node cards, overlays and the prompt have (rounded) borders. When the
+graph needs fewer rows than the screen gives it, the conversation takes the
+spare rows and shows more of the chat. Before the first
 task the graph pane shows `No nodes yet.` and, if this project has saved
 sessions, `N saved sessions - /resume`. Each project keeps its own sessions, so
 you can leave and continue later (see [Sessions](#sessions)).
@@ -42,27 +49,63 @@ Code, QA and so on) is unchanged; see [Reaching the classic pipeline](#reaching-
 
 ## The node graph
 
-Columns go left to right by dependency depth. Each box shows the node id, its
-title, its role and its status. Lines join a node to the nodes that depend on
-it.
+Columns go left to right by dependency depth. Each node is a rounded card: the
+first row has the id (dim) and the title (bold), the second row has the runner
+glyph, the role and the short model (dim) on the left and the status on the
+right. Lines join a node to the nodes that depend on it. The selected card is
+filled and has an accent border; a failed card has a red border.
 
 ```
- T1 Add schema     ─┐
- coder  ✓ done      ├─ T3 Write handlers ──┐
- T2 Config flags   ─┘   coder  ● running   ├─ CHECK Build & test
- qa     ✓ done                             │  ⏸ blocked
-                        T4 Docs ───────────┘
-                        ?  unassigned
+╭────────────────────────────────╮      ╭────────────────────────────────╮
+│ T1  Parse the --json flag      │──┬──▶│ T3  Tests for --json           │
+│ ✳ coder · sonnet        ✓ done │  │   │ ⬡ qa                 ! failed  │
+╰────────────────────────────────╯  │   ╰────────────────────────────────╯
 ```
+
+The card width follows the graph pane: the widest card (18 to 44 cells) that
+lets every column fit. Titles are cut only when that is not enough. When even
+18 cells per column do not fit, the graph shows only whole columns and scrolls
+sideways to follow the selected node; a dim `+2 ›` at the right edge (or
+`‹ +1` at the left) counts the columns hidden on that side.
+
+A node with no role yet shows `→ role` in dim on the left of its second row,
+the role the lead suggested, and `? unassigned` on the right. On a narrow card
+the role name is cut first; the arrow and the status never are.
 
 A longer-range dependency (to a node that is not in the column directly to the
 left) is not drawn; it is listed in the node's footer and in the inspector.
 The inspector shows the selected node's description, role, dependencies, files,
 warnings, summary or error, tokens and output; `i` shows or hides it. The
 description gets all the room the other sections leave free, and the output
-section keeps at least four lines while the node runs. A node's second line and
-the inspector show the short model name (the part after the last `/`), with the
-runner in front when it is not `opencode` (`claude:sonnet`).
+section keeps at least four lines while the node runs. Section labels are dim
+title-case words (`Role`, `Description`, `Files`, `Summary`, `Tokens`,
+`Output`). A node's second line and the inspector show the runner glyph and the
+short model name (the part after the last `/`).
+
+### Runner glyphs
+
+The glyph tells which runner a role uses. The glyph set is the `ui.icons`
+setting (`unicode`, `ascii` or `nerd`; default `unicode`):
+
+```yaml
+# .decsr/project.yaml or ~/.decsr/config.yaml
+ui:
+  icons: ascii
+```
+
+| Runner | `unicode` | `ascii` | Colour |
+|---|---|---|---|
+| claude | `✳` | `[C]` | orange |
+| codex | `◎` | `[X]` | muted |
+| opencode (the default) | `⬡` | `[O]` | muted |
+| copilot | `◈` | `[G]` | muted |
+| deepseek | `◆` | `[D]` | blue |
+| openai | `○` | `[A]` | muted |
+| ollama, lmstudio, mlx (local) | `●` | `[L]` | green |
+| any other | `·` | `[?]` | muted |
+
+`nerd` uses Nerd Font code points and falls back to the `unicode` glyph for a
+runner that has none.
 
 ### Node states
 
@@ -77,7 +120,7 @@ Status is always a glyph plus a word, never color alone.
 | `✓` | done | Finished; files it wrote are listed. |
 | `!` | failed | The run failed; the error is shown. |
 
-A `⚠` after the status in a node's title border means the node has warnings
+A `⚠` after the status on a node card means the node has warnings
 (see [Warnings](#warnings)).
 
 One node failing does not stop its siblings. Nodes that depend on it stay
@@ -105,7 +148,7 @@ shows the keys of the area that has focus.
 | `Ctrl+C` | Quit (press twice) |
 
 **Suggestions.** An empty prompt shows a dim italic suggestion in place of
-"Type a task or / for commands", and the hint bar adds `→ accept suggestion`.
+"Type a task, / for commands", and the hint bar adds `→ accept suggestion`.
 It is picked from the session state, with no model call, and only while no
 node runs and no overlay is open:
 
@@ -167,6 +210,8 @@ prompt and lands there.
 | `/help` | Keys and the full command list, including custom commands |
 | `/clear` | Save this session and start a new, empty one (asks first when nodes are unfinished) |
 | `/compact` | Fold finished nodes into the session summary (see [Compact](#compact)) |
+| `/merge` | Merge the session's branch into your current branch (see [Isolation](#isolation)) |
+| `/pr` | Push the session branch and open (or update) a pull request; `/pr watch` also turns failing CI and review comments into fix nodes, `/pr stop` ends it (see [Pull requests](#pull-requests)) |
 | `/resume` | Pick a saved session of this project |
 | `/project` | Switch to another project (see [Switching project](#switching-project)) |
 | `/profile` | Save or apply a profile of role settings (see [Profiles](#profiles)) |
@@ -180,7 +225,7 @@ prompt and lands there.
 | `/<name> [args]` | A [custom command](#custom-commands-and-skills) |
 | `/<plugin>:<name> [args]` | A command of a [plugin](#plugins) |
 
-`/clear`, `/compact`, `/project`, `/resume` and applying a profile are refused
+`/clear`, `/compact`, `/merge`, `/pr`, `/project`, `/resume` and applying a profile are refused
 while nodes are running: `stop the running nodes first`. Saving a profile stays
 allowed.
 
@@ -375,7 +420,7 @@ says so.
 
 The skills a node gets are the role's own `skills:` followed by the ones the
 lead chose, each once. A skill that does not resolve shows the usual
-`skill "..." not found` warning. The inspector lists them under SKILLS, each
+`skill "..." not found` warning. The inspector lists them under Skills, each
 marked `(role)` or `(lead)`, and `(not installed)` when no enabled plugin
 provides it. On a todo or failed work node `K` opens a checklist of the
 installed skills to change the lead's choice (the role's skills are shown but
@@ -519,9 +564,131 @@ a read-only role that changed files on disk
 (`read-only role changed files: <paths>`), or a Build & test node with no
 commands to run. The parallel-overlap warning only looks at files written from
 file blocks, not at files an agent changed with its own tools. Warnings do not fail the node.
-They show as `⚠` in the node's title border (when it fits), in a `WARNINGS`
-section of the inspector above the summary, and as `N warnings` in the summary
-line at the top of the graph.
+They show as `⚠` on the node card (when it fits), in a `Warnings`
+section of the inspector above the summary, and as `N warnings` in the progress
+text at the top right.
+
+## Isolation
+
+```yaml
+workspace:
+  isolation: ""   # "worktree", "shared" or empty for auto
+```
+
+When the project is in a git repository with at least one commit (the default,
+"auto"), every node works in its own git worktree, so parallel nodes cannot
+overwrite each other's files and an agent CLI that edits files itself only
+touches its own copy. `shared` runs all nodes in your checkout, as before;
+`worktree` asks for isolation explicitly (it still falls back to shared outside
+a git repository).
+
+- The session gets an integration branch `decsr/<session id>` with a worktree
+  in `.decsr/worktrees/<session id>/_integration`, created when the first node
+  starts. It starts from a snapshot of your working tree: your last commit plus
+  uncommitted changes to tracked files (taken with `git stash create`, so your
+  files and your stash list are not touched). The snapshot is one plain commit
+  on top of your last commit, `decsr: uncommitted changes at session start`.
+- Each node gets the branch `decsr/<session id>-<node id>` and a worktree in
+  `.decsr/worktrees/<session id>/<node id>`, created from the current tip of
+  the integration branch. A node that depends on another sees the files that
+  node wrote.
+- When a node succeeds, its changes are committed (`<node id>: <title>`, with
+  your git identity, or `decsr` when none is set) and merged into the
+  integration branch; then its worktree and branch are removed. Merges are
+  done one at a time. A node that fails or is stopped leaves nothing behind.
+- If a node's changes conflict with nodes that were merged before it, the
+  merge is aborted and the node ends failed with `merge conflict with earlier
+  nodes in: <files>`. Its branch is kept; run the node again to redo it on top
+  of the latest work.
+- Build & test runs in the integration worktree, so it checks the combined
+  result. Fix nodes are ordinary nodes: they get their own worktree and are
+  merged when they succeed.
+- `.decsr/worktrees/` is added to `.git/info/exclude`, so git ignores it.
+
+**Untracked files are not copied.** Only tracked files exist in a worktree. If
+your tree has untracked files, the first node shows a warning; `git add` the
+ones the nodes (or the build) need. Ignored files such as `node_modules` or
+`.env` are not there either.
+
+**Getting the result back.** Nothing reaches your checkout until you type
+`/merge`. It merges `decsr/<session id>` into the branch you have checked out
+(`git merge --no-ff`) and removes the session's worktrees; the branch stays,
+for example to push it. `/merge` refuses when no node has been merged yet, while
+nodes are running, or when your checkout has uncommitted changes to tracked
+files: commit or stash them first. Because the session started from a snapshot
+that included those uncommitted changes, merging brings them back as commits,
+which is why the tree must be clean. If the merge conflicts with your branch,
+it is aborted, the files are listed and nothing changes. After Build & test
+passes, the Workspace reminds you of `/merge`.
+
+`/clear` and deleting a session remove that session's worktrees (not its
+branches). Quitting leaves them, so `/resume` continues where you stopped.
+Read-only roles run in a worktree too, but whatever they change is dropped.
+The classic pipeline does not use worktrees.
+
+## Pull requests
+
+`/pr` publishes the session as a GitHub pull request, and `/pr watch` keeps it
+green. It uses the `gh` CLI (it must be on `PATH` and logged in, `gh auth
+login`) and git; DECSR never talks to GitHub itself.
+
+```yaml
+workspace:
+  pr_base: ""          # base branch; empty = the branch checked out in your project
+  pr_remote: ""        # remote to push to; empty = origin
+  pr_poll_seconds: 60  # /pr watch polling period; at least 15
+  max_ci_fixes: 3      # CI fix rounds before DECSR stops adding fix nodes
+  pr_auto_fix: false   # run the fix nodes of /pr watch without asking
+```
+
+**`/pr`** needs worktree isolation (see [Isolation](#isolation)), at least one
+node merged into `decsr/<session id>`, no node running, `gh` logged in, and the
+remote. It refuses when the base branch is the session branch. It then:
+
+1. pushes `decsr/<session id>` to the remote (`git push -u`; if the push is
+   rejected because someone else pushed to the PR branch, e.g. a reviewer
+   applied a suggestion on GitHub, `/pr` stops with an error and overwrites
+   nothing: pull their commits into the session branch or push manually);
+2. if an open pull request already exists for that branch, stops there and shows
+   its URL; otherwise runs `gh pr create` with the base branch above. The title
+   is the first line of the session's first task (72 characters at most; `decsr
+   session <id>` when there is none). The body is plain Markdown: the task, a
+   table of the nodes (id, title, role, status, number of files), the summary of
+   each finished node and the Build & test result;
+3. prints the URL in the conversation and remembers the pull request number, the
+   URL, the review comments already handled and the number of CI fix rounds in
+   the session file, so `/resume` carries on.
+
+Only the session branch is pushed: your own branch and your uncommitted files
+stay local. The first commit of the branch is `decsr: uncommitted changes at
+session start` when your tree had changes, otherwise the branch starts at your
+current commit.
+
+**`/pr watch`** does the same and then polls every `pr_poll_seconds`. `/pr
+watch` again, `/pr stop`, `/clear`, switching session or leaving the Workspace
+ends it. Each poll looks at:
+
+- **CI checks** (`gh pr checks`). When all checks pass you get a note in the
+  conversation and a notification ("PR checks passed"). When a check fails, once
+  per head commit of the pull request, DECSR fetches the failed log of the
+  GitHub Actions run (`gh run view --log-failed`, the last 150 lines, at most
+  8 KB) and adds a fix node `F<n>` titled `Fix CI: <check names>` with that log
+  in its description. Checks that are not Actions runs get a node without a log.
+- **Review comments** (`gh api` for the pull request's line comments and for
+  reviews that request changes). New ones, all of them, go into one node `Address
+  review comments`, one `path:line — text` line each; their ids are remembered so
+  they are never added twice.
+
+Fix nodes get the role `coder_fixer` (the one normal fix nodes suggest), and
+Build & test is queued behind them. They are not run for you: the conversation
+says `press r to run`. With `pr_auto_fix: true` they start at once. When a fix
+node finishes and is merged into the session branch while you are watching, the
+branch is pushed again, so CI runs on the fix.
+
+Limits: after `max_ci_fixes` CI fix rounds DECSR adds no more CI fix nodes, says
+so and sends a failure notification. Review comment nodes are not counted.
+A poll that fails (network, `gh` error) is shown in the status line and retried
+at the next tick. Build & test is not run again before the automatic push.
 
 ## Build & test and fix nodes
 
@@ -537,6 +704,47 @@ runs, it finishes with a warning instead of passing silently. If it fails, selec
 fix node (`F1`, `F2`, ...; a number is never reused in a session, not even after
 `/compact`) that receives the failure output, suggested role
 `coder_fixer`. Assign it, run it, and Build & test is queued again behind it.
+
+## Notifications
+
+When something needs you, DECSR can alert you outside the terminal, so you can
+leave a long run alone. The Workspace sends a short note (title `decsr` or
+`decsr · <project>`, body up to 140 characters) for:
+
+- a split that leaves sub-tasks waiting for roles ("Assign roles: 3 sub-tasks
+  are waiting");
+- a plugin question that waits for y or n;
+- a node that failed ("T2 failed: <first line of the error>");
+- Build & test passed (with "/merge to apply" when nodes run in worktrees) or
+  failed;
+- the end of a run ("Run finished: 4 done, 1 failed").
+
+There is no note per node start or per output chunk, and an identical note is
+sent only once in 10 seconds. The classic pipeline sends notes for approval
+gates, errors, rate limits and completion.
+
+Channels, all on by default except the webhook, each best-effort:
+
+| Channel | What it does | Switch off |
+|---------|--------------|------------|
+| cmux | cmux notification, only when cmux runs | `disable_cmux: true` |
+| bell | `\a` written to the terminal (`/dev/tty`); not on Windows | `disable_bell: true` |
+| desktop | `notify-send` on Linux (needs `DISPLAY` or `WAYLAND_DISPLAY`), `osascript` on macOS | `disable_desktop: true` |
+| webhook | HTTP POST of each note to `webhook` | leave `webhook` empty |
+
+```yaml
+# .decsr/project.yaml or ~/.decsr/config.yaml
+notifications:
+  disable_bell: false
+  disable_desktop: false
+  webhook: https://ntfy.sh/<your-topic>   # phone push through ntfy
+  webhook_format: ntfy                    # ntfy (default) | slack | discord
+```
+
+With `ntfy` the body is the text and the title, priority (high for "needs you"
+and failures) and tags go in headers. `slack` and `discord` post JSON. The
+webhook URL may contain a secret, so DECSR shows only its host in messages and
+`decsr doctor`, which also has a `notify` line listing the active channels.
 
 ## Where state is stored
 

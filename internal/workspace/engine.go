@@ -263,6 +263,19 @@ func (e *Engine) AddFix(checkID string) (string, error) {
 	return f.ID, nil
 }
 
+// AddCIFix adds a fix node for a failing pull request check or for review
+// comments, assigns role when it is not "", and returns its ID. It works while
+// other nodes run.
+func (e *Engine) AddCIFix(title, desc, role string) string {
+	e.mu.Lock()
+	f := e.g.AddCIFix(title, desc)
+	f.Role = role
+	err := e.saveLocked()
+	e.mu.Unlock()
+	e.reportSave(err)
+	return f.ID
+}
+
 // Run starts one node now.
 func (e *Engine) Run(ctx context.Context, id string) error {
 	e.mu.Lock()

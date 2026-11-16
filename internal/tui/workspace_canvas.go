@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -11,23 +12,57 @@ import (
 
 // Canvas geometry.
 const (
-	canvasBoxW   = 26
+	canvasBoxMin = 18 // narrowest node card
+	canvasBoxMax = 44 // widest node card
 	canvasGutter = 6
-	canvasColW   = canvasBoxW + canvasGutter
 	canvasVertX  = 2 // gutter column that carries the vertical connector run
 )
+
+// canvasFit picks the card width and the number of whole columns shown for a
+// graph of cols columns drawn in avail cells. When every column fits it is the
+// widest card (canvasBoxMin to canvasBoxMax) that lets them all fit. Otherwise
+// it is the most whole columns that fit at the minimum width, with the cards
+// widened to use the room; scroll indicators reserve canvasMarkW cells per side
+// that can hide columns.
+func canvasFit(cols, avail int) (boxW, shown int) {
+	if cols < 1 {
+		cols = 1
+	}
+	width := func(k, reserve int) int {
+		return min((avail-reserve-(k-1)*canvasGutter)/k, canvasBoxMax)
+	}
+	if w := width(cols, 0); w >= canvasBoxMin {
+		return w, cols
+	}
+	for k := cols - 1; k >= 1; k-- {
+		reserve := canvasMarkW(cols)
+		if cols-k >= 2 {
+			reserve *= 2
+		}
+		if w := width(k, reserve); w >= canvasBoxMin {
+			return w, k
+		}
+	}
+	return min(max(canvasBoxMin, 1), max(avail, 1)), 1
+}
+
+// canvasMarkW is the cells one scroll indicator ("+N ›") and its gap take.
+func canvasMarkW(cols int) int { return len(fmt.Sprint(cols)) + 4 }
 
 // canvasOpts configures renderCanvas.
 type canvasOpts struct {
 	width, height int
 	selected      string            // node ID
 	models        map[string]string // role name → short model label, for the node's second line
+	runners       map[string]string // role name → runner name, for the card's runner glyph
+	icons         string            // ui.icons: unicode | ascii | nerd
 	spinner       string            // current spinner frame for running nodes
 }
 
 type canvasRect struct{ x, y, w, h int }
 
 type canvasLayout struct {
+	boxW   int
 	layers [][]*workspace.Node
 	layer  map[string]int
 	rect   map[string]canvasRect
@@ -36,8 +71,9 @@ type canvasLayout struct {
 	totalH int
 }
 
-func computeCanvasLayout(g *workspace.Graph) canvasLayout {
+func computeCanvasLayout(g *workspace.Graph, boxW int) canvasLayout {
 	l := canvasLayout{
+		boxW:   boxW,
 		layers: g.Layers(),
 		layer:  map[string]int{},
 		rect:   map[string]canvasRect{},
@@ -60,7 +96,7 @@ func computeCanvasLayout(g *workspace.Graph) canvasLayout {
 			if len(l.far[n.ID]) > 0 {
 				h = 5
 			}
-			l.rect[n.ID] = canvasRect{x: i * canvasColW, y: y, w: canvasBoxW, h: h}
+			l.rect[n.ID] = canvasRect{x: i * (boxW + canvasGutter), y: y, w: boxW, h: h}
 			y += h + 1
 		}
 		if y-1 > l.totalH {
@@ -68,7 +104,7 @@ func computeCanvasLayout(g *workspace.Graph) canvasLayout {
 		}
 	}
 	if len(l.layers) > 0 {
-		l.totalW = len(l.layers)*canvasColW - canvasGutter
+		l.totalW = len(l.layers)*(boxW+canvasGutter) - canvasGutter
 	}
 	return l
 }
@@ -96,7 +132,7 @@ func nodeStatusGlyph(g *workspace.Graph, n *workspace.Node) (glyph, label string
 // canvasNeighbor returns the node to select when moving from selected in dir
 // ("left", "right", "up", "down"); the same ID when there is none.
 func canvasNeighbor(g *workspace.Graph, selected, dir string) string {
-	l := computeCanvasLayout(g)
+	l := computeCanvasLayout(g, canvasBoxMin)
 	li, ok := l.layer[selected]
 	if !ok {
 		return selected
@@ -145,6 +181,7 @@ func canvasNeighbor(g *workspace.Graph, selected, dir string) string {
 type cell struct {
 	r    rune
 	fg   lipgloss.Color
+	bg   lipgloss.Color // only the selected card has a background
 	bold bool
 	wide bool // r is double-width; the next cell is its continuation
 	cont bool // second half of a double-width rune; draws nothing
@@ -179,6 +216,11 @@ func runeCells(r rune) int { return ansi.StringWidth(string(r)) }
 // text writes s at x,y by display width, clipped to maxW cells. Double-width
 // runes take two cells; zero-width runes are dropped.
 func (g *canvasGrid) text(x, y, maxW int, s string, fg lipgloss.Color, bold bool) {
+	g.textOn(x, y, maxW, s, fg, "", bold)
+}
+
+// textOn is text on a background (bg "" = none).
+func (g *canvasGrid) textOn(x, y, maxW int, s string, fg, bg lipgloss.Color, bold bool) {
 	i := 0
 	for _, r := range s {
 		rw := runeCells(r)
@@ -189,10 +231,10 @@ func (g *canvasGrid) text(x, y, maxW int, s string, fg lipgloss.Color, bold bool
 			return
 		}
 		if rw == 2 {
-			g.set(x+i, y, cell{r: r, fg: fg, bold: bold, wide: true})
-			g.set(x+i+1, y, cell{fg: fg, bold: bold, cont: true})
+			g.set(x+i, y, cell{r: r, fg: fg, bg: bg, bold: bold, wide: true})
+			g.set(x+i+1, y, cell{fg: fg, bg: bg, bold: bold, cont: true})
 		} else {
-			g.set(x+i, y, cell{r: r, fg: fg, bold: bold})
+			g.set(x+i, y, cell{r: r, fg: fg, bg: bg, bold: bold})
 		}
 		i += rw
 	}
@@ -208,10 +250,10 @@ const (
 var junctionGlyph = map[int]rune{
 	dirN | dirS:               '│',
 	dirE | dirW:               '─',
-	dirS | dirE:               '┌',
-	dirS | dirW:               '┐',
-	dirN | dirE:               '└',
-	dirN | dirW:               '┘',
+	dirS | dirE:               '╭',
+	dirS | dirW:               '╮',
+	dirN | dirE:               '╰',
+	dirN | dirW:               '╯',
 	dirN | dirS | dirE:        '├',
 	dirN | dirS | dirW:        '┤',
 	dirE | dirW | dirS:        '┬',
@@ -226,105 +268,121 @@ var junctionGlyph = map[int]rune{
 func nodeBorderColor(g *workspace.Graph, n *workspace.Node, selected bool) lipgloss.Color {
 	switch {
 	case selected:
-		return focusBorder
-	case n.Status == workspace.StatusRunning:
-		return roleColor(n.Role)
-	case n.Status == workspace.StatusDone:
-		return crt.success
+		return colAccent
 	case n.Status == workspace.StatusFailed:
-		return crt.warn
+		return colFail
 	}
-	return crt.border
+	return colBorder
 }
 
 func statusLabelColor(g *workspace.Graph, n *workspace.Node) lipgloss.Color {
 	switch n.Status {
 	case workspace.StatusDone:
-		return crt.success
+		return colOK
 	case workspace.StatusFailed:
-		return crt.warn
+		return colFail
 	case workspace.StatusRunning:
-		return roleColor(n.Role)
+		return colAccent
 	}
 	if !g.Assigned(n) {
-		return galaxyGold
+		return colWarn
 	}
 	if len(g.Blockers(n.ID)) > 0 {
-		return crt.dim
+		return colMuted
 	}
-	return crt.primary
+	return colText
 }
 
+// drawBox draws one node card: a rounded border, the ID and bold title on the
+// first row, the runner glyph, role and model on the second with the status
+// right-aligned. The selected card is filled with colSel.
 func (c *canvasGrid) drawBox(g *workspace.Graph, n *workspace.Node, r canvasRect, far []string, o canvasOpts) {
 	sel := n.ID == o.selected
 	bc := nodeBorderColor(g, n, sel)
-	inner := r.w - 2
-
-	// Borders.
-	for x := 1; x < r.w-1; x++ {
-		c.set(r.x+x, r.y, cell{r: '─', fg: bc, bold: sel})
-		c.set(r.x+x, r.y+r.h-1, cell{r: '─', fg: bc, bold: sel})
+	var bg lipgloss.Color
+	if sel {
+		bg = colSel
 	}
-	for y := 1; y < r.h-1; y++ {
-		c.set(r.x, r.y+y, cell{r: '│', fg: bc, bold: sel})
-		c.set(r.x+r.w-1, r.y+y, cell{r: '│', fg: bc, bold: sel})
-		for x := 1; x < r.w-1; x++ {
-			c.set(r.x+x, r.y+y, cell{r: ' '})
+	inner := r.w - 2
+	tw := inner - 2 // 1 cell of padding on each side
+
+	for y := 0; y < r.h; y++ {
+		for x := 0; x < r.w; x++ {
+			ch := ' '
+			switch {
+			case y == 0 && x == 0:
+				ch = '╭'
+			case y == 0 && x == r.w-1:
+				ch = '╮'
+			case y == r.h-1 && x == 0:
+				ch = '╰'
+			case y == r.h-1 && x == r.w-1:
+				ch = '╯'
+			case y == 0 || y == r.h-1:
+				ch = '─'
+			case x == 0 || x == r.w-1:
+				ch = '│'
+			}
+			cl := cell{r: ch, bg: bg}
+			if ch != ' ' {
+				cl.fg = bc
+			}
+			c.set(r.x+x, r.y+y, cl)
 		}
 	}
-	c.set(r.x, r.y, cell{r: '┌', fg: bc, bold: sel})
-	c.set(r.x+r.w-1, r.y, cell{r: '┐', fg: bc, bold: sel})
-	c.set(r.x, r.y+r.h-1, cell{r: '└', fg: bc, bold: sel})
-	c.set(r.x+r.w-1, r.y+r.h-1, cell{r: '┘', fg: bc, bold: sel})
 
-	// Top border: ID on the left, status on the right.
+	// Row 1: ID (dim) and title (bold).
+	idw := ansi.StringWidth(n.ID)
+	c.textOn(r.x+2, r.y+1, tw, truncateOneLine(n.ID, tw), colMuted, bg, false)
+	if tw-idw-2 >= 3 {
+		c.textOn(r.x+2+idw+2, r.y+1, tw-idw-2, truncateOneLine(n.Title, tw-idw-2), colText, bg, true)
+	}
+
+	// Row 2, right: status glyph and word (and a warning mark).
 	glyph, label := nodeStatusGlyph(g, n)
 	if n.Status == workspace.StatusRunning && o.spinner != "" {
 		glyph = o.spinner
 	}
-	status := " " + glyph + " " + label + " "
-	warned := " " + glyph + " " + label + " ⚠ "
-	lead := "─ "
-	if sel {
-		lead = "▌ "
+	status := glyph + " " + label
+	if len(n.Warnings) > 0 && ansi.StringWidth(status)+2 <= tw-10 {
+		status += " ⚠"
 	}
-	id := truncateOneLine(n.ID, inner-ansi.StringWidth(status)-3)
-	left := lead + id + " "
-	// Keep at least one fill dash between ID and status; shrink the label if needed.
-	room := inner - ansi.StringWidth(left) - 1
-	if len(n.Warnings) > 0 && ansi.StringWidth(warned) <= room {
-		status = warned
-	}
-	if ansi.StringWidth(status) > room {
-		status = truncateOneLine(status, max(room, 0))
-	}
-	sw := ansi.StringWidth(status)
-	c.text(r.x+1, r.y, inner, left, bc, true)
-	c.text(r.x+r.w-1-sw, r.y, sw, status, statusLabelColor(g, n), false)
-	if sel {
-		c.set(r.x+1, r.y, cell{r: '▌', fg: focusBorder, bold: true})
+	sw := min(ansi.StringWidth(status), tw)
+	c.textOn(r.x+r.w-2-sw, r.y+2, sw, truncateOneLine(status, sw), statusLabelColor(g, n), bg, false)
+	if len(n.Warnings) > 0 && strings.HasSuffix(status, "⚠") {
+		c.textOn(r.x+r.w-3, r.y+2, 1, "⚠", colWarn, bg, false)
 	}
 
-	// Line 1: title. Line 2: role / suggestion.
-	tw := inner - 2
-	c.text(r.x+2, r.y+1, tw, truncateOneLine(n.Title, tw), crt.primary, sel)
-
+	// Row 2, left: runner glyph, role, model.
+	x, room := r.x+2, tw-sw-2
 	switch {
 	case n.Kind == workspace.KindCheck:
-		c.text(r.x+2, r.y+2, tw, "build & test", crt.dim, false)
+		c.textOn(x, r.y+2, room, truncateOneLine("build & test", room), colMuted, bg, false)
 	case n.Role != "":
-		s := n.Role
-		if m := o.models[n.Role]; m != "" {
-			s += " · " + m
+		runner := o.runners[n.Role]
+		gl := runnerGlyph(runner, o.icons)
+		c.textOn(x, r.y+2, room, gl, runnerColor(runner), bg, false)
+		gw := ansi.StringWidth(gl) + 1
+		x, room = x+gw, room-gw
+		role := truncateOneLine(n.Role, room)
+		c.textOn(x, r.y+2, room, role, colText, bg, false)
+		rw := ansi.StringWidth(role)
+		x, room = x+rw, room-rw
+		model := strings.TrimPrefix(o.models[n.Role], runner+":")
+		if model != "" && model != runner && room > 5 {
+			c.textOn(x, r.y+2, room, truncateOneLine(" · "+model, room), colMuted, bg, false)
 		}
-		c.text(r.x+2, r.y+2, tw, truncateOneLine(s, tw), roleColor(n.Role), false)
 	case n.SuggestedRole != "":
-		c.text(r.x+2, r.y+2, tw, truncateOneLine("? suggested: "+n.SuggestedRole, tw), galaxyGold, false)
-	default:
-		c.text(r.x+2, r.y+2, tw, "? unassigned", galaxyGold, false)
+		// The arrow and the status never truncate; only the role name does.
+		room = tw - sw - 1
+		label := "→"
+		if room >= 3 {
+			label = truncateOneLine("→ "+n.SuggestedRole, room)
+		}
+		c.textOn(x, r.y+2, room, label, colMuted, bg, false)
 	}
 	if len(far) > 0 {
-		c.text(r.x+2, r.y+3, tw, truncateOneLine("◂ "+strings.Join(far, ","), tw), crt.dim, false)
+		c.textOn(r.x+2, r.y+3, tw, truncateOneLine("◂ "+strings.Join(far, ","), tw), colMuted, bg, false)
 	}
 }
 
@@ -335,11 +393,13 @@ func renderCanvas(g *workspace.Graph, o canvasOpts) string {
 	out := newCanvasGrid(o.width, o.height)
 	if g == nil || len(g.Nodes) == 0 {
 		msg := "no nodes yet"
-		out.text(max((o.width-ansi.StringWidth(msg))/2, 0), o.height/2, o.width, msg, crt.dim, false)
+		out.text(max((o.width-ansi.StringWidth(msg))/2, 0), o.height/2, o.width, msg, colMuted, false)
 		return out.render()
 	}
 
-	l := computeCanvasLayout(g)
+	nCols := len(g.Layers())
+	boxW, shown := canvasFit(nCols, o.width)
+	l := computeCanvasLayout(g, boxW)
 	grid := newCanvasGrid(l.totalW, l.totalH)
 	for _, n := range g.Nodes {
 		if r, ok := l.rect[n.ID]; ok {
@@ -362,7 +422,7 @@ func renderCanvas(g *workspace.Graph, o canvasOpts) string {
 			conns[k] = c
 		}
 		c.mask |= dir
-		if fg == focusBorder {
+		if fg == colAccent {
 			c.fg = fg
 		}
 	}
@@ -377,9 +437,9 @@ func renderCanvas(g *workspace.Graph, o canvasOpts) string {
 				continue
 			}
 			sr := l.rect[d]
-			fg := crt.dim
+			fg := colBorder
 			if d == o.selected || t.ID == o.selected {
-				fg = focusBorder
+				fg = colAccent
 			}
 			gx := sr.x + sr.w
 			ys, yt := sr.y+1, tr.y+1
@@ -432,15 +492,23 @@ func renderCanvas(g *workspace.Graph, o canvasOpts) string {
 		grid.set(k[0], k[1], cell{r: r, fg: c.fg})
 	}
 
-	// Offset: minimal scroll that keeps the selected box fully visible.
-	ox, oy := 0, 0
+	// Window: whole columns only, scrolled minimally to keep the selected
+	// column visible.
+	first := 0
+	if _, ok := l.rect[o.selected]; ok {
+		first = max(l.layer[o.selected]-shown+1, 0)
+	}
+	hiddenR := nCols - first - shown
+	markW := canvasMarkW(nCols)
+	ox := first * (boxW + canvasGutter)
+	winW := shown*boxW + (shown-1)*canvasGutter
+	x0 := 0
+	if first > 0 && markW+winW <= o.width {
+		x0 = markW
+	}
+	room := x0 > 0 || first == 0 && winW+markW <= o.width // margins fit the indicators
+	oy := 0
 	if sr, ok := l.rect[o.selected]; ok {
-		if sr.x+sr.w > ox+o.width {
-			ox = sr.x + sr.w - o.width
-		}
-		if sr.x < ox {
-			ox = sr.x
-		}
 		if sr.y+sr.h > oy+o.height {
 			oy = sr.y + sr.h - o.height
 		}
@@ -449,25 +517,34 @@ func renderCanvas(g *workspace.Graph, o canvasOpts) string {
 		}
 	}
 	for y := 0; y < o.height; y++ {
-		for x := 0; x < o.width; x++ {
+		for x := 0; x < winW && x0+x < o.width; x++ {
 			gx, gy := x+ox, y+oy
 			if gx < grid.w && gy < grid.h {
-				out.cells[y][x] = grid.cells[gy][gx]
+				out.cells[y][x0+x] = grid.cells[gy][gx]
 			}
 		}
 	}
 
-	// Scroll marks (never over the selection marker).
-	mark := func(x, y int, r rune) {
-		if x >= 0 && y >= 0 && x < o.width && y < o.height && out.cells[y][x].r != '▌' {
-			out.cells[y][x] = cell{r: r, fg: crt.dim}
+	// Scroll indicators sit in the reserved side margins; the vertical marks
+	// never cover the selected card.
+	note := func(x, y int, text string) {
+		for i, r := range []rune(text) {
+			if x+i >= 0 && x+i < o.width && y >= 0 && y < o.height {
+				out.cells[y][x+i] = cell{r: r, fg: colMuted}
+			}
 		}
 	}
-	if ox > 0 {
-		mark(0, o.height/2, '‹')
+	if first > 0 && room {
+		note(0, o.height/2, fmt.Sprintf("‹ +%d", first))
 	}
-	if ox+o.width < grid.w {
-		mark(o.width-1, o.height/2, '›')
+	if hiddenR > 0 && room {
+		t := fmt.Sprintf("+%d ›", hiddenR)
+		note(o.width-len([]rune(t)), o.height/2, t)
+	}
+	mark := func(x, y int, r rune) {
+		if x >= 0 && y >= 0 && x < o.width && y < o.height && out.cells[y][x].bg == "" {
+			out.cells[y][x] = cell{r: r, fg: colMuted}
+		}
 	}
 	if oy > 0 {
 		mark(o.width/2, 0, '▴')
@@ -486,7 +563,7 @@ func (g *canvasGrid) render() string {
 		for x := 0; x < len(row); {
 			e := x
 			var run strings.Builder
-			for e < len(row) && row[e].fg == row[x].fg && row[e].bold == row[x].bold {
+			for e < len(row) && row[e].fg == row[x].fg && row[e].bg == row[x].bg && row[e].bold == row[x].bold {
 				c := row[e]
 				switch {
 				case c.cont:
@@ -505,10 +582,10 @@ func (g *canvasGrid) render() string {
 				}
 				e++
 			}
-			if row[x].fg == "" && !row[x].bold {
+			if row[x].fg == "" && row[x].bg == "" && !row[x].bold {
 				sb.WriteString(run.String())
 			} else {
-				sb.WriteString(lipgloss.NewStyle().Foreground(row[x].fg).Bold(row[x].bold).Render(run.String()))
+				sb.WriteString(lipgloss.NewStyle().Foreground(row[x].fg).Background(row[x].bg).Bold(row[x].bold).Render(run.String()))
 			}
 			x = e
 		}

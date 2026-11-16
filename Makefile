@@ -6,7 +6,7 @@ INSTALL_DIR := $(shell go env GOPATH)/bin
 VERSION     := $(shell cat .Version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS     := -ldflags "-X main.version=$(VERSION)"
 
-.PHONY: all build run test test-race lint vet clean install uninstall help bump-patch bump-minor bump-major release
+.PHONY: all build run test test-race lint vet demo clean install uninstall help bump-patch bump-minor bump-major release
 
 all: vet lint test-race build install
 
@@ -42,6 +42,11 @@ vet:
 ## lint: run golangci-lint (requires golangci-lint in PATH)
 lint:
 	golangci-lint run ./...
+
+## demo: record doc/assets/demo.gif with vhs (set DECSR_DEMO_DIR to a throwaway project)
+demo:
+	@command -v vhs >/dev/null 2>&1 || { echo "vhs not found. install: go install github.com/charmbracelet/vhs@latest; also needs ttyd and ffmpeg"; exit 1; }
+	vhs doc/demo.tape
 
 ## clean: remove build artefacts
 clean:

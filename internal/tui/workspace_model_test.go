@@ -122,7 +122,7 @@ func newWSHarnessAt(t *testing.T, root string) *wsHarness {
 			}
 			return h.graph(), runner.TokenUsage{InputTokens: 100, OutputTokens: 50}, nil
 		},
-		newEngine: func(g *workspace.Graph, save func(*workspace.Graph) error, summary func() string) *workspace.Engine {
+		newEngine: func(g *workspace.Graph, save func(*workspace.Graph) error, summary func() string, _ *workspace.Isolator) *workspace.Engine {
 			h.summary = summary
 			h.eng = workspace.NewEngineWithSave(g, h.exec, 3, save)
 			return h.eng
@@ -322,11 +322,11 @@ func (h *wsHarness) status(id string) workspace.Status { return h.m.g.Node(id).S
 
 func TestWorkspaceEmptyStateIsTheWholeScreen(t *testing.T) {
 	h := newWSHarness(t)
-	h.want("WORKSPACE")
-	h.want("GRAPH")
-	h.want("INSPECTOR")
+	h.want("◆ decsr")
+	h.want("Graph")
+	h.want("Inspector")
 	h.want("No nodes yet. Describe a task below")
-	h.want("Type a task or / for commands")
+	h.want("Type a task, / for commands")
 	h.want("Enter send")
 	h.want("Tab graph")
 	h.want("? help")
@@ -345,7 +345,7 @@ func TestWorkspaceSendSplitsAndShowsGraph(t *testing.T) {
 	h.want("you › Build a todo CLI")
 	h.finishSplit()
 	h.want("Data model")
-	h.want("? suggested: coder")
+	h.want("→ ? unassigned")
 	h.want("split into 5 nodes: T1, T2, T3, T4, T5")
 	if h.eng.Snapshot().Node("CHECK") == nil {
 		t.Fatal("no CHECK node was added")
@@ -778,15 +778,15 @@ func TestWorkspaceClearConfirmsWhenUnfinished(t *testing.T) {
 func TestWorkspaceInspectorToggle(t *testing.T) {
 	h := newWSHarness(t)
 	h.toGraph()
-	h.want("DESCRIPTION")
+	h.want("Description")
 	h.key("i")
-	h.wantNot("DESCRIPTION")
+	h.wantNot("Description")
 	h.key("i")
-	h.want("DESCRIPTION")
+	h.want("Description")
 	h.size(80, 24)
-	h.wantNot("DESCRIPTION")
+	h.wantNot("Description")
 	h.key("i")
-	h.want("DESCRIPTION")
+	h.want("Description")
 }
 
 func assertFits(t *testing.T, name, view string, w, h int) {

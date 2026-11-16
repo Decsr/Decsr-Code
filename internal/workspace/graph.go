@@ -379,6 +379,39 @@ func (g *Graph) AddFix(checkID, failure string) (*Node, error) {
 	return f, nil
 }
 
+// AddCIFix appends a work node "F<n>" with the given title and description
+// (CI log or review comments) and returns it. It has no dependencies: it works
+// on what is already merged. A Build & test node is reset to todo and made to
+// depend on it, as AddFix does.
+func (g *Graph) AddCIFix(title, desc string) *Node {
+	seq := g.FixSeq
+	if top := g.highestFix(); top > seq {
+		seq = top
+	}
+	id := ""
+	for seq++; ; seq++ {
+		if id = fmt.Sprintf("F%d", seq); g.Node(id) == nil {
+			break
+		}
+	}
+	g.FixSeq = seq
+	f := &Node{
+		ID:            id,
+		Title:         strings.Join(strings.Fields(title), " "),
+		Description:   strings.TrimSpace(desc),
+		Kind:          KindWork,
+		SuggestedRole: "coder_fixer",
+		Status:        StatusTodo,
+	}
+	g.Nodes = append(g.Nodes, f)
+	if c := g.Node("CHECK"); c != nil && c.Kind == KindCheck && c.Status != StatusRunning {
+		c.Status = StatusTodo
+		c.Error = ""
+		c.DependsOn = append(c.DependsOn, id)
+	}
+	return f
+}
+
 // Append merges the work nodes of add into g under fresh IDs T<n>, T<n+1>, …
 // (n is at least nextID and above every T number already in g), rewrites their
 // dependencies, merges add's new roles and drops add's CHECK. g's CHECK (created

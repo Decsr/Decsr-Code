@@ -69,6 +69,7 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		SystemPrompt: sys,
 		Skills:       req.Skills,
 		Model:        req.Model,
+		Dir:          root,
 		Messages:     []runner.ConvMessage{{Role: "user", Content: task}},
 	})
 	if err != nil {

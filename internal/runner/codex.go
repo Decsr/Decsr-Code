@@ -112,7 +112,7 @@ func (r CodexRunner) Complete(ctx context.Context, req CompletionRequest) (<-cha
 		model = r.Model
 	}
 
-	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, userContent.String(), req.SystemPrompt, model, NormalizeEffort(req.Effort))
+	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, userContent.String(), req.SystemPrompt, model, NormalizeEffort(req.Effort), req.Dir)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (r CodexRunner) Complete(ctx context.Context, req CompletionRequest) (<-cha
 	return ch, nil
 }
 
-func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, model, effort string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
+func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, model, effort, dir string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "codex"
@@ -145,6 +145,7 @@ func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPr
 	// Prompt is piped via stdin to avoid macOS ARG_MAX limits on large prompts.
 
 	cmd := executil.CommandContext(ctx, bin, args...)
+	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(fullPrompt)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

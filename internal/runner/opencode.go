@@ -37,7 +37,7 @@ func (r OpenCodeRunner) Complete(ctx context.Context, req CompletionRequest) (<-
 		model = r.Model
 	}
 
-	rawBytes, err := r.runRaw(ctx, sb.String(), model, NormalizeEffort(req.Effort))
+	rawBytes, err := r.runRaw(ctx, sb.String(), model, NormalizeEffort(req.Effort), req.Dir)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func (r OpenCodeRunner) Complete(ctx context.Context, req CompletionRequest) (<-
 	return ch, nil
 }
 
-func (r OpenCodeRunner) runRaw(ctx context.Context, prompt, model, effort string) ([]byte, error) {
+func (r OpenCodeRunner) runRaw(ctx context.Context, prompt, model, effort, dir string) ([]byte, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "opencode"
@@ -82,6 +82,7 @@ func (r OpenCodeRunner) runRaw(ctx context.Context, prompt, model, effort string
 	args = append(args, "-")
 
 	cmd := executil.CommandContext(ctx, bin, args...)
+	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(prompt)
 
 	var out, stderr bytes.Buffer

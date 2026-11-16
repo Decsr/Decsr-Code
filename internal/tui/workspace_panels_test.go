@@ -32,8 +32,8 @@ func TestInspectorShowsDepsAndError(t *testing.T) {
 	g, n := inspectorGraph()
 	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, 36, 30, []string{"tail one", "tail two"}))
 	flat := strings.Join(strings.Fields(out), " ")
-	for _, want := range []string{"T3 · Storage tests", "failed", "ROLE", "qa", "DEPENDS ON", "✓ T1 Data model",
-		"DESCRIPTION", "FILES", "store_test.go", "ERROR", "TestStorage expected 3 got 2", "TOKENS", "in 1.2k", "OUTPUT", "tail two"} {
+	for _, want := range []string{"T3 · Storage tests", "failed", "Role", "qa", "Depends on", "✓ T1 Data model",
+		"Description", "Files", "store_test.go", "Error", "TestStorage expected 3 got 2", "Tokens", "in 1.2k", "Output", "tail two"} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("inspector lacks %q:\n%s", want, out)
 		}
@@ -116,15 +116,19 @@ func inspectorLongNode() (*workspace.Graph, *workspace.Node, []string) {
 	return g, n, tail
 }
 
-// sectionRows returns the number of rows under each upper-case header.
+// sectionRows returns the number of rows under each section header, keyed by
+// the upper-case name.
 func sectionRows(out string) map[string]int {
 	rows := map[string]int{}
 	cur := ""
 	for _, l := range strings.Split(out, "\n") {
 		t := strings.TrimSpace(l)
-		switch t {
+		switch strings.ToUpper(t) {
 		case "ROLE", "DEPENDS ON", "DESCRIPTION", "FILES", "WARNINGS", "ERROR", "SUMMARY", "TOKENS", "OUTPUT":
-			cur = t
+			if t == strings.ToUpper(t) {
+				break // an all-caps line is content, not a header
+			}
+			cur = strings.ToUpper(t)
 			rows[cur] = 0
 			continue
 		}

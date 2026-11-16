@@ -38,7 +38,7 @@ func ClaudeListModels() ([]string, error) {
 func (r ClaudeRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan Token, error) {
 	prompt := buildClaudePrompt(req.Messages)
 
-	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, prompt, req.SystemPrompt, NormalizeEffort(req.Effort))
+	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, prompt, req.SystemPrompt, NormalizeEffort(req.Effort), req.Dir)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func buildClaudePrompt(messages []ConvMessage) string {
 	return sb.String()
 }
 
-func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, effort string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
+func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, effort, dir string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "claude"
@@ -79,6 +79,7 @@ func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemP
 	}
 
 	cmd := executil.Command(bin, args...)
+	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(prompt)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

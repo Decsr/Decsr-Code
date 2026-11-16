@@ -27,6 +27,27 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# Homebrew tap. goreleaser v2.10+ deprecates `brews` (formulas) in favour of
+# casks. The cask is only pushed when HOMEBREW_TAP_GITHUB_TOKEN is set, so a
+# release does not fail while the tap repo or the secret do not exist yet.
+homebrew_casks:
+  - name: decsr
+    ids: [decsr]
+    binaries: [decsr]
+    homepage: https://github.com/Decsr/Decsr-Code
+    description: Drive a team of AI agents through a structured software development pipeline
+    skip_upload: '{{ if index .Env "HOMEBREW_TAP_GITHUB_TOKEN" }}auto{{ else }}true{{ end }}'
+    repository:
+      owner: Decsr
+      name: homebrew-tap
+      token: '{{ index .Env "HOMEBREW_TAP_GITHUB_TOKEN" }}'
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/decsr"]
+          end
+
 changelog:
   sort: asc
   filters:

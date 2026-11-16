@@ -59,6 +59,7 @@ func (m workspaceModel) askPlugins() workspaceModel {
 		default:
 			m.confirm = pluginConfirm(e, r.Reason, m.plug.State(r.Name) == plugins.StateDisabled)
 			m.overlay = wsOverlayConfirm
+			m.notifyPlugin(e.Name, m.confirm.verb)
 			return m
 		}
 	}

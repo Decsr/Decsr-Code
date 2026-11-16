@@ -61,6 +61,8 @@ func main() {
 		cleanCmd(os.Args[2:])
 	case "memory":
 		memoryCmd(os.Args[2:])
+	case "doctor":
+		doctorCmd(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -79,6 +81,7 @@ func usage() {
 	  task --from-file task.md            Read task description from a file
 	  (both task and run accept --no-context-pack to skip the context pack phase)
 	  resume                              Open the Workspace with this project's saved sessions listed
+	  doctor                              Check git, config, runners and optional tools
 	  report                              Summarize last run artifacts
 	  monitor                             Open the control TUI against a running bus
 	  approve                             Create approval marker

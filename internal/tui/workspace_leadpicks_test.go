@@ -106,7 +106,7 @@ func TestInspectorSkillsSection(t *testing.T) {
 		Skills: []string{"sp:debug", "sp:tdd", "sp:ghost"}}
 	g := &workspace.Graph{Nodes: []*workspace.Node{n}}
 	out := ansi.Strip(renderInspector(g, n, cfg, set, 46, 30, nil))
-	for _, want := range []string{"SKILLS", "sp:tdd (role)", "notes (role)", "sp:debug (lead)", "sp:ghost (lead) (not installed)"} {
+	for _, want := range []string{"Skills", "sp:tdd (role)", "notes (role)", "sp:debug (lead)", "sp:ghost (lead) (not installed)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("inspector lacks %q:\n%s", want, out)
 		}
@@ -116,8 +116,8 @@ func TestInspectorSkillsSection(t *testing.T) {
 	}
 	// No skills, no section.
 	n2 := &workspace.Node{ID: "T2", Title: "Do", Kind: workspace.KindWork, Status: workspace.StatusTodo}
-	if out := ansi.Strip(renderInspector(&workspace.Graph{Nodes: []*workspace.Node{n2}}, n2, cfg, set, 46, 30, nil)); strings.Contains(out, "SKILLS") {
-		t.Errorf("empty SKILLS section:\n%s", out)
+	if out := ansi.Strip(renderInspector(&workspace.Graph{Nodes: []*workspace.Node{n2}}, n2, cfg, set, 46, 30, nil)); strings.Contains(out, "Skills") {
+		t.Errorf("empty Skills section:\n%s", out)
 	}
 }
 

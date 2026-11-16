@@ -125,7 +125,7 @@ func TestWorkspaceSuggestionRenderAcceptDismiss(t *testing.T) {
 	h.m.nSaved = 1
 	h.want("/resume")
 	h.want("→ accept suggestion")
-	h.wantNot("Type a task or / for commands")
+	h.wantNot("Type a task, / for commands")
 
 	// Right accepts into the input without sending it.
 	h.key("right")
@@ -146,7 +146,7 @@ func TestWorkspaceSuggestionRenderAcceptDismiss(t *testing.T) {
 	h2.m.nSaved = 1
 	h2.key("esc")
 	h2.wantNot("→ accept suggestion")
-	h2.want("Type a task or / for commands")
+	h2.want("Type a task, / for commands")
 	h2.key("right")
 	if h2.m.input.Value() != "" {
 		t.Fatal("Right accepted a dismissed suggestion")

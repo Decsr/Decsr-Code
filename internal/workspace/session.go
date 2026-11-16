@@ -45,6 +45,7 @@ type Session struct {
 	Graph      *Graph    `json:"graph,omitempty"`
 	In         int       `json:"input_tokens,omitempty"`  // lead usage for the session
 	Out        int       `json:"output_tokens,omitempty"` // lead usage for the session
+	PR         *PRState  `json:"pr,omitempty"`            // pull request of the session branch
 }
 
 // SessionInfo is the listing entry of a saved session.

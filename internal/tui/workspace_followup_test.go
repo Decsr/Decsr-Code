@@ -228,11 +228,11 @@ func TestWorkspaceInspectorOverlayOnNarrow(t *testing.T) {
 		h := newWSHarness(t)
 		h.size(sz[0], sz[1])
 		h.toGraph()
-		h.wantNot("INSPECTOR")
+		h.wantNot("Inspector")
 		base := h.view()
 		h.key("i")
 		v := h.view()
-		if !strings.Contains(v, "GRAPH") {
+		if !strings.Contains(v, "Graph") {
 			t.Fatalf("%v: the graph must stay the base view:\n%s", sz, v)
 		}
 		if v == base || !strings.Contains(v, "Data model") {

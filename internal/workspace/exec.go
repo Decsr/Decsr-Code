@@ -76,6 +76,7 @@ type executor struct {
 	checkCommands  func() []string // commands for a check node without Commands; may be nil
 	checkTimeout   time.Duration   // 0 = checkTimeout
 	summary        func() string   // session summary for the work context; may be nil
+	iso            *Isolator       // per-node worktrees; nil = all nodes share root
 }
 
 // maxSessionSummaryChars caps the session summary given to a worker.
@@ -96,6 +97,13 @@ func NewExecutorWithChecks(root string, cfg config.Config, projectContext string
 // NewExecutorWithSummary is NewExecutorWithChecks plus a source of the session
 // summary, which work nodes get as an "Earlier in this session" section.
 func NewExecutorWithSummary(root string, cfg config.Config, projectContext string, checkCommands func() []string, summary func() string) Executor {
+	return NewExecutorIsolated(root, cfg, projectContext, checkCommands, summary, nil)
+}
+
+// NewExecutorIsolated is NewExecutorWithSummary with an Isolator: each work
+// node runs in its own git worktree and Build & test runs in the integration
+// worktree. A nil iso keeps every node in root.
+func NewExecutorIsolated(root string, cfg config.Config, projectContext string, checkCommands func() []string, summary func() string, iso *Isolator) Executor {
 	loader := skills.New("")
 	return &executor{
 		root:           root,
@@ -103,6 +111,7 @@ func NewExecutorWithSummary(root string, cfg config.Config, projectContext strin
 		projectContext: projectContext,
 		checkCommands:  checkCommands,
 		summary:        summary,
+		iso:            iso,
 		newRunner: func(ac config.AgentConfig) (runner.LLMRunner, error) {
 			return runner.New(ac, loader, cfg.PromptLanguage)
 		},
@@ -139,14 +148,31 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 		}
 		rolePrompt += skillBlock
 	}
-	before, snapOK := snapshotTree(x.root, maxSnapshotFiles)
-	res, err := agent.RunWorker(ctx, r, x.root, x.cfg, agent.WorkerRequest{
+	// wx works in the node's own worktree when isolated; skills, plugins and
+	// project context still come from the project root.
+	wx := *x
+	finished := false
+	if x.iso != nil {
+		wroot, warns, err := x.iso.Start(n.ID)
+		if err != nil {
+			return Result{}, fmt.Errorf("worktree: %w", err)
+		}
+		wx.root = wroot
+		skillWarnings = append(skillWarnings, warns...)
+		defer func() {
+			if !finished {
+				x.iso.Discard(n.ID)
+			}
+		}()
+	}
+	before, snapOK := snapshotTree(wx.root, maxSnapshotFiles)
+	res, err := agent.RunWorker(ctx, r, wx.root, x.cfg, agent.WorkerRequest{
 		RolePrompt:  rolePrompt,
 		Skills:      role.Agent.Skills,
 		Model:       role.Agent.Model,
 		Title:       n.Title,
 		Description: n.Description,
-		Context:     x.workContext(g, n),
+		Context:     wx.workContext(g, n),
 		ReadOnly:    role.ReadOnly,
 	}, func(s string) { emit(Event{NodeID: n.ID, Type: EventOutput, Text: s}) })
 	if res.Usage.InputTokens > 0 || res.Usage.OutputTokens > 0 {
@@ -157,7 +183,7 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	}
 	out := Result{Summary: res.Summary, Files: res.Files, Warnings: skillWarnings}
 	if snapOK {
-		if after, ok := snapshotTree(x.root, maxSnapshotFiles); ok {
+		if after, ok := snapshotTree(wx.root, maxSnapshotFiles); ok {
 			out.Observed = diffSnapshots(before, after, res.Files)
 		}
 	}
@@ -172,6 +198,12 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	}
 	for _, w := range out.Warnings {
 		emit(Event{NodeID: n.ID, Type: EventOutput, Text: "\u26a0 " + w + "\n"})
+	}
+	if x.iso != nil && !role.ReadOnly {
+		finished = true
+		if err := x.iso.Finish(n.ID, n.Title); err != nil {
+			return Result{}, err
+		}
 	}
 	return out, nil
 }
@@ -379,7 +411,14 @@ func (x *executor) runCheck(ctx context.Context, n *Node, emit func(Event)) (Res
 	if timeout <= 0 {
 		timeout = checkTimeout
 	}
-	run := executil.NewRunner(x.root).WithTimeout(timeout)
+	root := x.root
+	if x.iso != nil {
+		var err error
+		if root, err = x.iso.IntegrationRoot(); err != nil {
+			return Result{}, fmt.Errorf("worktree: %w", err)
+		}
+	}
+	run := executil.NewRunner(root).WithTimeout(timeout)
 	commands := n.Commands
 	if len(commands) == 0 && x.checkCommands != nil {
 		commands = x.checkCommands()

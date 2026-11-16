@@ -65,7 +65,16 @@ task, a lead agent splits it into sub-tasks shown as a node graph, you assign a
 role to each node, and assigned nodes run in parallel (3 at a time by default).
 A final **Build & test** node checks the result. Nothing runs until you press
 `r` or `R`. Roles are plain data (a name, a description and a model), so you can
-add your own under `agents:` in `.decsr/project.yaml`.
+add your own under `agents:` in `.decsr/project.yaml`. In a git repository each
+node runs in its own worktree and branch; `/merge` brings the result into your
+checkout (`workspace.isolation: shared` turns this off).
+
+**Pull requests:** `/pr` pushes the session branch and opens a pull request with `gh`; `/pr watch` turns failing CI and review comments into fix nodes (see [`doc/workspace.md`](doc/workspace.md#pull-requests)).
+
+**Needs-you notifications:** when a split waits for roles, a node or Build &
+test fails or passes, or a run ends, DECSR rings the terminal bell, sends a
+desktop notification and can post to an ntfy, Slack or Discord webhook
+(`notifications.webhook`). See [`doc/workspace.md`](doc/workspace.md#notifications).
 
 Each project keeps its own sessions in `.decsr/sessions/`: `decsr resume` (or
 `/resume`) continues one, `/clear` starts a new one, `/compact` folds finished
@@ -250,17 +259,33 @@ See [`doc/context-pack.md`](doc/context-pack.md) for the context pack format, ed
 - At least one LLM backend installed and configured — a CLI runner (**OpenCode**, **Claude CLI**, **Codex CLI**, or **GitHub Copilot CLI**) or a local model server (**Ollama**, **LM Studio**, or **oMLX**)
 - **[bd (beads)](https://github.com/gastownhall/beads)** — recommended. Sub-tasks are tracked as durable beads, which makes runs resumable across sessions. Without `bd` the pipeline still runs, but multi-session resume of a bead-backed task is unavailable.
 
-### Option 1 — Prebuilt binaries
+### Option 1 — One-line install (Linux, macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Decsr/Decsr-Code/main/scripts/install.sh | sh
+```
+
+Installs the latest release to `~/.local/bin` (no sudo) after verifying its checksum. Set `DECSR_VERSION=v0.6.0` to pin a release or `DECSR_INSTALL_DIR` to change the directory.
+
+Then run `decsr doctor` to check your setup: git, config, runners and API keys, plus optional tools such as `tmux` and `gh`. It prints a fix hint for every problem and exits with 1 if a required check fails.
+
+### Option 2 — Homebrew (once the tap is published)
+
+```bash
+brew install decsr/tap/decsr
+```
+
+### Option 3 — Prebuilt binaries
 
 Download an archive for Linux, macOS or Windows (amd64/arm64) from the [Releases page](https://github.com/Decsr/Decsr-Code/releases), unpack it and put `decsr` on your `PATH`.
 
-### Option 2 — `go install`
+### Option 4 — `go install`
 
 ```bash
 go install github.com/Decsr/Decsr-Code/cmd/decsr@latest
 ```
 
-### Option 3 — From source
+### Option 5 — From source
 
 ```bash
 # Clone and build
@@ -348,6 +373,16 @@ make build      # build bin/decsr
 make test       # run the test suite
 make lint       # vet and lint
 ```
+
+### Demo GIF
+
+`make demo` records `doc/assets/demo.gif` from [`doc/demo.tape`](doc/demo.tape)
+with [vhs](https://github.com/charmbracelet/vhs). Install it with
+`go install github.com/charmbracelet/vhs@latest`; it also needs `ttyd` and
+`ffmpeg` on the PATH, and the Monaspace Krypton font. The tape drives a real
+session: run `DECSR_DEMO_DIR=/path/to/small/git/project make demo` from this
+repository, with a cheap, fast model configured, and tune the `Sleep` timings to it. Model output is not
+deterministic.
 
 <p align="center"><img src="doc/assets/divider.svg" width="100%" alt=""></p>
 

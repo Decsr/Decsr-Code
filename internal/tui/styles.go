@@ -64,6 +64,21 @@ var (
 	focusBorder   = lipgloss.Color("#4a86ff") // focused-panel border (azure)
 )
 
+// Workspace semantic tokens: the only colours the workspace screen uses.
+// Colour carries meaning; status is always also a glyph and a word.
+var (
+	colText     = lipgloss.Color("#d5e0f7") // normal foreground: titles, body text
+	colMuted    = lipgloss.Color("#7d8db3") // metadata: roles, models, times, labels, keys
+	colBorder   = lipgloss.Color("#2f4270") // faint borders, dividers, connectors
+	colAccent   = galaxyBlue                // focus, selection, the lead, running
+	colOK       = galaxyMint                // done, local runners
+	colWarn     = galaxyGold                // needs you: unassigned, warnings
+	colFail     = galaxyRed                 // failed, errors
+	colSel      = surfaceRaised             // background of the selected card or row
+	colClaude   = lipgloss.Color("#D97757") // Claude glyph
+	colDeepseek = lipgloss.Color("#4D6BFE") // DeepSeek glyph
+)
+
 // pixelBorder is the shared square-cornered panel border (┌┐└┘─│).
 var pixelBorder = lipgloss.NormalBorder()
 
@@ -144,15 +159,15 @@ var styleGateBanner = lipgloss.NewStyle().
 
 // Suggested prompt shown as ghost text in the empty Workspace prompt; italic
 // so it also reads without color.
-var styleWsGhost = lipgloss.NewStyle().Foreground(crt.dim).Italic(true)
+var styleWsGhost = lipgloss.NewStyle().Foreground(colMuted).Italic(true)
 
 // Skills of a node (inspector, picker) and the plugin dialogs. The state is
 // always spelled out in the text; the style only supports it.
 var (
-	styleWsSkill     = lipgloss.NewStyle().Foreground(crt.primary)
-	styleWsSkillNote = lipgloss.NewStyle().Foreground(crt.dim)
-	styleWsSkillWarn = lipgloss.NewStyle().Foreground(crt.warn)
-	styleWsPickRow   = lipgloss.NewStyle().Background(surfaceRaised)
+	styleWsSkill     = lipgloss.NewStyle().Foreground(colText)
+	styleWsSkillNote = lipgloss.NewStyle().Foreground(colMuted)
+	styleWsSkillWarn = lipgloss.NewStyle().Foreground(colFail)
+	styleWsPickRow   = lipgloss.NewStyle().Background(colSel)
 )
 
 // Conversation line.

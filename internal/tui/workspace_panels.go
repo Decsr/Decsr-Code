@@ -16,24 +16,24 @@ import (
 // ── Inspector ────────────────────────────────────────────────────────────────
 
 const (
-	inspFilesLines = 5 // FILES rows, the last one "+N more" when there are more
-	inspTextLines  = 6 // rows of SUMMARY, WARNINGS, ERROR and the OUTPUT maximum
-	inspOutputMin  = 4 // OUTPUT rows kept under height pressure
+	inspFilesLines = 5 // Files rows, the last one "+N more" when there are more
+	inspTextLines  = 6 // rows of Summary, Warnings, Error and the Output maximum
+	inspOutputMin  = 4 // Output rows kept under height pressure
 )
 
 // renderInspector draws the detail panel of one node in at most h lines of at
-// most w cells. The fixed sections (header, status, ROLE, DEPENDS ON) come
-// first; FILES, WARNINGS, ERROR, SUMMARY, TOKENS and OUTPUT get a bounded
-// number of rows and DESCRIPTION takes all the height that remains (at least
-// 4 rows, never fewer than 3). When the pane is too short, TOKENS, OUTPUT (when
-// the node is not running), FILES and SUMMARY are dropped, in that order.
+// most w cells. The fixed sections (header, status, Role, Depends on) come
+// first; Files, Warnings, Error, Summary, Tokens and Output get a bounded
+// number of rows and Description takes all the height that remains (at least
+// 4 rows, never fewer than 3). When the pane is too short, Tokens, Output (when
+// the node is not running), Files and Summary are dropped, in that order.
 func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, plug plugins.Set, w, h int, outputTail []string) string {
 	if w < 8 || h <= 0 {
 		return ""
 	}
-	dim := lipgloss.NewStyle().Foreground(crt.dim)
-	bright := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
-	head := lipgloss.NewStyle().Foreground(galaxyAzure).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(colMuted)
+	bright := lipgloss.NewStyle().Foreground(colText).Bold(true)
+	head := lipgloss.NewStyle().Foreground(colMuted)
 	var lines []string
 	add := func(s string) { lines = append(lines, ansi.Truncate(s, w, "…")) }
 	section := func(title string) { add(head.Render(title)) }
@@ -51,24 +51,30 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 		add(bright.Render(l))
 	}
 
-	// Status.
+	// Status: glyph and word on the left, the elapsed time dim on the right.
 	glyph, label := nodeStatusGlyph(g, n)
 	status := glyph + " " + label
 	if label == "blocked" {
 		status += " by " + strings.Join(g.Blockers(n.ID), ", ")
 	}
+	statusLine := lipgloss.NewStyle().Foreground(statusLabelColor(g, n)).Render(status)
 	if !n.StartedAt.IsZero() {
 		end := n.EndedAt
 		if end.IsZero() {
 			end = time.Now()
 		}
-		status += " · " + formatElapsed(end.Sub(n.StartedAt))
+		elapsed := formatElapsed(end.Sub(n.StartedAt))
+		if gap := w - ansi.StringWidth(status) - ansi.StringWidth(elapsed); gap >= 2 {
+			statusLine += strings.Repeat(" ", gap) + dim.Render(elapsed)
+		} else {
+			statusLine += dim.Render(" · " + elapsed)
+		}
 	}
-	add(lipgloss.NewStyle().Foreground(statusLabelColor(g, n)).Render(status))
+	add(statusLine)
 	add("")
 
 	// Role.
-	section("ROLE")
+	section("Role")
 	switch {
 	case n.Kind == workspace.KindCheck:
 		add("none — runs build/test commands")
@@ -80,8 +86,10 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 		}
 	case n.Role != "":
 		var meta []string
+		runner := ""
 		if r, ok := workspace.FindRole(cfg, n.Role); ok {
-			if m := shortModel(r.Agent.Runner, r.Agent.Model); m != "" {
+			runner = r.Agent.Runner
+			if m := modelOnly(r.Agent.Model); m != "" {
 				meta = append(meta, m)
 			}
 			if r.Agent.Effort != "" {
@@ -91,23 +99,27 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 				meta = append(meta, "read-only")
 			}
 		}
-		add(lipgloss.NewStyle().Foreground(roleColor(n.Role)).Bold(true).Render(n.Role) + dim.Render("  "+strings.Join(meta, " / ")))
+		line := runnerBadge(runner, cfg.UI.Icons) + " " + lipgloss.NewStyle().Foreground(colText).Bold(true).Render(n.Role)
+		if len(meta) > 0 {
+			line += dim.Render("  " + strings.Join(meta, " / "))
+		}
+		add(line)
 	case n.SuggestedRole != "":
 		s := "suggested: " + n.SuggestedRole
 		if _, ok := workspace.FindRole(cfg, n.SuggestedRole); !ok {
 			s += " (not defined yet)"
 		}
-		add(lipgloss.NewStyle().Foreground(galaxyGold).Render(s))
+		add(lipgloss.NewStyle().Foreground(colWarn).Render(s))
 		add(dim.Render("press a to assign"))
 	default:
-		add(lipgloss.NewStyle().Foreground(galaxyGold).Render("unassigned — press a to assign"))
+		add(lipgloss.NewStyle().Foreground(colWarn).Render("unassigned — press a to assign"))
 	}
 	add("")
 
 	// Skills.
 	if n.Kind == workspace.KindWork {
 		if rows := nodeSkillRows(n, cfg, plug); len(rows) > 0 {
-			section("SKILLS")
+			section("Skills")
 			for _, r := range rows {
 				add(r)
 			}
@@ -117,7 +129,7 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 
 	// Dependencies.
 	if len(n.DependsOn) > 0 {
-		section("DEPENDS ON")
+		section("Depends on")
 		for _, id := range n.DependsOn {
 			d := g.Node(id)
 			if d == nil {
@@ -158,14 +170,14 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 	var desc []string // full wrapped description
 	if n.Description != "" {
 		for _, l := range wrapText(n.Description, w) {
-			desc = append(desc, lipgloss.NewStyle().Foreground(crt.primary).Render(l))
+			desc = append(desc, lipgloss.NewStyle().Foreground(colText).Render(l))
 		}
 	}
 	descBlock := func(body int) []string {
 		if body > len(desc) {
 			body = len(desc)
 		}
-		return mk(head, "DESCRIPTION", clampBody(desc, body))
+		return mk(head, "Description", clampBody(desc, body))
 	}
 
 	files := append([]string(nil), n.Files...)
@@ -185,10 +197,10 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 		if len(files) > inspFilesLines {
 			body = append(append([]string(nil), files[:inspFilesLines-1]...), dim.Render(fmt.Sprintf("… +%d more", len(files)-(inspFilesLines-1))))
 		}
-		filesBlock = mk(head, "FILES", body)
+		filesBlock = mk(head, "Files", body)
 	}
 	if len(n.Warnings) > 0 {
-		gold := lipgloss.NewStyle().Foreground(galaxyGold)
+		gold := lipgloss.NewStyle().Foreground(colWarn)
 		var body []string
 		for _, wn := range n.Warnings {
 			for j, l := range wrapText(wn, w-2) {
@@ -199,20 +211,20 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 				body = append(body, gold.Render(mark+l))
 			}
 		}
-		warnBlock = mk(gold.Bold(true), "WARNINGS", clampBody(body, inspTextLines))
+		warnBlock = mk(gold.Bold(true), "Warnings", clampBody(body, inspTextLines))
 	}
 	if n.Error != "" {
-		errBlock = mk(head, "ERROR", styled(n.Error, lipgloss.NewStyle().Foreground(crt.warn), inspTextLines))
+		errBlock = mk(lipgloss.NewStyle().Foreground(colFail), "Error", styled(n.Error, lipgloss.NewStyle().Foreground(colFail), inspTextLines))
 	}
 	if n.Summary != "" {
-		sumBlock = mk(head, "SUMMARY", styled(n.Summary, lipgloss.NewStyle().Foreground(crt.primary), inspTextLines))
+		sumBlock = mk(head, "Summary", styled(n.Summary, lipgloss.NewStyle().Foreground(colText), inspTextLines))
 	}
 	if n.InputTokens > 0 || n.OutputTokens > 0 {
 		mark := ""
 		if n.Estimated {
 			mark = "~"
 		}
-		tokBlock = mk(head, "TOKENS", []string{fmt.Sprintf("in %s%s · out %s%s", mark, formatTokensCompact(n.InputTokens), mark, formatTokensCompact(n.OutputTokens))})
+		tokBlock = mk(head, "Tokens", []string{dim.Render(fmt.Sprintf("in %s%s · out %s%s", mark, formatTokensCompact(n.InputTokens), mark, formatTokensCompact(n.OutputTokens)))})
 	}
 	running := n.Status == workspace.StatusRunning
 	showOutput := len(outputTail) > 0 || running
@@ -228,7 +240,7 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 		for _, l := range t {
 			body = append(body, dim.Render(strings.TrimRight(l, "\r")))
 		}
-		return mk(head, "OUTPUT", body)
+		return mk(head, "Output", body)
 	}
 
 	avail := h - len(lines) + 1 // the last block needs no trailing blank line
@@ -358,6 +370,14 @@ func clipLines(lines []string, h int) []string {
 	return lines
 }
 
+// modelOnly is the model name after its last "/".
+func modelOnly(model string) string {
+	if i := strings.LastIndex(model, "/"); i >= 0 {
+		return model[i+1:]
+	}
+	return model
+}
+
 // shortModel is the model name after its last "/", prefixed with the runner
 // ("claude:sonnet") unless the runner is the default opencode.
 func shortModel(runner, model string) string {
@@ -375,34 +395,20 @@ func shortModel(runner, model string) string {
 
 // ── Overlay helpers ──────────────────────────────────────────────────────────
 
-// wsBox draws a titled bordered box of total width w around body lines (each
-// already fitted to w-4).
+// wsBox draws a titled box of total width w around body lines (each already
+// fitted to w-4). Overlays use a rounded border with the title in its top edge.
 func wsBox(title string, w int, body []string) string {
 	inner := w - 4
 	for i, l := range body {
 		body[i] = padRight(ansi.Truncate(l, inner, "…"), inner)
 	}
 	st := lipgloss.NewStyle().Padding(0, 1).Width(w - 2)
-	return pixelPanel(title, galaxyAzure, true, st, strings.Join(body, "\n"))
-}
-
-// wsFrame draws body inside a titled pixel frame of exactly w×h cells (body
-// lines are cut or padded to fit).
-func wsFrame(title string, titleColor lipgloss.Color, focused bool, w, h, padX int, body []string) string {
-	if w < 8 || h < 3 {
-		return strings.Join(body, "\n")
-	}
-	inner, innerH := w-2-2*padX, h-2
-	rows := make([]string, innerH)
-	for i := range rows {
-		l := ""
-		if i < len(body) {
-			l = ansi.Truncate(body[i], inner, "")
-		}
-		rows[i] = padRight(l, inner)
-	}
-	st := lipgloss.NewStyle().Padding(0, padX).Width(w - 2).Height(innerH)
-	return pixelPanel(title, titleColor, focused, st, strings.Join(rows, "\n"))
+	out := st.Border(lipgloss.RoundedBorder(), false, true, true, true).BorderForeground(colAccent).Render(strings.Join(body, "\n"))
+	bs := lipgloss.NewStyle().Foreground(colAccent)
+	label := " " + ansi.Truncate(title, max(w-6, 1), "…") + " "
+	fill := max(w-3-ansi.StringWidth(label), 0)
+	top := bs.Render("╭─") + lipgloss.NewStyle().Foreground(colText).Bold(true).Render(label) + bs.Render(strings.Repeat("─", fill)+"╮")
+	return top + "\n" + out
 }
 
 // overlayCenter draws box (multi-line) centered over base, leaving the first
@@ -488,7 +494,7 @@ func renderPickRow(it wsPickItem, selected bool, inner, nameW int) string {
 	bg := func(fg lipgloss.Color, bold bool) lipgloss.Style {
 		st := lipgloss.NewStyle().Foreground(fg).Bold(bold)
 		if selected {
-			st = st.Background(surfaceRaised)
+			st = st.Background(colSel)
 		}
 		return st
 	}
@@ -497,13 +503,13 @@ func renderPickRow(it wsPickItem, selected bool, inner, nameW int) string {
 		marker = "▸ "
 	}
 	var sb strings.Builder
-	sb.WriteString(bg(crt.bright, true).Render(marker))
+	sb.WriteString(bg(colText, true).Render(marker))
 	switch it.kind {
 	case "role":
-		sb.WriteString(bg(roleColor(it.name), true).Render(padRight(fitRoleName(it.name, nameW), nameW)))
+		sb.WriteString(bg(colText, true).Render(padRight(fitRoleName(it.name, nameW), nameW)))
 		used := 2 + nameW
 		if it.suggested {
-			sb.WriteString(bg(galaxyGold, true).Render(" ★ suggested"))
+			sb.WriteString(bg(colWarn, true).Render(" ★ suggested"))
 			used += 12
 		}
 		desc := it.desc
@@ -518,28 +524,28 @@ func renderPickRow(it wsPickItem, selected bool, inner, nameW int) string {
 		if it.meta != "" {
 			reserve := min(ansi.StringWidth(desc), 14)
 			if mw := min(min(ansi.StringWidth(it.meta), 22), inner-used-2-reserve-2); mw >= 4 {
-				sb.WriteString(bg(crt.primary, false).Render("  " + ansi.Truncate(it.meta, mw, "…")))
+				sb.WriteString(bg(colText, false).Render("  " + ansi.Truncate(it.meta, mw, "…")))
 			}
 		}
 		if desc != "" {
-			sb.WriteString(bg(crt.dim, false).Render("  " + desc))
+			sb.WriteString(bg(colMuted, false).Render("  " + desc))
 		}
 	case "create":
-		sb.WriteString(bg(galaxyMint, true).Render("＋ create \"" + it.name + "\""))
+		sb.WriteString(bg(colOK, true).Render("＋ create \"" + it.name + "\""))
 		if it.suggested {
-			sb.WriteString(bg(galaxyGold, true).Render(" ★ suggested"))
+			sb.WriteString(bg(colWarn, true).Render(" ★ suggested"))
 		}
 		if it.desc != "" {
-			sb.WriteString(bg(crt.dim, false).Render(" — " + it.desc))
+			sb.WriteString(bg(colMuted, false).Render(" — " + it.desc))
 		}
 	case "new":
-		sb.WriteString(bg(galaxyMint, true).Render("＋ new role…"))
+		sb.WriteString(bg(colOK, true).Render("＋ new role…"))
 	case "unassign":
-		sb.WriteString(bg(crt.warn, true).Render("– unassign"))
+		sb.WriteString(bg(colFail, true).Render("– unassign"))
 	}
 	row := ansi.Truncate(sb.String(), inner, "…")
 	if pad := inner - ansi.StringWidth(row); pad > 0 {
-		row += bg(crt.primary, false).Render(strings.Repeat(" ", pad))
+		row += bg(colText, false).Render(strings.Repeat(" ", pad))
 	}
 	return row
 }
@@ -585,7 +591,7 @@ func renderPicker(title string, items []wsPickItem, idx int, footer string, widt
 	for i := start; i < start+rows && i < len(items); i++ {
 		body = append(body, renderPickRow(items[i], i == idx, inner, nameW))
 	}
-	body = append(body, "", lipgloss.NewStyle().Foreground(crt.dim).Render(footer))
+	body = append(body, "", lipgloss.NewStyle().Foreground(colMuted).Render(footer))
 	return wsBox(ansi.Truncate(title, boxW-6, "…"), boxW, body)
 }
 
@@ -597,16 +603,16 @@ func renderPicker(title string, items []wsPickItem, idx int, footer string, widt
 func renderRoleForm(nameView, descView string, focus int, canChange bool, inherits, errText string, width int) string {
 	boxW := min(70, width-2)
 	inner := boxW - 4
-	dim := lipgloss.NewStyle().Foreground(crt.dim)
+	dim := lipgloss.NewStyle().Foreground(colMuted)
 	label := func(s string, active bool) string {
 		if active {
-			return lipgloss.NewStyle().Foreground(crt.bright).Bold(true).Render("▸ " + padRight(s, 18))
+			return lipgloss.NewStyle().Foreground(colText).Bold(true).Render("▸ " + padRight(s, 18))
 		}
 		return dim.Render("  " + padRight(s, 18))
 	}
-	toggle := lipgloss.NewStyle().Foreground(crt.primary).Render("yes") + dim.Render("  (←/→ or Space toggles)")
+	toggle := lipgloss.NewStyle().Foreground(colText).Render("yes") + dim.Render("  (←/→ or Space toggles)")
 	if !canChange {
-		toggle = lipgloss.NewStyle().Foreground(galaxyGold).Bold(true).Render("no") + dim.Render("   reports only, never writes files")
+		toggle = lipgloss.NewStyle().Foreground(colWarn).Bold(true).Render("no") + dim.Render("   reports only, never writes files")
 	}
 	body := []string{
 		label("Name", focus == 0) + nameView,
@@ -620,7 +626,7 @@ func renderRoleForm(nameView, descView string, focus int, canChange bool, inheri
 	if errText != "" {
 		body = append(body, "")
 		for _, l := range wrapText("! "+errText, inner) {
-			body = append(body, lipgloss.NewStyle().Foreground(crt.warn).Render(l))
+			body = append(body, lipgloss.NewStyle().Foreground(colFail).Render(l))
 		}
 	}
 	body = append(body, "", dim.Render("Tab next · ←/→ toggle · Enter save · Esc cancel"))
@@ -640,13 +646,13 @@ func renderCmdList(cmds []wsCommand, idx, width, maxRows int) []string {
 	for i := start; i < len(cmds) && (maxRows <= 0 || len(out) < maxRows); i++ {
 		c := cmds[i]
 		sel := i == idx
-		nameSt := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
-		descSt := lipgloss.NewStyle().Foreground(crt.dim)
+		nameSt := lipgloss.NewStyle().Foreground(colText).Bold(true)
+		descSt := lipgloss.NewStyle().Foreground(colMuted)
 		marker := "  "
 		if sel {
 			marker = "▸ "
-			nameSt = nameSt.Background(surfaceRaised)
-			descSt = descSt.Background(surfaceRaised)
+			nameSt = nameSt.Background(colSel)
+			descSt = descSt.Background(colSel)
 		}
 		desc := c.desc
 		if c.hint != "" {
@@ -660,7 +666,7 @@ func renderCmdList(cmds []wsCommand, idx, width, maxRows int) []string {
 		if pad := width - ansi.StringWidth(row); pad > 0 {
 			st := lipgloss.NewStyle()
 			if sel {
-				st = st.Background(surfaceRaised)
+				st = st.Background(colSel)
 			}
 			row += st.Render(strings.Repeat(" ", pad))
 		}

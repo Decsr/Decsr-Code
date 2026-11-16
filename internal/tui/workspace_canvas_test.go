@@ -83,7 +83,7 @@ func TestCanvasShowsNodeText(t *testing.T) {
 	chk := &workspace.Node{ID: "CHECK", Title: "Build & test", Kind: workspace.KindCheck, Status: workspace.StatusTodo, DependsOn: []string{"T1"}}
 	g := &workspace.Graph{Nodes: []*workspace.Node{a, b, c, d, chk}}
 	out := plain(g, canvasOpts{width: 120, height: 30, models: map[string]string{"coder": "m"}})
-	for _, want := range []string{"T1", "Wire login", "coder · m", "? suggested: qa", "build & test", "✓ done", "! failed", "⏸ blocked"} {
+	for _, want := range []string{"T1", "Wire login", "coder · m", "→ qa", "build & test", "✓ done", "! failed", "⏸ blocked"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -94,18 +94,18 @@ func TestCanvasSelectedVisible(t *testing.T) {
 	g := chainGraph(30, 8)
 	for _, n := range g.Nodes {
 		out := plain(g, canvasOpts{width: 60, height: 12, selected: n.ID})
-		if !strings.Contains(out, "▌ "+n.ID+" ") {
+		if !strings.Contains(out, "│ "+n.ID+" ") {
 			t.Fatalf("selected %s not visible:\n%s", n.ID, out)
 		}
 		// the whole box (bottom border too) must be visible
-		if !strings.Contains(out, "└") {
+		if !strings.Contains(out, "╰") {
 			t.Fatalf("no box bottom for %s", n.ID)
 		}
 	}
 	g = oneLayer(12)
 	for _, n := range g.Nodes {
 		out := plain(g, canvasOpts{width: 60, height: 16, selected: n.ID})
-		if !strings.Contains(out, "▌ "+n.ID+" ") || !strings.Contains(out, n.Title) {
+		if !strings.Contains(out, "│ "+n.ID+" ") || !strings.Contains(out, n.Title) {
 			t.Fatalf("selected %s not visible in 12-column graph:\n%s", n.ID, out)
 		}
 	}
@@ -125,7 +125,7 @@ func TestCanvasConnectors(t *testing.T) {
 	if !strings.Contains(row[strings.Index(row, "Root task"):], "│──") {
 		t.Fatalf("no connector right of T1: %q", row)
 	}
-	if !strings.Contains(out, "┐") && !strings.Contains(out, "┤") {
+	if !strings.Contains(out, "╮") && !strings.Contains(out, "┤") {
 		t.Fatalf("no junction glyphs:\n%s", out)
 	}
 }

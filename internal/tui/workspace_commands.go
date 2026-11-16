@@ -41,6 +41,8 @@ func (m workspaceModel) commandList() []wsCommand {
 		}},
 		{name: "/clear", desc: "save this session and start a new one", run: workspaceModel.cmdClear},
 		{name: "/compact", desc: "fold finished nodes into the session summary", run: workspaceModel.cmdCompact},
+		{name: "/merge", desc: "merge this session's worktree branch into your branch", run: workspaceModel.cmdMerge},
+		{name: "/pr", args: "[watch|stop]", desc: "push the session branch and open a pull request; watch fixes CI and review comments", run: workspaceModel.cmdPR},
 		{name: "/resume", desc: "continue a saved session of this project", run: workspaceModel.cmdResume},
 		{name: "/project", desc: "switch to another project", run: workspaceModel.cmdProject},
 		{name: "/profile", desc: "save or apply a set of role settings", run: workspaceModel.cmdProfile},
@@ -147,10 +149,32 @@ func (m workspaceModel) cmdClear(string) (tea.Model, tea.Cmd) {
 
 func (m workspaceModel) doClear() workspaceModel {
 	m.saveSession()
+	m.dropWorktrees(m.sess.snapshot().ID)
 	m = m.resetSession(workspace.NewSession())
 	m.refreshSaved()
 	m.setNotice("New session started. The previous one is listed by /resume", false)
 	return m
+}
+
+// dropWorktrees removes the worktrees of a session (not its branches).
+func (m workspaceModel) dropWorktrees(session string) {
+	if err := workspace.RemoveSessionWorktrees(m.root, session); err != nil {
+		m.say("error", "could not remove the session worktrees: "+oneLine(err.Error()))
+	}
+}
+
+// cmdMerge merges the session's integration branch into the checked-out branch.
+func (m workspaceModel) cmdMerge(string) (tea.Model, tea.Cmd) {
+	if m.busy() {
+		return m.refuseBusy()
+	}
+	msg, err := workspace.MergeSession(m.root, m.sess.snapshot().ID)
+	if err != nil {
+		m.say("error", oneLine(err.Error()))
+		return m, nil
+	}
+	m.say("system", msg)
+	return m, nil
 }
 
 func (m workspaceModel) cmdCompact(string) (tea.Model, tea.Cmd) {
@@ -259,6 +283,7 @@ func (m workspaceModel) doDeleteSession(id string) workspaceModel {
 	if id == m.sess.snapshot().ID {
 		m = m.resetSession(workspace.NewSession())
 	}
+	m.dropWorktrees(id)
 	m.refreshSaved()
 	m.sessions = workspace.ListSessions(m.root)
 	m.listIdx = min(m.listIdx, max(len(m.sessions)-1, 0))
@@ -580,7 +605,7 @@ func (m workspaceModel) listBox() string {
 			"↑↓ move · Enter apply · d delete · Esc close", w, h)
 	case wsOverlayText:
 		boxW := min(70, w-2)
-		dim := lipgloss.NewStyle().Foreground(crt.dim)
+		dim := lipgloss.NewStyle().Foreground(colMuted)
 		title, label := "Open a project", "Path of the project directory"
 		if m.textKind == "profile" {
 			title, label = "Save profile", "Name for the current roles"
@@ -589,7 +614,7 @@ func (m workspaceModel) listBox() string {
 		if m.textErr != "" {
 			body = append(body, "")
 			for _, l := range wrapText("! "+m.textErr, boxW-4) {
-				body = append(body, lipgloss.NewStyle().Foreground(crt.warn).Render(l))
+				body = append(body, lipgloss.NewStyle().Foreground(colFail).Render(l))
 			}
 		}
 		body = append(body, "", dim.Render("Enter confirm · Esc cancel"))
@@ -606,7 +631,7 @@ func (m workspaceModel) listBox() string {
 		if len(m.infoText) > rows {
 			foot = "↑↓ scroll · Esc close"
 		}
-		body = append(body, "", lipgloss.NewStyle().Foreground(crt.dim).Render(foot))
+		body = append(body, "", lipgloss.NewStyle().Foreground(colMuted).Render(foot))
 		return wsBox(m.infoName, boxW, body)
 	}
 	return ""
@@ -624,31 +649,31 @@ func renderListBox(title string, rows []wsListItem, idx int, empty, footer strin
 	}
 	var body []string
 	if len(rows) == 0 && empty != "" {
-		body = append(body, lipgloss.NewStyle().Foreground(crt.dim).Render(empty))
+		body = append(body, lipgloss.NewStyle().Foreground(colMuted).Render(empty))
 	}
 	for i := start; i < start+vis && i < len(rows); i++ {
 		sel := i == idx
-		fg := crt.primary
+		fg := colText
 		if rows[i].dim {
-			fg = crt.dim
+			fg = colMuted
 		}
 		st := lipgloss.NewStyle().Foreground(fg)
 		marker := "  "
 		if sel {
-			st = st.Foreground(crt.bright).Bold(true).Background(surfaceRaised)
+			st = st.Foreground(colText).Bold(true).Background(colSel)
 			marker = "▸ "
 		}
 		row := st.Render(marker + ansi.Truncate(rows[i].text, inner-2, "…"))
 		if pad := inner - ansi.StringWidth(row); pad > 0 {
 			ps := lipgloss.NewStyle()
 			if sel {
-				ps = ps.Background(surfaceRaised)
+				ps = ps.Background(colSel)
 			}
 			row += ps.Render(strings.Repeat(" ", pad))
 		}
 		body = append(body, row)
 	}
-	body = append(body, "", lipgloss.NewStyle().Foreground(crt.dim).Render(footer))
+	body = append(body, "", lipgloss.NewStyle().Foreground(colMuted).Render(footer))
 	return wsBox(ansi.Truncate(title, boxW-6, "…"), boxW, body)
 }
 

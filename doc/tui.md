@@ -160,6 +160,15 @@ the agent that made the call.
 - The session log keeps the last 500 calls. Totals are lifetime and are not
   affected by the cap.
 
+## Workspace look
+
+The Workspace uses a calmer style than the cockpit: one accent colour (blue),
+green for done and local runners, amber for what needs you (unassigned,
+warnings), red for failures and dim text for metadata. Status is always a glyph
+and a word. Panes share one faint divider; only node cards, overlays and the
+prompt have rounded borders. Runner glyphs follow the `ui.icons` setting
+(`unicode`, `ascii`, `nerd`); see [workspace.md](workspace.md#runner-glyphs).
+
 ## Keyboard
 
 | Key | Action |

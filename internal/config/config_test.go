@@ -429,6 +429,39 @@ func TestMerge_NotificationsDisableCMux(t *testing.T) {
 	}
 }
 
+func TestMerge_NotificationsChannels(t *testing.T) {
+	dst := DefaultConfig()
+	merge(&dst, Config{Notifications: NotifyConfig{DisableBell: true, DisableDesktop: true, Webhook: "https://ntfy.sh/a", WebhookFormat: "slack"}})
+	n := dst.Notifications
+	if !n.DisableBell || !n.DisableDesktop || n.Webhook != "https://ntfy.sh/a" || n.WebhookFormat != "slack" {
+		t.Fatalf("first layer not applied: %+v", n)
+	}
+	merge(&dst, Config{}) // empty layer keeps everything
+	if dst.Notifications != n {
+		t.Errorf("empty layer changed notifications: %+v", dst.Notifications)
+	}
+	merge(&dst, Config{Notifications: NotifyConfig{Webhook: "https://ntfy.sh/b"}})
+	if dst.Notifications.Webhook != "https://ntfy.sh/b" || dst.Notifications.WebhookFormat != "slack" {
+		t.Errorf("non-empty string should override only itself: %+v", dst.Notifications)
+	}
+}
+
+func TestMerge_WorkspaceIsolation(t *testing.T) {
+	dst := DefaultConfig()
+	merge(&dst, Config{Workspace: WorkspaceConfig{Isolation: "shared"}})
+	if dst.Workspace.Isolation != "shared" {
+		t.Errorf("isolation = %q, want shared", dst.Workspace.Isolation)
+	}
+	merge(&dst, Config{})
+	if dst.Workspace.Isolation != "shared" {
+		t.Error("empty layer should not clear isolation")
+	}
+	merge(&dst, Config{Workspace: WorkspaceConfig{Isolation: "worktree"}})
+	if dst.Workspace.Isolation != "worktree" {
+		t.Errorf("isolation = %q, want worktree", dst.Workspace.Isolation)
+	}
+}
+
 func TestDefaultConfig_ContextPackEnabled(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.Project.Context.Pack.Disable {
@@ -690,5 +723,21 @@ func TestProfileKeepsAPIFields(t *testing.T) {
 	}
 	if ac := LoadProject(root).Agents["coder"]; ac.BaseURL == "" || ac.APIKeyEnv == "" || ac.Runner != "openai" {
 		t.Fatalf("project lost api fields: %+v", ac)
+	}
+}
+
+func TestMerge_UIIcons(t *testing.T) {
+	var dst Config
+	merge(&dst, Config{UI: UIConfig{Icons: "ascii"}})
+	if dst.UI.Icons != "ascii" {
+		t.Fatalf("icons = %q, want ascii", dst.UI.Icons)
+	}
+	merge(&dst, Config{})
+	if dst.UI.Icons != "ascii" {
+		t.Errorf("empty layer changed icons: %q", dst.UI.Icons)
+	}
+	merge(&dst, Config{UI: UIConfig{Icons: "nerd"}})
+	if dst.UI.Icons != "nerd" {
+		t.Errorf("later layer should override: %q", dst.UI.Icons)
 	}
 }

@@ -469,7 +469,7 @@ func TestWorkspaceProfileSaveAndApplyRoundTrip(t *testing.T) {
 		t.Fatalf("cfg not reloaded: %+v", h.m.cfg.Project)
 	}
 	h.want("profile: cheap")
-	h.want("claude:haiku-x")
+	h.want("haiku-x")
 	if y, err := os.ReadFile(filepath.Join(h.root, ".decsr", "project.yaml")); err != nil || !strings.Contains(string(y), "profile: cheap") {
 		t.Fatalf("project.yaml: %s %v", y, err)
 	}
@@ -651,4 +651,12 @@ func TestWorkspaceAgoText(t *testing.T) {
 			t.Errorf("agoText(%v) = %q, want %q", d, got, want)
 		}
 	}
+}
+
+func TestWorkspaceMergeWithoutMergedNodesSaysSo(t *testing.T) {
+	h := newWSHarness(t)
+	h.toGraph()
+	h.key("tab")
+	h.typeCmd("/merge")
+	h.want("no node of this session has been merged yet")
 }

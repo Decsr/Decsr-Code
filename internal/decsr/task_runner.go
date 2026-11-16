@@ -205,13 +205,14 @@ func (tr *TaskRunner) Run(ctx context.Context, taskInput string) error {
 		if errors.Is(err, runner.ErrRateLimited) && tr.state != PipelineRateLimited {
 			tr.setState(PipelineRateLimited)
 			tr.event(fmt.Sprintf("⛔ rate limit / quota hit: %v — pipeline stopped", err))
-			tr.notify("Rate limited", "Quota hit — pipeline stopped")
+			tr.notify(notify.Failed, "Rate limited", "Quota hit — pipeline stopped")
 		} else {
-			tr.notify("Error", fmt.Sprintf("Pipeline failed: %v", err))
+			tr.notify(notify.Failed, "Error", fmt.Sprintf("Pipeline failed: %v", err))
 		}
 	} else {
-		tr.notify("Complete", "Pipeline finished — review artifacts in .decsr/")
+		tr.notify(notify.Done, "Complete", "Pipeline finished — review artifacts in .decsr/")
 	}
+	notify.Wait(3 * time.Second) // let the last alert leave before the process exits
 	return err
 }
 
@@ -224,13 +225,14 @@ func (tr *TaskRunner) Resume(ctx context.Context) error {
 		if errors.Is(err, runner.ErrRateLimited) && tr.state != PipelineRateLimited {
 			tr.setState(PipelineRateLimited)
 			tr.event(fmt.Sprintf("⛔ rate limit / quota hit: %v — pipeline stopped", err))
-			tr.notify("Rate limited", "Quota hit — pipeline stopped")
+			tr.notify(notify.Failed, "Rate limited", "Quota hit — pipeline stopped")
 		} else {
-			tr.notify("Error", fmt.Sprintf("Pipeline failed: %v", err))
+			tr.notify(notify.Failed, "Error", fmt.Sprintf("Pipeline failed: %v", err))
 		}
 	} else {
-		tr.notify("Complete", "Pipeline finished — review artifacts in .decsr/")
+		tr.notify(notify.Done, "Complete", "Pipeline finished — review artifacts in .decsr/")
 	}
+	notify.Wait(3 * time.Second) // let the last alert leave before the process exits
 	return err
 }
 
@@ -1685,15 +1687,11 @@ func (tr *TaskRunner) collectStats() summaryStats {
 	}
 }
 
-// notify sends a best-effort external alert (cmux) for a noteworthy pipeline
-// moment — approval needed, completion, or failure — mirroring how Claude Code
-// forwards alerts into cmux. No-ops when notifications are disabled or cmux is
-// not running.
-func (tr *TaskRunner) notify(subtitle, body string) {
-	if tr.cfg.Notifications.DisableCMux {
-		return
-	}
-	notify.SendCMux("DECSR", subtitle, body)
+// notify sends a best-effort external alert (cmux, bell, desktop, webhook) for
+// a noteworthy pipeline moment: approval needed, completion, or failure. Each
+// channel can be switched off in the notification config.
+func (tr *TaskRunner) notify(level notify.Level, subtitle, body string) {
+	notify.Send(tr.cfg.Notifications, notify.Note{Title: "decsr · " + subtitle, Body: body, Level: level})
 }
 
 // waitArtifact blocks until the user approves or asks to regenerate the artifact.
@@ -1707,7 +1705,7 @@ func (tr *TaskRunner) waitArtifact(ctx context.Context, filename string) (bool, 
 	tr.log.Info("waiting for artifact approval", slog.String("artifact", filename))
 	tr.setState(PipelineGate)
 	tr.b.Publish(bus.NewMessage(bus.RoleSystem, "", bus.MsgHumanGate, filename))
-	tr.notify("Approval needed", fmt.Sprintf("Review %s and approve to continue", filename))
+	tr.notify(notify.NeedsYou, "Approval needed", fmt.Sprintf("Review %s and approve to continue", filename))
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()

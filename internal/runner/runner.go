@@ -42,6 +42,9 @@ type CompletionRequest struct {
 	// Effort overrides the agent's configured reasoning effort for this call.
 	// Empty leaves the decision to the configured EffortRunner or the provider.
 	Effort string
+	// Dir is the working directory for CLI runners that run an agent process.
+	// Empty keeps the process working directory; HTTP runners ignore it.
+	Dir string
 }
 
 // LLMRunner is the common interface for all LLM backends.
