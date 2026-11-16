@@ -301,8 +301,6 @@ func (tr *TaskRunner) run(ctx context.Context, taskInput string, resume bool) (r
 		}
 	}
 
-	ctxFragment := projCtx.SystemPromptFragment(appctx.ProfileFull)
-
 	// Load an approved context pack on resume; otherwise generate it before
 	// any planning. The approved pack becomes the primary planning context.
 	if resume {
@@ -318,7 +316,7 @@ func (tr *TaskRunner) run(ctx context.Context, taskInput string, resume bool) (r
 		}
 		tr.contextPack = pack
 	}
-	ctxFragment = tr.buildContextFragment(projCtx)
+	ctxFragment := tr.buildContextFragment(projCtx)
 
 	if resume {
 		curStage = "execute"

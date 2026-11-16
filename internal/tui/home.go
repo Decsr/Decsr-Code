@@ -582,12 +582,6 @@ func blockPixelRows(text string) []string {
 // blockPairs groups the 5 pixel rows into 3 display rows (top, bottom or -1).
 var blockPairs = [][2]int{{0, 1}, {2, 3}, {4, -1}}
 
-// renderBlockText renders text as chunky pixel-art using Unicode half-block characters.
-// 5 pixel rows → 3 display rows via ▀▄█ compositing.
-func renderBlockText(text string) []string {
-	return renderBlockTextColored(text, nil)
-}
-
 // renderBlockTextColored is renderBlockText with a per-pixel-row colour
 // (len 5). With half-blocks, a cell holding two pixels of different rows uses
 // foreground = top colour and background = bottom colour, giving a smooth

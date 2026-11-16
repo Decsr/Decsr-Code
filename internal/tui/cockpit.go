@@ -60,15 +60,14 @@ type cockpitSubTask struct {
 }
 
 type cockpitAgent struct {
-	role     bus.AgentRole
-	status   AgentState
-	current  string
-	last     string
-	model    string
-	effort   string
-	tokens   int
-	calls    int
-	duration time.Duration
+	role    bus.AgentRole
+	status  AgentState
+	current string
+	last    string
+	model   string
+	effort  string
+	tokens  int
+	calls   int
 }
 
 // cockpitSession is one model call, kept in a capped log.
@@ -471,7 +470,10 @@ func parseTaskPlanFile(path string) []agent.SubTask {
 			continue
 		}
 		if strings.HasPrefix(line, "Priority:") {
-			fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(line, "Priority:")), "%d", &cur.Priority)
+			var p int
+			if n, _ := fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(line, "Priority:")), "%d", &p); n == 1 {
+				cur.Priority = p
+			}
 		}
 		if strings.HasPrefix(line, "Depends on:") {
 			for _, d := range strings.Split(strings.TrimSpace(strings.TrimPrefix(line, "Depends on:")), ",") {
@@ -727,7 +729,7 @@ func (c *CockpitModel) SeedUsageFromRunLog(path string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	type entry struct {
 		From    bus.AgentRole   `json:"from"`
 		Type    string          `json:"type"`
@@ -1661,9 +1663,10 @@ func (c *CockpitModel) renderInspector(w, h int) string {
 	lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render("TESTS"))
 	tstatus := map[string]string{"idle": "waiting", "running": "running", "pass": "pass", "fail": "fail"}[c.tests.status]
 	tstyle := lipgloss.NewStyle().Foreground(crt.dim)
-	if c.tests.status == "pass" {
+	switch c.tests.status {
+	case "pass":
 		tstyle = lipgloss.NewStyle().Foreground(galaxyMint)
-	} else if c.tests.status == "fail" {
+	case "fail":
 		tstyle = lipgloss.NewStyle().Foreground(galaxyRed)
 	}
 	lines = append(lines, "  "+tstyle.Render(tstatus))
@@ -1699,7 +1702,7 @@ func (c *CockpitModel) renderInspector(w, h int) string {
 		noun = "file"
 	}
 	lines = append(lines, fmt.Sprintf("  %d %s  %d fix rounds", len(c.files), noun, c.fixRounds))
-	if !(c.failed && c.errMsg != "") {
+	if !c.failed || c.errMsg == "" {
 		lines = append(lines, "")
 		lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render("NEXT"))
 		for _, l := range wrapText(c.nextAction(), w-4) {
@@ -1826,10 +1829,6 @@ func windowLines(lines []string, h, scroll int) []string {
 		end = len(lines)
 	}
 	return lines[scroll:end]
-}
-
-func tokenBar(percent, width int) string {
-	return tokenBarColor(percent, width, galaxyMint)
 }
 
 func tokenBarColor(percent, width int, color lipgloss.Color) string {

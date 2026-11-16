@@ -568,10 +568,12 @@ func TestWorkspaceStatusCostExport(t *testing.T) {
 	}
 	h.toGraph()
 	h.wsMarkDone("T1")
-	h.eng.Replace(func(g *workspace.Graph) {
+	if err := h.eng.Replace(func(g *workspace.Graph) {
 		g.Node("T1").InputTokens, g.Node("T1").OutputTokens, g.Node("T1").Estimated = 1200, 300, true
 		g.Node("T3").Role, g.Node("T3").InputTokens, g.Node("T3").OutputTokens = "qa", 5000, 800
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	h.m.g = h.eng.Snapshot()
 	h.key("tab")
 

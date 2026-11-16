@@ -225,7 +225,9 @@ func TestSkillPickerKeepsMissingSkillsRemovable(t *testing.T) {
 func TestSkillPickerRefusedForDoneRunningAndCheck(t *testing.T) {
 	h := lpHarness(t)
 	h.toGraph()
-	h.eng.Replace(func(g *workspace.Graph) { g.Node("T1").Status = workspace.StatusDone })
+	if err := h.eng.Replace(func(g *workspace.Graph) { g.Node("T1").Status = workspace.StatusDone }); err != nil {
+		t.Fatal(err)
+	}
 	h.m.g = h.eng.Snapshot()
 	h.m.sel = "T1"
 	h.key("K")
@@ -514,17 +516,21 @@ func TestSuggestionForPendingPluginRequest(t *testing.T) {
 	h := lpHarness(t)
 	h.toGraph()
 	h.key("tab")
-	h.eng.Replace(func(g *workspace.Graph) {
+	if err := h.eng.Replace(func(g *workspace.Graph) {
 		g.PluginRequests = []workspace.PluginRequest{{Name: "modern-cpp", Status: workspace.PluginPending}, {Name: "x", Status: workspace.PluginPending}}
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	h.m.g = h.eng.Snapshot()
 	if got := h.m.suggestion(); got != "/plugin install modern-cpp" {
 		t.Errorf("suggestion = %q", got)
 	}
-	h.eng.Replace(func(g *workspace.Graph) {
+	if err := h.eng.Replace(func(g *workspace.Graph) {
 		g.SetPluginStatus("modern-cpp", workspace.PluginDeclined)
 		g.SetPluginStatus("x", workspace.PluginDeclined)
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	h.m.g = h.eng.Snapshot()
 	if got := h.m.suggestion(); strings.HasPrefix(got, "/plugin") {
 		t.Errorf("declined request still suggested: %q", got)

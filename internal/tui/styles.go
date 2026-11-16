@@ -27,20 +27,6 @@ type galaxyTheme struct {
 	scanline lipgloss.Color // scanline stripe tint
 }
 
-// themeAmber is the previous amber CRT palette, kept so it can be switched back.
-var themeAmber = galaxyTheme{
-	primary:  lipgloss.Color("#ffc66d"),
-	dim:      lipgloss.Color("#6b553f"),
-	bright:   lipgloss.Color("#ffe4a8"),
-	bg:       lipgloss.Color("#0b0c0b"),
-	border:   lipgloss.Color("#3a3020"),
-	panelBg:  lipgloss.Color("#0d1117"),
-	warn:     lipgloss.Color("#ff6633"),
-	success:  lipgloss.Color("#c8b040"),
-	muted:    lipgloss.Color("#3a3025"),
-	scanline: lipgloss.Color("#111111"),
-}
-
 var themeGalaxyBlue = galaxyTheme{
 	primary:  lipgloss.Color("#c9d8f5"),
 	dim:      lipgloss.Color("#8a9bc2"),
@@ -54,40 +40,22 @@ var themeGalaxyBlue = galaxyTheme{
 	scanline: lipgloss.Color("#0e182e"),
 }
 
-// themeGalaxyViolet is the previous violet-on-grey palette, kept so it can be switched back.
-var themeGalaxyViolet = galaxyTheme{
-	primary:  lipgloss.Color("#c8c6d8"), // starlight
-	dim:      lipgloss.Color("#77758a"),
-	bright:   lipgloss.Color("#f4f2ff"),
-	bg:       lipgloss.Color("#1b1b1f"),
-	border:   lipgloss.Color("#3a3a44"),
-	panelBg:  lipgloss.Color("#232329"),
-	warn:     lipgloss.Color("#ff5c7a"), // pulsar red
-	success:  lipgloss.Color("#6ff2b4"), // aurora mint
-	muted:    lipgloss.Color("#2c2c33"),
-	scanline: lipgloss.Color("#202026"),
-}
-
 // crt is the active theme used across the TUI.
 var crt = themeGalaxyBlue
 
 // Galaxy accent palette shared by roles, pipeline steps and widgets.
 var (
-	galaxyViolet   = lipgloss.Color("#9d7cff") // nebula violet
-	galaxyPurple   = lipgloss.Color("#c77dff") // nebula purple
-	galaxyBlue     = lipgloss.Color("#7c9cff") // nebula blue
-	galaxyMint     = lipgloss.Color("#6ff2b4") // aurora mint
-	galaxyMintDeep = lipgloss.Color("#4fcf95") // deeper aurora mint
-	galaxyPink     = lipgloss.Color("#ff7ac6") // cosmic pink
-	galaxyGold     = lipgloss.Color("#ffd166") // star gold
-	galaxyOrange   = lipgloss.Color("#ffa36b") // solar orange
-	galaxyRed      = lipgloss.Color("#ff5c7a") // pulsar red
-	galaxyCyan     = lipgloss.Color("#5ce1e6") // comet cyan
-	galaxyIce      = lipgloss.Color("#9ee8ff") // ice
-	galaxyAzure    = lipgloss.Color("#4a86ff") // azure
-	galaxySky      = lipgloss.Color("#7cb8ff") // sky
-	galaxyFrost    = lipgloss.Color("#bfe3ff") // frost
-	galaxyTeal     = lipgloss.Color("#3fb8c0") // teal
+	galaxyBlue   = lipgloss.Color("#7c9cff") // nebula blue
+	galaxyMint   = lipgloss.Color("#6ff2b4") // aurora mint
+	galaxyGold   = lipgloss.Color("#ffd166") // star gold
+	galaxyOrange = lipgloss.Color("#ffa36b") // solar orange
+	galaxyRed    = lipgloss.Color("#ff5c7a") // pulsar red
+	galaxyCyan   = lipgloss.Color("#5ce1e6") // comet cyan
+	galaxyIce    = lipgloss.Color("#9ee8ff") // ice
+	galaxyAzure  = lipgloss.Color("#4a86ff") // azure
+	galaxySky    = lipgloss.Color("#7cb8ff") // sky
+	galaxyFrost  = lipgloss.Color("#bfe3ff") // frost
+	galaxyTeal   = lipgloss.Color("#3fb8c0") // teal
 )
 
 // Derived surface shades (galaxy theme).

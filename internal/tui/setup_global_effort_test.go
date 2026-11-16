@@ -26,7 +26,7 @@ func globalSetupWithEffort(t *testing.T, effort string) SetupModel {
 // returns the message the screen emits.
 func finishSave(t *testing.T, m SetupModel) tea.Msg {
 	t.Helper()
-	m, cmd := m.Update(pingResultMsg{})
+	_, cmd := m.Update(pingResultMsg{})
 	if cmd == nil {
 		t.Fatal("expected a command after a successful save")
 	}

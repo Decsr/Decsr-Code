@@ -36,7 +36,7 @@ func TestPrintReport_OrderAndJSON(t *testing.T) {
 		t.Errorf("unexpected empty message: %q", out)
 	}
 	is, it, ir := strings.Index(out, "summary.md"), strings.Index(out, "test_report.json"), strings.Index(out, "review.md")
-	if is < 0 || !(is < it && it < ir) {
+	if is < 0 || (is >= it || it >= ir) {
 		t.Errorf("unexpected order: %q", out)
 	}
 	if !strings.Contains(out, "  \"success\": true") {
