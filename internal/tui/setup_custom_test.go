@@ -120,6 +120,7 @@ func TestSetupGlobalCustomProviderRoundTrip(t *testing.T) {
 	base := map[string]config.AgentConfig{"pm": {Runner: "claude", Model: "sonnet"}, "coder": {Runner: "claude", Model: "sonnet"}}
 	m := prep(NewSetupModel("claude", "sonnet", "", base))
 	m.provider = kindByLabel(t, m, "acme (custom)")
+	m.modelIdx = 0
 	m.apiModels[m.entry(m.provider).key()] = []string{"gpt-x"}
 	m.apiModelsLoading[m.entry(m.provider).key()] = false
 	m.effortTouched = true

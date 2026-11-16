@@ -421,7 +421,7 @@ func (m workspaceModel) effectiveAgents() map[string]config.AgentConfig {
 			continue
 		}
 		own := m.cfg.Agents[r.Name]
-		ac := config.AgentConfig{Runner: own.Runner, Model: own.Model, Effort: own.Effort, BaseURL: own.BaseURL, APIKeyEnv: own.APIKeyEnv, UserSkills: own.UserSkills}
+		ac := config.AgentConfig{Runner: own.Runner, Model: own.Model, Effort: own.Effort, BaseURL: own.BaseURL, APIKeyEnv: own.APIKeyEnv, Mode: own.Mode, UserSkills: own.UserSkills}
 		if !r.Builtin {
 			ac.Description, ac.ReadOnly = own.Description, own.ReadOnly
 		}

@@ -72,6 +72,66 @@ type Node struct {
 	// role's context limit, 0 when unknown.
 	ContextTokens int `json:"context_tokens,omitempty"`
 	ContextLimit  int `json:"context_limit,omitempty"`
+
+	// Attempt is the number of the current attempt; 0 and 1 both mean the
+	// first. A reply (Engine.Reply) starts the next one.
+	Attempt int `json:"attempt,omitempty"`
+	// Reply is the user's message that started the current attempt; "" for a
+	// first attempt that was not started by a reply.
+	Reply string `json:"reply,omitempty"`
+	// PendingReply is a reply to a running node, kept until the run ends.
+	PendingReply string `json:"pending_reply,omitempty"`
+	// Attempts are the finished earlier attempts, oldest first.
+	Attempts []Attempt `json:"attempts,omitempty"`
+
+	// replyContext is the excerpt of the previous attempt the engine built when
+	// this attempt started (it can read details that are kept in memory only).
+	// Not saved.
+	replyContext string
+}
+
+// Attempt is one finished attempt of a node, kept when a reply starts the next.
+// Activity is kept for the most recent maxAttemptActivity attempts only.
+type Attempt struct {
+	N               int               `json:"n"`
+	Reply           string            `json:"reply,omitempty"` // what started it; "" for the first
+	Status          Status            `json:"status"`
+	StartedAt       time.Time         `json:"started_at,omitempty"`
+	EndedAt         time.Time         `json:"ended_at,omitempty"`
+	Summary         string            `json:"summary,omitempty"`
+	Error           string            `json:"error,omitempty"`
+	FileStats       []FileStat        `json:"file_stats,omitempty"`
+	Commit          string            `json:"commit,omitempty"`
+	Activity        []runner.Activity `json:"activity,omitempty"`
+	ActivityDropped int               `json:"activity_dropped,omitempty"`
+}
+
+// maxAttemptActivity is how many archived attempts keep their activity.
+const maxAttemptActivity = 3
+
+// AttemptNumber is the number of the current attempt (1 for the first).
+func (n *Node) AttemptNumber() int {
+	if n.Attempt < 1 {
+		return 1
+	}
+	return n.Attempt
+}
+
+func (a Attempt) clone() Attempt {
+	a.FileStats = append([]FileStat(nil), a.FileStats...)
+	a.Activity = append([]runner.Activity(nil), a.Activity...)
+	return a
+}
+
+func cloneAttempts(in []Attempt) []Attempt {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]Attempt, len(in))
+	for i, a := range in {
+		out[i] = a.clone()
+	}
+	return out
 }
 
 // SpecRef names the Spec Kit task a node was imported from.
@@ -336,6 +396,7 @@ func (g *Graph) Clone() *Graph {
 		nn.Warnings = append([]string(nil), n.Warnings...)
 		nn.Skills = append([]string(nil), n.Skills...)
 		nn.Activity = append([]runner.Activity(nil), n.Activity...)
+		nn.Attempts = cloneAttempts(n.Attempts)
 		if n.Spec != nil {
 			sr := *n.Spec
 			nn.Spec = &sr
@@ -535,6 +596,7 @@ func (g *Graph) Append(add *Graph, nextID int) (newNext int, idMap map[string]st
 		c.Warnings = append([]string(nil), n.Warnings...)
 		c.Skills = append([]string(nil), n.Skills...)
 		c.Activity = append([]runner.Activity(nil), n.Activity...)
+		c.Attempts = cloneAttempts(n.Attempts)
 		g.Nodes = append(g.Nodes, &c)
 	}
 	if g.Task == "" {

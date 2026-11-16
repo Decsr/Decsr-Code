@@ -154,6 +154,9 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	if !ok {
 		return Result{}, fmt.Errorf("role %q is not defined", n.Role)
 	}
+	if err := role.Agent.ModeError(); err != nil {
+		return Result{}, fmt.Errorf("role %q: %w", role.Name, err)
+	}
 	r, err := x.newRunner(role.Agent)
 	if err != nil {
 		return Result{}, fmt.Errorf("runner for role %q: %w", role.Name, err)
@@ -189,16 +192,22 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 			}
 		}()
 	}
+	var buildCommands []string
+	if x.checkCommands != nil && !role.ReadOnly && role.Agent.EffectiveMode() == config.ModeAgent {
+		buildCommands = x.checkCommands()
+	}
 	before, snapOK := snapshotTree(wx.root, maxSnapshotFiles)
 	res, err := agent.RunWorker(ctx, r, wx.root, x.cfg, agent.WorkerRequest{
-		RolePrompt:  rolePrompt,
-		Skills:      role.Agent.Skills,
-		Model:       role.Agent.Model,
-		Title:       n.Title,
-		Description: n.Description,
-		Context:     wx.workContext(g, n),
-		ReadOnly:    role.ReadOnly,
-		OnActivity:  func(a runner.Activity) { emit(Event{NodeID: n.ID, Type: EventActivity, Activity: &a}) },
+		RolePrompt:    rolePrompt,
+		Skills:        role.Agent.Skills,
+		Model:         role.Agent.Model,
+		Title:         n.Title,
+		Description:   n.Description,
+		Context:       wx.workContext(g, n),
+		ReadOnly:      role.ReadOnly,
+		Mode:          role.Agent.EffectiveMode(),
+		BuildCommands: buildCommands,
+		OnActivity:    func(a runner.Activity) { emit(Event{NodeID: n.ID, Type: EventActivity, Activity: &a}) },
 		OnContext: func(tokens int) {
 			emit(Event{NodeID: n.ID, Type: EventContext, ContextTokens: tokens, ContextLimit: max(role.Agent.MaxContextTokens, 0)})
 		},
@@ -336,6 +345,30 @@ func (x *executor) workContext(g *Graph, n *Node) string {
 		}
 	}
 	sb.WriteString(x.currentFiles(g, n))
+	sb.WriteString(replySection(n))
+	return sb.String()
+}
+
+// replySection tells a worker what the user replied to the node and, when an
+// earlier attempt exists, what it did. "" for a node without a reply.
+func replySection(n *Node) string {
+	if n.Reply == "" {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n\n")
+	if k := len(n.Attempts); k > 0 {
+		prev := n.Attempts[k-1]
+		ex := n.replyContext
+		if ex == "" {
+			ex = ReplyExcerpt(n, prev, ReplyContextChars, nil)
+		}
+		if ex == "" {
+			ex = "(nothing was recorded)"
+		}
+		fmt.Fprintf(&sb, "Previous attempt (attempt %d, %s):\n%s\n\n", prev.N, prev.Status, ex)
+	}
+	sb.WriteString("The user replied:\n" + n.Reply + "\n")
 	return sb.String()
 }
 

@@ -324,7 +324,7 @@ func TestCodexExecActivities(t *testing.T) {
 		t.Errorf("failed command exit code = %v", e)
 	}
 	args, _ := os.ReadFile(argsFile)
-	for _, want := range []string{"exec", "--full-auto", "--json", "--model", "gpt-5.4"} {
+	for _, want := range []string{"exec", "--sandbox", "read-only", "--json", "--model", "gpt-5.4"} {
 		if !strings.Contains(string(args), want) {
 			t.Errorf("args missing %q: %s", want, args)
 		}

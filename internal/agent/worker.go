@@ -21,6 +21,12 @@ type WorkerRequest struct {
 	Title, Description string
 	Context            string // project context + dependency summaries + current files
 	ReadOnly           bool   // report only: file blocks are never written
+	// Mode is config.ModeText (or empty) or config.ModeAgent. In agent mode the
+	// runner edits files itself and file blocks in its text are ignored.
+	Mode string
+	// BuildCommands are the project's build and test commands an agent-mode
+	// Claude run may execute.
+	BuildCommands []string
 	// OnActivity, when set, receives the runner's activity (thinking, tools,
 	// commands) and the file blocks the worker writes. Nil-safe.
 	OnActivity func(runner.Activity)
@@ -44,8 +50,16 @@ func IsBinaryContent(data []byte) bool { return isBinaryContent(data) }
 const workerSummaryMarker = "===SUMMARY==="
 
 const (
-	workerModeWrite    = "To create or change a file, write its path in bold on its own line, followed by a fenced\ncode block with the COMPLETE file content:\n\n**internal/example/example.go**\n```go\npackage example\n// complete file content\n```\n\nEvery code block MUST be preceded by the file path in bold on its own line, otherwise\nthe file is not saved. Never output partial files or placeholders.\n\nIf your role reviews or analyses (no files to change), write a report instead and do not\noutput file blocks."
-	workerModeReadOnly = "You are in read-only mode: you MUST NOT change any files. Anything you output as a file block\nis discarded. Only report: write your findings as plain text (you may quote code in\nfenced blocks, but do not put a file path in bold before them)."
+	// workerTail ends the text-mode prompts.
+	workerTail = "\n\nFiles shown under \"Current files\" in the project context are the latest versions on disk,\nincluding changes made by earlier agents. When you change one of them, output the\nCOMPLETE updated file and keep everything unrelated to your sub-task intact. Never\nre-create a file from memory.\n\nEnd your answer with:\n\n===SUMMARY===\n1 to 5 lines: what you did and anything the next agent must know."
+	// workerAgentTail ends the agent-mode prompts.
+	workerAgentTail = "\n\nEnd your answer with:\n\n===SUMMARY===\n1 to 5 lines: what you changed (or found) and anything the next agent must know."
+
+	workerModeWrite    = "To create or change a file, write its path in bold on its own line, followed by a fenced\ncode block with the COMPLETE file content:\n\n**internal/example/example.go**\n```go\npackage example\n// complete file content\n```\n\nEvery code block MUST be preceded by the file path in bold on its own line, otherwise\nthe file is not saved. Never output partial files or placeholders.\n\nIf your role reviews or analyses (no files to change), write a report instead and do not\noutput file blocks." + workerTail
+	workerModeReadOnly = "You are in read-only mode: you MUST NOT change any files. Anything you output as a file block\nis discarded. Only report: write your findings as plain text (you may quote code in\nfenced blocks, but do not put a file path in bold before them)." + workerTail
+
+	workerModeAgent         = "You are running as a coding agent in the project working directory. Change files directly\nwith your tools. Do NOT print file contents as fenced file blocks: they are not saved.\nFiles shown under \"Current files\" are on disk and you can read them. Keep everything\nunrelated to your sub-task intact. When build or test commands are available to you, run\nthem to check your work." + workerAgentTail
+	workerModeAgentReadOnly = "You are running as a read-only agent in the project working directory. Use your tools only\nto read and search: you MUST NOT create, change, move or delete any file, and must not run\ncommands that do. Report your findings as plain text." + workerAgentTail
 )
 
 // RunWorker runs one LLM call for a sub-task, writes the file blocks of the
@@ -60,8 +74,14 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 	if strings.TrimSpace(role) == "" {
 		role = "Follow the role instructions you were given."
 	}
+	agentMode := req.Mode == config.ModeAgent
 	mode := workerModeWrite
-	if req.ReadOnly {
+	switch {
+	case agentMode && req.ReadOnly:
+		mode = workerModeAgentReadOnly
+	case agentMode:
+		mode = workerModeAgent
+	case req.ReadOnly:
 		mode = workerModeReadOnly
 	}
 	// One pass, so placeholder text inside a role, skill, task or context is
@@ -81,20 +101,25 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		}
 		req.OnContext(total)
 	}
-	ch, err := r.Complete(ctx, runner.CompletionRequest{
+	creq := runner.CompletionRequest{
 		SystemPrompt: sys,
 		Skills:       req.Skills,
 		Model:        req.Model,
 		Dir:          root,
 		Messages:     msgs,
-	})
+		Agent:        agentMode,
+	}
+	if agentMode {
+		creq.AllowedTools = runner.AgentTools(req.BuildCommands, req.ReadOnly)
+	}
+	ch, err := r.Complete(ctx, creq)
 	if err != nil {
 		return res, fmt.Errorf("worker: runner: %w", err)
 	}
 	var sb strings.Builder
 	writes := newWriteTracker(root, req.OnActivity)
 	watch := &blockWatcher{}
-	if !req.ReadOnly {
+	if !req.ReadOnly && !agentMode {
 		watch.onStart = writes.begin
 	}
 	for tok := range ch {
@@ -111,7 +136,7 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		}
 		if tok.Text != "" {
 			sb.WriteString(tok.Text)
-			if req.OnActivity != nil && !req.ReadOnly {
+			if req.OnActivity != nil && !req.ReadOnly && !agentMode {
 				watch.feed(tok.Text)
 			}
 			if onToken != nil {
@@ -133,7 +158,9 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 	}
 
 	res.Summary = workerSummary(res.Output)
-	if req.ReadOnly {
+	// Agent mode: the runner changed the files itself, so any fenced block is
+	// just text. The caller finds the changes by snapshot or worktree commit.
+	if req.ReadOnly || agentMode {
 		writes.finish()
 		return res, nil
 	}

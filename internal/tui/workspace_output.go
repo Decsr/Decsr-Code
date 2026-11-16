@@ -26,6 +26,7 @@ func (m workspaceModel) openOutput(n *workspace.Node) workspaceModel {
 	m.outNode = n.ID
 	m.outFollow = true
 	m.outRaw = len(n.Activity) == 0
+	m.outAttempt = 0
 	m.outCur = max(len(n.Activity)-1, 0)
 	m.refreshOutput()
 	return m
@@ -40,31 +41,48 @@ func (m workspaceModel) outTimelineOn() bool { return !m.outRaw }
 func (m *workspaceModel) refreshTimeline() {
 	n := m.g.Node(m.outNode)
 	dim := lipgloss.NewStyle().Foreground(colMuted)
-	if n == nil || len(n.Activity) == 0 {
+	if n == nil {
 		m.outVP.SetContent(dim.Render("(no activity recorded; t shows the raw output)"))
 		return
 	}
 	w := max(m.outVP.Width, 8)
-	last := len(n.Activity) - 1
+	arch := m.outArchived(n)
+	acts, dropped := m.outActivity(n)
+	var lines []string
+	if arch != nil {
+		lines = archivedHeader(arch, w)
+	}
+	if len(acts) == 0 {
+		msg := "(no activity recorded; t shows the raw output)"
+		if arch != nil {
+			msg = "  (the activity of this attempt was not kept)"
+		}
+		m.outVP.SetContent(strings.Join(append(lines, dim.Render(msg)), "\n"))
+		return
+	}
+	last := len(acts) - 1
 	if m.outFollow || m.outCur > last {
 		m.outCur = last
 	}
 	m.outCur = max(m.outCur, 0)
-	var lines []string
-	if n.ActivityDropped > 0 {
-		lines = append(lines, dim.Render(fmt.Sprintf("  … %d earlier %s", n.ActivityDropped, pluralize(n.ActivityDropped, "step", "steps"))))
+	if dropped > 0 {
+		lines = append(lines, dim.Render(fmt.Sprintf("  … %d earlier %s", dropped, pluralize(dropped, "step", "steps"))))
 	}
 	curTop, curBot := 0, 0
-	for i, a := range n.Activity {
+	for i, a := range acts {
 		bar := "  "
 		if i == m.outCur {
 			bar = lipgloss.NewStyle().Foreground(colAccent).Render("▌ ")
 			curTop = len(lines)
 		}
 		lines = append(lines, bar+activityLine(a, m.now(), w-2))
-		if m.outOpen[outKey(n.ID, a.ID)] {
+		key := outKey(n.ID, a.ID)
+		if arch != nil {
+			key = outKey(fmt.Sprintf("%s#%d", n.ID, arch.N), a.ID)
+		}
+		if m.outOpen[key] {
 			detail := a.Detail
-			if m.eng != nil {
+			if m.eng != nil && arch == nil {
 				if full, ok := m.eng.ActivityDetail(n.ID, a.ID); ok {
 					detail = full
 				}
@@ -94,10 +112,14 @@ func (m *workspaceModel) refreshTimeline() {
 // timelineKey handles the keys of the timeline: it reports whether it used k.
 func (m workspaceModel) timelineKey(k string) (workspaceModel, bool) {
 	n := m.g.Node(m.outNode)
-	if n == nil || len(n.Activity) == 0 {
+	if n == nil {
 		return m, false
 	}
-	last := len(n.Activity) - 1
+	acts, _ := m.outActivity(n)
+	if len(acts) == 0 {
+		return m, false
+	}
+	last := len(acts) - 1
 	move := func(to int) workspaceModel {
 		m.outCur = min(max(to, 0), last)
 		m.outFollow = m.outCur == last
@@ -117,7 +139,10 @@ func (m workspaceModel) timelineKey(k string) (workspaceModel, bool) {
 		if m.outOpen == nil {
 			m.outOpen = map[string]bool{}
 		}
-		key := outKey(n.ID, n.Activity[m.outCur].ID)
+		key := outKey(n.ID, acts[m.outCur].ID)
+		if arch := m.outArchived(n); arch != nil {
+			key = outKey(fmt.Sprintf("%s#%d", n.ID, arch.N), acts[m.outCur].ID)
+		}
 		m.outOpen[key] = !m.outOpen[key]
 		m.refreshOutput()
 		return m, true
@@ -134,15 +159,25 @@ func (m workspaceModel) outputHeader(w int) string {
 	}
 	_, label := nodeStatusGlyph(m.g, n)
 	meta := []string{label}
-	if !n.StartedAt.IsZero() {
-		end, word := n.EndedAt, "Worked for "
-		if n.Status == workspace.StatusRunning || end.IsZero() {
-			end, word = m.now(), "Working for "
-		}
-		meta = append(meta, word+feedDuration(end.Sub(n.StartedAt)))
+	if at := m.attemptMeta(n); at != "" {
+		meta = append([]string{at}, meta...)
 	}
-	if c := ctxLabel(n); c != "" {
-		meta = append(meta, c)
+	if a := m.outArchived(n); a != nil {
+		meta[len(meta)-1] = string(a.Status)
+		if !a.StartedAt.IsZero() && !a.EndedAt.IsZero() {
+			meta = append(meta, "Worked for "+feedDuration(a.EndedAt.Sub(a.StartedAt)))
+		}
+	} else {
+		if !n.StartedAt.IsZero() {
+			end, word := n.EndedAt, "Worked for "
+			if n.Status == workspace.StatusRunning || end.IsZero() {
+				end, word = m.now(), "Working for "
+			}
+			meta = append(meta, word+feedDuration(end.Sub(n.StartedAt)))
+		}
+		if c := ctxLabel(n); c != "" {
+			meta = append(meta, c)
+		}
 	}
 	right := strings.Join(meta, " · ")
 	left := n.ID + " · " + n.Title

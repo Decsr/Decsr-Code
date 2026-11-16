@@ -292,7 +292,7 @@ func cardHeader(o cardOpts, iw int) string {
 		glyph = o.spin
 	}
 	left := lipgloss.NewStyle().Foreground(statusLabelColor(o.g, n)).Bold(true).Render(glyph) + " " + dim.Render(n.ID) + " "
-	clock := feedClock(n.StartedAt) + " ↗"
+	clock := attemptTag(n) + feedClock(n.StartedAt) + " ↗"
 	var cands []string
 	if o.runner != "" || o.model != "" {
 		badge := runnerBadge(o.runner, o.icons)
@@ -433,6 +433,7 @@ func cardBody(o cardOpts, iw int) []string {
 	if len(n.Warnings) > 0 && n.Status != workspace.StatusRunning {
 		rows = append(rows, dim.Render("⚠ "+fmt.Sprintf("%d %s", len(n.Warnings), pluralize(len(n.Warnings), "warning", "warnings"))))
 	}
+	rows = append(rows, replyLines(n, iw)...)
 	if o.expanded && hasAct {
 		rows = append(rows, activityTimelineRows(n, o.now, iw)...)
 	} else if o.expanded {
@@ -447,6 +448,9 @@ func cardBody(o cardOpts, iw int) []string {
 		for _, l := range tail {
 			rows = append(rows, dim.Render(truncateOneLine(cleanOutputLine(l), iw)))
 		}
+	}
+	if o.expanded {
+		rows = append(rows, attemptRows(n, o.now, iw)...)
 	}
 	return rows
 }

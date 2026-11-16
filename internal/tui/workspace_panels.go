@@ -84,6 +84,15 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 		}
 	}
 	add(statusLine)
+	if n.AttemptNumber() > 1 {
+		add(dim.Render(fmt.Sprintf("Attempt  %d of %d", n.AttemptNumber(), n.AttemptNumber())))
+	}
+	if n.Reply != "" {
+		add(dim.Render("Reply  " + firstLine(workspace.SanitizeText(n.Reply))))
+	}
+	if n.PendingReply != "" {
+		add(dim.Render("Queued  " + firstLine(workspace.SanitizeText(n.PendingReply))))
+	}
 	gap()
 
 	// Role.
@@ -100,9 +109,9 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 		}
 	case n.Role != "":
 		var meta []string
-		runner := ""
+		runner, mode := "", ""
 		if r, ok := workspace.FindRole(cfg, n.Role); ok {
-			runner = r.Agent.Runner
+			runner, mode = r.Agent.Runner, roleModeLabel(r.Agent)
 			if m := modelOnly(r.Agent.Model); m != "" {
 				meta = append(meta, m)
 			}
@@ -118,6 +127,13 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 			line += dim.Render("  " + strings.Join(meta, " / "))
 		}
 		add(line)
+		if mode != "" && !compact {
+			// On the section header line, so it costs no row.
+			tag := "Mode  " + mode
+			if gap := w - ansi.StringWidth("Role") - ansi.StringWidth(tag); gap >= 2 {
+				lines[roleAt] = head.Render("Role") + strings.Repeat(" ", gap) + dim.Render(tag)
+			}
+		}
 	case n.SuggestedRole != "":
 		s := "suggested: " + n.SuggestedRole
 		if _, ok := workspace.FindRole(cfg, n.SuggestedRole); !ok {
@@ -521,7 +537,9 @@ func buildPickItems(g *workspace.Graph, n *workspace.Node, cfg config.Config) []
 	return items
 }
 
-func roleMetaShort(ac config.AgentConfig) string { return shortModel(ac.Runner, ac.Model) }
+func roleMetaShort(ac config.AgentConfig) string {
+	return shortModel(ac.Runner, ac.Model) + " · " + roleModeLabel(ac)
+}
 
 // pickDefaultIndex puts the cursor on the suggested row.
 func pickDefaultIndex(items []wsPickItem) int {
@@ -771,6 +789,7 @@ func workspaceHelp(cmds []wsCommand) []helpSection {
 			{"Alt+Enter", "prompt: new line"},
 			{"/usr/lib is gone", "a first word with a second / is sent as a task"},
 			{"//text", "sends /text as a task, not a command"},
+			{"@T3 message", "reply to node T3 (@ lists nodes)"},
 		}},
 		{"Graph keys (graph focus)", []keyHint{
 			{"← ↑ ↓ → / h j k l", "move between nodes"},
@@ -782,6 +801,8 @@ func workspaceHelp(cmds []wsCommand) []helpSection {
 			{"r / R", "run the node / run every assigned node"},
 			{"s / S", "stop the node / stop all nodes"},
 			{"f", "add a fix node after a failed Build & test"},
+			{"m", "reply to the node (fills the prompt with @T3)"},
+			{"!", "open a shell in the node's worktree (a tmux split under tmux)"},
 			{"q", "quit (asks first while nodes run)"},
 		}},
 		{"Anywhere", []keyHint{
@@ -790,4 +811,14 @@ func workspaceHelp(cmds []wsCommand) []helpSection {
 		}},
 		{"Commands", cmdKeys},
 	}
+}
+
+// roleModeLabel is the effective mode of a role for display, with a "!" when
+// the runner cannot run it.
+func roleModeLabel(ac config.AgentConfig) string {
+	mode := ac.EffectiveMode()
+	if ac.ModeError() != nil {
+		mode += " !"
+	}
+	return mode
 }

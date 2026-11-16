@@ -229,7 +229,9 @@ the area that has focus.
 | `Enter` | Send the task, or run the command when the text starts with `/` (see [Commands](#commands)) |
 | `Alt+Enter` | New line in the task |
 | `/` | At the start of the text: open the command list |
-| `Up` / `Down`, `Tab` | In the command list: move, complete the name |
+| `@` | At the start of the text: list the work and fix nodes (`T3 · title · status`); type to filter |
+| `@T3 message` | Reply to node T3 (see [Reply to a node](#reply-to-a-node)) |
+| `Up` / `Down`, `Tab` | In the command list or the node list: move, complete the name (`Enter` also completes a node) |
 | `Right` | Empty prompt with a suggestion shown: fill the prompt with it (does not send) |
 | `Esc` | Hide the suggestion; close the command list; otherwise go to the main pane (when it has nodes) |
 | `PgUp` / `PgDn` | Scroll the activity feed (the conversation in Graph mode) |
@@ -268,6 +270,8 @@ node keys work with focus on the sidebar or on the main pane, in either mode.
 | `A` | Accept all suggestions that are defined roles |
 | `d` | Open the diff of the selected node (see [Diff and review notes](#diff-and-review-notes)) |
 | `D` | Open the diff of the whole session branch |
+| `m` | Reply to the selected node: focus the prompt filled with `@T3 ` (see [Reply to a node](#reply-to-a-node)) |
+| `!` | Open a shell in the selected node's worktree (tmux split under tmux; see [Agent mode](#agent-mode)) |
 | `K` | Choose the plugin skills of the selected node (see [How the lead picks skills](#how-the-lead-picks-skills)) |
 | `r` | Run the selected node |
 | `R` | Run every assigned node as dependencies finish |
@@ -286,7 +290,10 @@ cursor over the steps (`g`/`G` jump to the first and last), `Enter` or `Space`
 expands the step under the cursor to its detail (the full text while decsr
 still holds it, else the 500 characters saved in the session), and `t` toggles
 the raw output text. A node without activity (an old session) opens in raw
-mode. `Esc` or `q` returns, `s` stops the node, and `PgUp`/`PgDn` scroll.
+mode. After a reply the node has earlier attempts: `[` and `]` show the
+previous and next attempt (its summary or error and its timeline, when that
+was kept), and `]` past the last earlier attempt returns to the current one.
+`Esc` or `q` returns, `s` stops the node, and `PgUp`/`PgDn` scroll.
 
 The old `n` key (new task) is gone; use `/clear`.
 
@@ -648,6 +655,62 @@ saved with `no` gets `read_only: true`. The picker and the inspector show
 `<role> is read-only: it will report, not change files`. A read-only node never
 gets the "no files were written" warning.
 
+### Agent mode
+
+A role has a mode, `mode: text` or `mode: agent` (in `agents:` of
+`.decsr/project.yaml`, kept by profiles):
+
+```yaml
+agents:
+  coder:
+    runner: claude
+    mode: agent
+```
+
+| Mode | What happens |
+|---|---|
+| `text` | The model answers with file blocks and DECSR writes the files (see above). |
+| `agent` | The runner works as a coding agent in the node's working directory (its worktree when isolation is on) and edits the files itself with its own tools. DECSR does not read file blocks; fenced blocks in the reply are just text. The node's files are what changed in the worktree (the commit that is merged) or the observed tree changes. |
+
+Without `mode`, `opencode` and `codex` (and an empty runner, which is opencode)
+use `agent`; every other runner uses `text`. Agent mode needs `claude`,
+`opencode` or `codex`; with an API or local runner the node fails with
+`agent mode needs claude, opencode or codex`, and `decsr doctor` prints one
+`mode <role>` line for each such role. `mode: text` is not accepted for
+`opencode`, because it has no read-only switch to keep it from editing files
+itself; use `agent`, or another runner. For `codex`, text mode runs with
+`--sandbox read-only` and agent mode with `--sandbox workspace-write`. The
+inspector shows `Mode  agent` or `Mode  text` on the Role header, and the role
+list and the picker show it after the model. Project Setup does not edit the
+mode yet: set it in the YAML file.
+
+In agent mode the prompt tells the agent to change files directly, not to print
+file blocks, and to end with a short `===SUMMARY===`. A node whose run changed
+nothing still gets the "no files were written" warning. A read-only role stays
+read-only: its prompt forbids changes and, with Claude, it gets no write tool.
+
+**Claude in agent mode** runs with a fixed tool list and nothing else
+(`--tools`, `--allowedTools` and `--permission-mode dontAsk`, so a tool that is
+not on the list is refused instead of asking, whatever your own Claude settings
+allow):
+
+- `Read`, `Edit`, `Write`, `Glob`, `Grep`;
+- `Bash` limited to the project's build and test commands (the ones the Build &
+  test node runs, each as a prefix: `Bash(go test ./...:*)`);
+- read-only git: `git status`, `git diff`, `git log`, `git show`.
+
+A read-only role gets `Read`, `Glob`, `Grep` and the read-only git commands.
+There are no interactive permission prompts. In text mode Claude runs with all
+tools off, as before.
+
+**Shell in a node's worktree.** `!` on the selected node opens `$SHELL` (else
+`/bin/sh`) in its worktree while that exists (running, failed, or conflicted
+nodes whose worktree was kept); otherwise in the integration worktree (the
+merged result), otherwise in the project root. A conversation line says which.
+Under tmux (`$TMUX` set, which includes `decsr --tmux`) it runs
+`tmux split-window -h -c <dir>` and the Workspace keeps running; otherwise the
+Workspace is suspended until the shell exits.
+
 If you remove a role from the config after assigning it, the node becomes
 unassigned again the next time the graph is loaded.
 
@@ -677,6 +740,65 @@ with more than 20,000 files) and lists new or changed files that were not
 written from file blocks as "by the agent's own tools" in the inspector. They
 also count as the node's files for the context of later nodes. Because nodes can
 run in parallel, a file changed by another running node may be listed too.
+
+## Reply to a node
+
+Talk to a node after it ran, or while it runs. Type `@T3 <message>` in the
+prompt (`@` at the start lists the work and fix nodes; `Tab` or `Enter` on an
+item completes `@T3 `), or select the node and press `m`, which focuses the
+prompt filled with `@T3 `. The message may span several lines (`Alt+Enter`).
+Build & test takes no reply: `@CHECK ...` and `m` on it show an error. An
+unknown ID shows an error and leaves the text in the prompt.
+
+A reply starts a new attempt of the same node. It is not a child node.
+
+- The node keeps its history. Its card shows `attempt 2` in the header, the
+  sidebar row and the inspector (`Attempt  2 of 2`, `Reply  <first line>`).
+  Expand the card (`Space`) to see the earlier attempts as folded lines such
+  as `Attempt 1 · failed · Worked for 2m 10s ›` with their summary or error.
+  The output view switches attempts with `[` and `]`.
+- The result is merged again. With worktree isolation the new attempt gets a
+  fresh worktree from the integration tip, which already holds what attempt 1
+  merged, so the agent edits on top of it.
+- A node that is done or failed moves its finished attempt into the history and
+  starts at once, unless it must wait: a dependency is not done, no role is
+  assigned, the parallel limit is reached, or the budget gate stops new nodes.
+  The conversation then says `T3 waiting: <reason>` and the node starts like
+  any ready node (`r`, or automatically while `R` run-all is on). A Build & test
+  node that was done or failed is reset to todo, as after a fix node.
+- A node that never ran keeps your message for its first run.
+- Nodes that depend on the replied node are not re-run. If a done node that
+  others depend on gets a new attempt, the node's output says
+  `T5, T6 depend on T3 and were not re-run`. Run them again yourself.
+
+**Reply to a running node.** The reply is queued (`queued for T3`; the card
+shows `reply queued: "..."`, several replies are joined by a blank line). It
+starts the next attempt when the current run ends, whether it succeeds, fails
+or is stopped. `s` still stops the run, and stopping keeps the queued reply:
+the next attempt starts right after. Closing decsr stops the node and leaves
+the reply on a waiting node.
+
+**What the new attempt gets.** The context is rebuilt by replay, so it works for
+every runner. The node's task and the usual project context come first. The
+reply attempt then adds:
+
+```
+Previous attempt (attempt 1, failed):
+<excerpt>
+
+The user replied:
+<message>
+```
+
+The excerpt is at most 8,000 characters: the previous summary, the commands
+with the tail of their output (failed ones first), the errors, the files
+touched and the last assistant message (at most 1,000 characters). Reasoning is
+never included, and where text was cut it says `[… N characters omitted]`.
+Resuming the CLI's own session is not used.
+
+The session keeps the earlier attempts of a node (summary, error, file
+statistics, commit); the activity timeline is kept for the three most recent
+ones. The budget gate and the autonomy level apply as for any node.
 
 ## Cost and budget
 

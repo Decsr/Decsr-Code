@@ -21,25 +21,13 @@ type ClaudeRunner struct {
 	Model  string
 }
 
-// ClaudeModels lists available Claude model aliases accepted by the CLI --model flag.
-var ClaudeModels = []string{
-	"sonnet",
-	"opus",
-	"haiku",
-}
-
-// ClaudeListModels returns the known Claude model aliases.
-func ClaudeListModels() ([]string, error) {
-	return ClaudeModels, nil
-}
-
 // Complete implements LLMRunner by streaming the Claude CLI output incrementally.
 // Uses `--output-format stream-json --verbose` so the TUI shows progress live
 // instead of a single burst at the end of generation.
 func (r ClaudeRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan Token, error) {
 	prompt := buildClaudePrompt(req.Messages)
 
-	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, prompt, req.SystemPrompt, NormalizeEffort(req.Effort), req.Dir)
+	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, prompt, req.SystemPrompt, NormalizeEffort(req.Effort), req.Dir, req.Agent, req.AllowedTools)
 	if err != nil {
 		return nil, err
 	}
@@ -49,6 +37,59 @@ func (r ClaudeRunner) Complete(ctx context.Context, req CompletionRequest) (<-ch
 	// Claude streams tool-use steps, but stretches of silent work still happen;
 	// a heartbeat keeps the UI alive so the run never looks frozen.
 	return withHeartbeat(ch, defaultHeartbeatInterval), nil
+}
+
+// claudeBaseArgs is the fixed part of the argument list. Text mode turns every
+// tool off. Agent mode limits the built-in tools to the ones the allow list
+// names and uses dontAsk, so anything not on the list is denied instead of
+// prompting (and a user's own settings cannot widen it).
+func claudeBaseArgs(agent bool, allowed []string) []string {
+	args := []string{"--output-format", "stream-json", "--verbose", "--no-session-persistence"}
+	if !agent {
+		return append(args, "--allowedTools", "")
+	}
+	return append(args,
+		"--tools", strings.Join(claudeToolNames(allowed), ","),
+		"--allowedTools", strings.Join(allowed, ","),
+		"--permission-mode", "dontAsk")
+}
+
+// claudeToolNames is the distinct tool names of an allow list, so "Bash(git
+// status:*)" makes the Bash tool available.
+func claudeToolNames(allowed []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, a := range allowed {
+		name, _, _ := strings.Cut(a, "(")
+		if name != "" && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// AgentTools is the allow list of a Claude agent run: file tools (read-only
+// for a read-only role), Bash limited to the given build and test commands
+// (never for a read-only role) and read-only git.
+func AgentTools(commands []string, readOnly bool) []string {
+	tools := []string{"Read", "Glob", "Grep"}
+	if !readOnly {
+		tools = []string{"Read", "Edit", "Write", "Glob", "Grep"}
+		seen := map[string]bool{}
+		for _, c := range commands {
+			c = strings.TrimSpace(c)
+			if c == "" || seen[c] || strings.ContainsAny(c, "()\n,") {
+				continue
+			}
+			seen[c] = true
+			tools = append(tools, "Bash("+c+":*)")
+		}
+	}
+	for _, g := range []string{"status", "diff", "log", "show"} {
+		tools = append(tools, "Bash(git "+g+":*)")
+	}
+	return tools
 }
 
 func buildClaudePrompt(messages []ConvMessage) string {
@@ -62,13 +103,13 @@ func buildClaudePrompt(messages []ConvMessage) string {
 	return sb.String()
 }
 
-func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, effort, dir string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
+func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, effort, dir string, agent bool, allowed []string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "claude"
 	}
 
-	args := []string{"--output-format", "stream-json", "--verbose", "--no-session-persistence", "--allowedTools", ""}
+	args := claudeBaseArgs(agent, allowed)
 	if r.Model != "" {
 		args = append(args, "--model", r.Model)
 	}

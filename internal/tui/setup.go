@@ -243,6 +243,16 @@ type SetupModel struct {
 
 	claudeModels        []string
 	claudeModelsLoading bool
+	// claudeCustom is a saved or typed model id that is not in claudeModels.
+	claudeCustom string
+	// claudeTyping is set while a model id is typed instead of picked.
+	claudeTyping  bool
+	claudeTypeErr string
+	// claudeDefault is the model of the user's Claude settings, used when a
+	// role has no model of its own.
+	claudeDefault string
+	// globalModelEmpty is set while the global model is unset and untouched.
+	globalModelEmpty bool
 
 	ollamaModels        []string
 	ollamaModelsLoading bool
@@ -406,6 +416,11 @@ func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs 
 		}
 	}
 
+	m.claudeDefault, _ = runner.ClaudeSettingsModel()
+	m.globalModelEmpty = currentModel == ""
+	if currentRunner == "claude" {
+		m.noteClaudeCustom(currentModel)
+	}
 	m.provider = providerFromString(currentRunner)
 	m.applyGlobalEndpoint(agentCfgs, currentRunner)
 	if m.entry(m.provider).isAPI() {
@@ -522,7 +537,7 @@ func (m SetupModel) nextAvailableProvider(start providerKind, dir int) providerK
 func (m SetupModel) modelsForProvider(p providerKind) []string {
 	switch p {
 	case providerClaude:
-		return m.claudeModels
+		return m.claudeRows()
 	case providerOllama:
 		return m.ollamaModels
 	case providerMLX:
@@ -551,7 +566,7 @@ func (m SetupModel) agentModel() string {
 	if m.typedMode(m.agentEditProv) {
 		return m.typedModel()
 	}
-	if models := m.modelsForProvider(m.agentEditProv); m.agentEditIdx < len(models) {
+	if models := m.modelsForProvider(m.agentEditProv); m.agentEditIdx < len(models) && models[m.agentEditIdx] != claudeTypeRow {
 		return models[m.agentEditIdx]
 	}
 	return ""
@@ -865,12 +880,12 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 		m.claudeModelsLoading = false
 		if msg.err == nil && len(msg.models) > 0 {
 			prevModel := ""
-			if m.provider == providerClaude && m.modelIdx < len(m.claudeModels) {
-				prevModel = m.claudeModels[m.modelIdx]
+			if rows := m.claudeRows(); m.provider == providerClaude && m.modelIdx < len(rows) {
+				prevModel = rows[m.modelIdx]
 			}
 			m.claudeModels = msg.models
 			if m.provider == providerClaude {
-				m.modelIdx = findModelIndex(m.claudeModels, prevModel)
+				m.modelIdx = findModelIndex(m.claudeRows(), prevModel)
 			}
 		}
 		if m.ready {
@@ -1036,6 +1051,11 @@ func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "esc":
+		if m.claudeTyping {
+			m.claudeTyping = false
+			m.claudeTypeErr = ""
+			return m, nil
+		}
 		if m.agentEditing {
 			if m.agentEditStep > 0 {
 				m.agentEditStep--
@@ -1186,6 +1206,18 @@ func (m SetupModel) apiKeyLine() string { return m.keyLineFor(m.entry(m.provider
 func (m SetupModel) handleModelKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 
 	models := m.activeModels()
+	if m.claudeTyping && m.provider == providerClaude {
+		accepted, cmd := m.claudeTypedKey(msg, &m.modelIdx)
+		if !accepted {
+			return m, cmd
+		}
+		m.pingErr = nil
+		m.resetEffortForNewModel()
+		m.section = sectionEffort
+		cmd = m.startEffortLoad()
+		m.ensureSectionVisible()
+		return m, cmd
+	}
 	if m.typedMode(m.provider) {
 		return m.handleTypedModelKeys(msg)
 	}
@@ -1218,6 +1250,10 @@ func (m SetupModel) handleModelKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		m.section = sectionProvider
 		m.ensureSectionVisible()
 	case "enter":
+		if m.provider == providerClaude && m.modelIdx < len(models) && models[m.modelIdx] == claudeTypeRow {
+			m.startClaudeTyping()
+			return m, nil
+		}
 		// Move to the effort picker instead of saving immediately, so choosing
 		// a model always presents its effort options.
 		m.section = sectionEffort
@@ -1256,6 +1292,7 @@ func (m SetupModel) handleTypedModelKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 // The current effort is kept; it is validated against the new model's levels
 // once they load.
 func (m *SetupModel) resetEffortForNewModel() {
+	m.globalModelEmpty = false
 	m.effortIdx = 0
 	m.effortOptions = nil
 	m.effortFor = ""
@@ -1423,9 +1460,13 @@ func (m SetupModel) handleAgentEditKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			m.agentEditStep = 1
 			m.agentEditIdx = 0
 			m.typed.SetValue("")
+			m.claudeTyping = false
 			// Pre-select current model if exists.
 			role := m.agentRoles[m.agentCursor]
 			if ov, ok := m.agentOverrides[role]; ok {
+				if m.agentEditProv == providerClaude {
+					m.noteClaudeCustom(ov.model)
+				}
 				for i, mdl := range m.modelsForProvider(m.agentEditProv) {
 					if mdl == ov.model {
 						m.agentEditIdx = i
@@ -1444,6 +1485,13 @@ func (m SetupModel) handleAgentEditKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 	if m.agentEditStep == 1 {
 		// Step 1: pick model.
 		models := m.modelsForProvider(m.agentEditProv)
+		if m.claudeTyping && m.agentEditProv == providerClaude {
+			accepted, cmd := m.claudeTypedKey(msg, &m.agentEditIdx)
+			if !accepted {
+				return m, cmd
+			}
+			models = m.modelsForProvider(m.agentEditProv)
+		}
 		if m.typedMode(m.agentEditProv) && msg.String() != "enter" {
 			var cmd tea.Cmd
 			m.typed, cmd = m.typed.Update(msg)
@@ -1461,6 +1509,10 @@ func (m SetupModel) handleAgentEditKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 				m.agentEditIdx++
 			}
 		case "enter":
+			if m.agentEditProv == providerClaude && m.agentEditIdx < len(models) && models[m.agentEditIdx] == claudeTypeRow {
+				m.startClaudeTyping()
+				return m, nil
+			}
 			// Move to effort. Keep the existing effort only when the model did
 			// not change; otherwise start from the global effort.
 			modelStr := m.agentModel()
@@ -1658,7 +1710,7 @@ func (m SetupModel) selectedProviderModel() (string, string) {
 	switch {
 	case m.typedMode(m.provider):
 		model = m.typedModel()
-	case m.modelIdx < len(models):
+	case m.modelIdx < len(models) && models[m.modelIdx] != claudeTypeRow:
 		model = models[m.modelIdx]
 	}
 	return provider, model
@@ -2037,6 +2089,9 @@ func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active,
 			modelPart := inactive.Render(ov.model)
 			if ov.model == "" {
 				modelPart = dim.Render("(auto)")
+				if ov.runner == "claude" {
+					modelPart = dim.Render(m.claudeDefaultLine(true))
+				}
 			}
 			display = runnerPart + dim.Render(" / ") + modelPart
 			if ov.effort != "" && ov.effort != setupEffortDefault {
@@ -2110,8 +2165,16 @@ func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active,
 			switch {
 			case m.typedMode(m.agentEditProv):
 				agentLines = append(agentLines, dim.Render("  no model list — type a model id:"), "  "+m.typed.View())
+			case m.claudeTyping && m.agentEditProv == providerClaude:
+				agentLines = append(agentLines, m.claudeTypingLines(dim)...)
 			case len(models) == 0:
 				agentLines = append(agentLines, dim.Render("  no models available"))
+			case m.agentEditProv == providerClaude:
+				if line := m.claudeDefaultLine(m.agentClaudeModelEmpty()); line != "" {
+					agentLines = append(agentLines, dim.Render("  "+line))
+				}
+				labels, hints := m.claudeLabels()
+				agentLines = append(agentLines, renderWindowedListHints(labels, hints, m.agentEditIdx, true, active, inactive, dim)...)
 			default:
 				agentLines = append(agentLines, renderWindowedList(models, m.agentEditIdx, true, active, inactive, dim)...)
 			}
@@ -2213,7 +2276,14 @@ func (m SetupModel) viewClaudeModels(active, inactive, dim lipgloss.Style) []str
 		return lines
 	}
 
-	lines = append(lines, renderWindowedList(m.claudeModels, m.modelIdx, isModelSection, active, inactive, dim)...)
+	if m.claudeTyping {
+		return append(lines, m.claudeTypingLines(dim)...)
+	}
+	if line := m.claudeDefaultLine(m.globalClaudeModelEmpty()); line != "" {
+		lines = append(lines, dim.Render("  "+line))
+	}
+	labels, hints := m.claudeLabels()
+	lines = append(lines, renderWindowedListHints(labels, hints, m.modelIdx, isModelSection, active, inactive, dim)...)
 	return lines
 }
 
@@ -2348,6 +2418,12 @@ func (m SetupModel) renderFooter() string {
 			hints = append(hints, hint("u", "base URL"))
 		}
 		hints = append(hints, hint("Enter", "confirm"), hint("Esc", "cancel"))
+	case m.agentEditing && m.agentEditStep == 1 && m.claudeTyping && m.agentEditProv == providerClaude:
+		hints = []keyHint{
+			hint("type", "model id"),
+			hint("Enter", "select"),
+			hint("Esc", "back"),
+		}
 	case m.agentEditing && m.agentEditStep == 1 && m.typedMode(m.agentEditProv):
 		hints = []keyHint{
 			hint("type", "model id"),
@@ -2392,6 +2468,12 @@ func (m SetupModel) renderFooter() string {
 			hint("Ctrl+S", "save & close"),
 			hint("Esc", "done"),
 		)
+	case m.section == sectionModel && m.claudeTyping && m.provider == providerClaude:
+		hints = []keyHint{
+			hint("type", "model id"),
+			hint("Enter", "effort"),
+			hint("Esc", "back"),
+		}
 	case m.section == sectionModel && m.typedMode(m.provider):
 		hints = []keyHint{
 			hint("type", "model id"),
@@ -2658,6 +2740,12 @@ func (m *SetupModel) ensureSectionVisible() {
 const listWindowSize = 7
 
 func renderWindowedList(items []string, cursor int, isFocused bool, active, inactive, dim lipgloss.Style) []string {
+	return renderWindowedListHints(items, nil, cursor, isFocused, active, inactive, dim)
+}
+
+// renderWindowedListHints is renderWindowedList with an optional dim hint after
+// each item; hints is empty or as long as items.
+func renderWindowedListHints(items, hints []string, cursor int, isFocused bool, active, inactive, dim lipgloss.Style) []string {
 	if len(items) == 0 {
 		return nil
 	}
@@ -2689,10 +2777,14 @@ func renderWindowedList(items []string, cursor int, isFocused bool, active, inac
 		if i == cursor {
 			marker = "  ▶ "
 		}
+		hint := ""
+		if i < len(hints) && hints[i] != "" {
+			hint = dim.Render("  " + hints[i])
+		}
 		if sel {
-			lines = append(lines, active.Render(marker+items[i]))
+			lines = append(lines, active.Render(marker+items[i])+hint)
 		} else {
-			lines = append(lines, inactive.Render(marker+items[i]))
+			lines = append(lines, inactive.Render(marker+items[i])+hint)
 		}
 	}
 	if end < len(items) {

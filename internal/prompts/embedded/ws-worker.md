@@ -16,13 +16,3 @@ has its own sub-task. Do only your sub-task; do not touch work that belongs to o
 ## Output format
 
 {{MODE}}
-
-Files shown under "Current files" in the project context are the latest versions on disk,
-including changes made by earlier agents. When you change one of them, output the
-COMPLETE updated file and keep everything unrelated to your sub-task intact. Never
-re-create a file from memory.
-
-End your answer with:
-
-===SUMMARY===
-1 to 5 lines: what you did and anything the next agent must know.

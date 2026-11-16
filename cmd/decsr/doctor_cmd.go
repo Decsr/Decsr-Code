@@ -13,6 +13,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/credentials"
 	"github.com/Decsr/Decsr-Code/internal/doctor"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
 const doctorCmdTimeout = 3 * time.Second
@@ -43,6 +44,16 @@ func buildDoctorDeps(root string) doctor.Deps {
 	for _, n := range names {
 		a := cfg.Agents[n]
 		agents = append(agents, doctor.Agent{Name: n, Runner: a.Runner, BaseURL: a.BaseURL, APIKeyEnv: a.APIKeyEnv, Provider: a.Provider})
+	}
+	// Mode applies to workspace roles; a custom role inherits pm's runner.
+	for _, r := range workspace.Roles(cfg) {
+		if err := r.Agent.ModeError(); err != nil && !r.Plugin {
+			for i := range agents {
+				if agents[i].Name == r.Name {
+					agents[i].ModeErr = err.Error()
+				}
+			}
+		}
 	}
 
 	layers := []doctor.Layer{}

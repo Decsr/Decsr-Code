@@ -101,6 +101,27 @@ func (i *Isolator) nodePath(id string) string {
 	return filepath.Join(worktreesDir(i.root, i.session), id)
 }
 
+// NodeDir is the project root inside a node's worktree, and whether that
+// worktree exists (a running node, or a failed or conflicted one that kept it).
+func (i *Isolator) NodeDir(id string) (string, bool) {
+	if !nodeIDRe.MatchString(id) {
+		return "", false
+	}
+	return existingDir(filepath.Join(i.nodePath(id), i.prefix))
+}
+
+// IntegrationDir is the project root inside the integration worktree (the
+// merged result), and whether that worktree exists. Unlike IntegrationRoot it
+// never creates it.
+func (i *Isolator) IntegrationDir() (string, bool) {
+	return existingDir(filepath.Join(worktreesDir(i.root, i.session), "_integration", i.prefix))
+}
+
+func existingDir(p string) (string, bool) {
+	st, err := os.Stat(p)
+	return p, err == nil && st.IsDir()
+}
+
 // ensureReady creates the integration branch and worktree on first use. The
 // caller holds i.mu.
 func (i *Isolator) ensureReady() error {

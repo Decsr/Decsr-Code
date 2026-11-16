@@ -276,3 +276,54 @@ func TestRunWorkerDoesNotStreamReasoningNotices(t *testing.T) {
 		t.Errorf("streamed %q, output %q: reasoning notices must stay out of the node output", got.String(), res.Output)
 	}
 }
+
+func TestRunWorkerAgentModeIgnoresFileBlocks(t *testing.T) {
+	root := t.TempDir()
+	out := "**a/one.txt**\n```\nhello\n```\n===SUMMARY===\nchanged one file\n"
+	f := &workerFake{chunks: []string{out}}
+	res, err := RunWorker(context.Background(), f, root, config.DefaultConfig(),
+		WorkerRequest{Title: "T", Mode: config.ModeAgent, BuildCommands: []string{"go test ./..."}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "a/one.txt")); err == nil {
+		t.Error("agent mode must not write file blocks")
+	}
+	if len(res.Files) != 0 || len(res.Skipped) != 0 {
+		t.Errorf("files = %v, skipped = %v", res.Files, res.Skipped)
+	}
+	if res.Summary != "changed one file" {
+		t.Errorf("summary = %q", res.Summary)
+	}
+	if !f.got.Agent || !strings.Contains(strings.Join(f.got.AllowedTools, ","), "Bash(go test ./...:*)") || !strings.Contains(strings.Join(f.got.AllowedTools, ","), "Edit") {
+		t.Errorf("request = %+v", f.got)
+	}
+	if !strings.Contains(f.got.SystemPrompt, "coding agent") || strings.Contains(f.got.SystemPrompt, "write its path in bold") {
+		t.Errorf("prompt lacks the agent text:\n%s", f.got.SystemPrompt)
+	}
+}
+
+func TestRunWorkerAgentModeReadOnlyPromptAndTools(t *testing.T) {
+	f := &workerFake{chunks: []string{"all fine\n"}}
+	if _, err := RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(),
+		WorkerRequest{Title: "T", Mode: config.ModeAgent, ReadOnly: true, BuildCommands: []string{"go test ./..."}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(f.got.SystemPrompt, "read-only agent") {
+		t.Errorf("prompt lacks the read-only agent text:\n%s", f.got.SystemPrompt)
+	}
+	tools := strings.Join(f.got.AllowedTools, ",")
+	if strings.Contains(tools, "Edit") || strings.Contains(tools, "Write") || strings.Contains(tools, "go test") {
+		t.Errorf("read-only tools = %s", tools)
+	}
+}
+
+func TestRunWorkerTextModeRequestIsNotAgent(t *testing.T) {
+	f := &workerFake{chunks: []string{"x\n===SUMMARY===\nok"}}
+	if _, err := RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(), WorkerRequest{Title: "T"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if f.got.Agent || len(f.got.AllowedTools) != 0 || !strings.Contains(f.got.SystemPrompt, "write its path in bold") {
+		t.Errorf("request = %+v", f.got)
+	}
+}

@@ -78,6 +78,10 @@ activity feed with one card per node (`g` switches to the graph); see
 
 **Diff and review notes:** `d` on a node shows what it changed (`D` the whole session); `c` puts a note on a line and `S` sends the notes to the agent as a new node (see [`doc/workspace.md`](doc/workspace.md#diff-and-review-notes)).
 
+**Agent mode:** `mode: agent` lets Claude, OpenCode or Codex edit files in the node's worktree with their own tools (Claude only gets a fixed tool list), `mode: text` keeps the file blocks; `!` on a node opens a shell in its worktree (see [`doc/workspace.md`](doc/workspace.md#agent-mode)).
+
+**Reply to a node:** `@T3 <message>` in the prompt (`@` completes node IDs) or `m` on a node starts a new attempt of that node with your message, keeps the earlier attempts, and queues the reply while the node runs (see [`doc/workspace.md`](doc/workspace.md#reply-to-a-node)).
+
 **Cost and budget:** add `pricing:` to the config and set `workspace.budget_usd`; the Workspace shows cost in a bottom bar, warns at 80% and stops starting nodes at the budget; `/budget` shows the spending (see [`doc/workspace.md`](doc/workspace.md#cost-and-budget)).
 
 **Autonomy levels:** `workspace.autonomy` or `/autonomy 1|2|3` lets the Workspace accept roles, run, add fix nodes after a failed Build & test (level 2) and open and watch the pull request (level 3, needs a budget); it never merges (see [`doc/workspace.md`](doc/workspace.md#autonomy-levels)).
@@ -120,7 +124,7 @@ Supports multiple runners out of the box:
 **CLI runners** (drive an external coding-agent CLI):
 
 - **OpenCode** (default)
-- **Claude CLI**
+- **Claude CLI** (pick an alias such as `fable` or `opus`, a full model name, or type a model id; with no model set, Claude uses the `model` of your `~/.claude/settings.json`)
 - **Codex CLI**
 - **GitHub Copilot CLI**
 

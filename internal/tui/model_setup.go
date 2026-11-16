@@ -41,14 +41,15 @@ func applyProjectSetupWithError(root string, msg setupDoneMsg) (config.Config, e
 		if ac, ok := projectAgents[role]; ok {
 			ac.Description = old.Description
 			ac.ReadOnly = old.ReadOnly
+			ac.Mode = old.Mode
 			ac.UserSkills = old.UserSkills
 			if ac.Runner == "" {
 				ac.BaseURL, ac.Provider = old.BaseURL, old.Provider
 			}
 			ac.APIKeyEnv = old.APIKeyEnv
 			projectAgents[role] = ac
-		} else if (!config.IsBuiltinRole(role) && role != "pr") || old.Description != "" || old.ReadOnly || len(old.UserSkills) > 0 || old.BaseURL != "" || old.Provider != "" || old.APIKeyEnv != "" {
-			projectAgents[role] = config.AgentConfig{Description: old.Description, ReadOnly: old.ReadOnly, UserSkills: old.UserSkills, BaseURL: old.BaseURL, Provider: old.Provider, APIKeyEnv: old.APIKeyEnv}
+		} else if (!config.IsBuiltinRole(role) && role != "pr") || old.Description != "" || old.ReadOnly || old.Mode != "" || len(old.UserSkills) > 0 || old.BaseURL != "" || old.Provider != "" || old.APIKeyEnv != "" {
+			projectAgents[role] = config.AgentConfig{Description: old.Description, ReadOnly: old.ReadOnly, Mode: old.Mode, UserSkills: old.UserSkills, BaseURL: old.BaseURL, Provider: old.Provider, APIKeyEnv: old.APIKeyEnv}
 		}
 	}
 	if len(projectAgents) > 0 {

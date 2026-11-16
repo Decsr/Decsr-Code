@@ -260,6 +260,19 @@ Project Setup edits per-agent overrides in three steps:
    is empty or fails shows a text input instead: type the model id.
 3. **Effort** — the levels supported by that model, or provider default.
 
+**Claude models.** The model list (Global Settings and the per-agent model step)
+shows the aliases `fable`, `opus`, `sonnet` and `haiku` (each with a dim
+`latest …` hint), then the full names `claude-fable-5-2`, `claude-opus-5-5`,
+`claude-sonnet-5-5` and `claude-haiku-5-5`. The saved string is passed unchanged
+as `claude --model`. The last row, `type a model id…`, opens a text input: Enter
+saves the id (no spaces), Esc returns to the list. A saved id that is not listed
+shows as `<id> (custom)` and stays selected. When a role has no model, DECSR
+passes no `--model` and Claude uses its own setting; the first line of the
+section then reads `default → <model> (from ~/.claude/settings.json)`, taken from
+the `model` key of that file, or `default → Claude Code's own default` when the
+file has none. The same line shows in the per-agent model step of a role with no
+model.
+
 The provider row of Global Settings offers the same runners. A custom provider
 is stored as `runner: openai` plus `provider: <name>` and uses the base URL
 saved with it; switching to another runner removes `provider`. If the config

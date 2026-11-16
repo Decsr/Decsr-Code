@@ -149,6 +149,13 @@ func (m workspaceModel) nodeRows(n *workspace.Node, w int, on bool, models, runn
 			age = sbAge(m.now(), n.EndedAt)
 		}
 	}
+	if n.Attempt > 1 {
+		mark := fmt.Sprintf("attempt %d", n.Attempt)
+		if age != "" {
+			mark += " · " + age
+		}
+		age = mark
+	}
 	return [2]string{sbRow(l1, "", w, on), sbRow(l2, sbSeg(age, colMuted, false, on), w, on)}
 }
 

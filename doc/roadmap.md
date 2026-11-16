@@ -96,14 +96,14 @@ and let you talk to a node after it has run.
 
 **Done when**
 
-- [ ] A role can be set to `mode: agent` or `mode: text`, with the defaults
+- [x] A role can be set to `mode: agent` or `mode: text`, with the defaults
       above.
-- [ ] In agent mode the node result is the worktree diff.
-- [ ] Claude agent mode refuses any tool outside the fixed list.
-- [ ] The shell command opens a split under `--tmux` and suspends the TUI
+- [x] In agent mode the node result is the worktree diff.
+- [x] Claude agent mode refuses any tool outside the fixed list.
+- [x] The shell command opens a split under `--tmux` and suspends the TUI
       otherwise.
-- [ ] `@T3 …` and `m` start `attempt 2` of T3, with history kept.
-- [ ] A reply to a running node waits until the run ends.
+- [x] `@T3 …` and `m` start `attempt 2` of T3, with history kept.
+- [x] A reply to a running node waits until the run ends.
 
 **Builds on.** Roles and runners, worktree isolation, `/merge`, `--tmux`,
 the activity excerpt from Phase 1.

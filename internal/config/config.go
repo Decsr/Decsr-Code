@@ -227,6 +227,7 @@ type AgentConfig struct {
 	APIKeyEnv        string   `yaml:"api_key_env,omitempty"`        // API runners: NAME of the env var holding the key; the key is never stored
 	MaxContextTokens int      `yaml:"max_context_tokens,omitempty"` // 0 = no limit (for local models)
 	ReadOnly         bool     `yaml:"read_only,omitempty"`          // workspace role that reports only and never writes files
+	Mode             string   `yaml:"mode,omitempty"`               // workspace roles: "" = by runner, "text" (decsr writes file blocks) or "agent" (the runner edits files with its own tools)
 	Skills           []string `yaml:"-"`                            // always from defaults, never persisted
 	UserSkills       []string `yaml:"skills,omitempty"`             // file-based skills (.decsr/skills/<name>.md)
 }
@@ -631,6 +632,9 @@ func merge(dst *Config, src Config) {
 			if ac.ReadOnly {
 				existing.ReadOnly = true
 			}
+			if ac.Mode != "" {
+				existing.Mode = ac.Mode
+			}
 			if len(ac.UserSkills) > 0 {
 				existing.UserSkills = ac.UserSkills
 			}
@@ -684,9 +688,61 @@ func SaveProjectRole(root, name string, ac AgentConfig) error {
 	existing.Model = ac.Model
 	existing.Effort = ac.Effort
 	existing.ReadOnly = ac.ReadOnly
+	existing.Mode = ac.Mode
 	if ac.UserSkills != nil {
 		existing.UserSkills = ac.UserSkills
 	}
 	cfg.Agents[name] = existing
 	return Save(root, cfg)
+}
+
+// Agent modes of a workspace role.
+const (
+	ModeText  = "text"  // the runner answers with text and decsr writes the file blocks
+	ModeAgent = "agent" // the runner edits files itself with its own tools
+)
+
+// modeRunner is the runner the mode rules apply to: an empty runner is opencode.
+func (ac AgentConfig) modeRunner() string {
+	if ac.Runner == "" {
+		return "opencode"
+	}
+	return ac.Runner
+}
+
+// EffectiveMode is the explicit mode, else "agent" for opencode and codex and
+// "text" for every other runner.
+func (ac AgentConfig) EffectiveMode() string {
+	if ac.Mode != "" {
+		return ac.Mode
+	}
+	switch ac.modeRunner() {
+	case "opencode", "codex":
+		return ModeAgent
+	}
+	return ModeText
+}
+
+// ModeError explains why the role's mode cannot run, or returns nil. Agent mode
+// needs a CLI that edits files with its own tools. opencode has no reliable
+// read-only switch, so text mode (where decsr alone writes the files) cannot be
+// guaranteed for it.
+func (ac AgentConfig) ModeError() error {
+	switch ac.Mode {
+	case "", ModeText, ModeAgent:
+	default:
+		return fmt.Errorf("invalid mode %q (use text or agent)", ac.Mode)
+	}
+	r := ac.modeRunner()
+	switch ac.EffectiveMode() {
+	case ModeAgent:
+		if r != "claude" && r != "opencode" && r != "codex" {
+			return errors.New("agent mode needs claude, opencode or codex")
+		}
+	case ModeText:
+		if r == "opencode" {
+			return errors.New("text mode is not supported for opencode (it has no read-only switch); use mode: agent or another runner")
+		}
+	}
+	return nil
 }

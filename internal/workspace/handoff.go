@@ -78,6 +78,14 @@ func FixExcerptWith(failed []*Node, maxChars int, detail func(nodeID, actID stri
 		parts = append(parts, "Files touched: "+strings.Join(fileList, ", "))
 	}
 
+	return fitParts(parts, maxChars)
+}
+
+// fitParts joins parts with blank lines in order until maxChars is spent. The
+// part that does not fit is cut (its end is kept, where a failure shows) and the
+// rest is dropped, each with an omission marker. The result is never longer than
+// maxChars characters.
+func fitParts(parts []string, maxChars int) string {
 	budget := maxChars
 	if budget > 2*markerReserve {
 		budget -= markerReserve
@@ -131,4 +139,99 @@ func joinNonEmpty(head, body string) string {
 		return head
 	}
 	return head + "\n" + body
+}
+
+// ReplyContextChars is the budget of the previous-attempt excerpt in the context
+// of a reply attempt.
+const ReplyContextChars = 8000
+
+// replyMessageChars caps the last assistant message in a reply excerpt.
+const replyMessageChars = 1000
+
+const (
+	replyFailedTail = 800 // output kept of a failed command
+	replyOKTail     = 200 // output kept of a command that worked
+	replyMaxOKCmds  = 20  // most recent commands that worked
+)
+
+// ReplyExcerpt builds the account of a previous attempt of node n that is given
+// to the next attempt: at most maxChars characters, in this order until the
+// budget is spent: the summary, the commands (failed ones first) with the tail
+// of their output, the errors, the files touched, then the last assistant
+// message. Reasoning is never included. Where text was cut it says
+// "[… N characters omitted]". detail, when not nil, returns the full detail of
+// an activity (kept in memory only); the stored, shorter detail is the fallback.
+func ReplyExcerpt(n *Node, prev Attempt, maxChars int, detail func(nodeID, actID string) (string, bool)) string {
+	if maxChars <= 0 {
+		return ""
+	}
+	id := ""
+	if n != nil {
+		id = n.ID
+	}
+	full := func(a runner.Activity) string {
+		d := a.Detail
+		if detail != nil {
+			if f, ok := detail(id, a.ID); ok {
+				d = f
+			}
+		}
+		return strings.TrimSpace(d)
+	}
+	tail := func(s string, max int) string {
+		if r := []rune(s); len(r) > max {
+			return "[…]\n" + string(r[len(r)-max:])
+		}
+		return s
+	}
+	var parts, failedCmds, okCmds, errs []string
+	files := map[string]bool{}
+	var fileList []string
+	lastMsg := ""
+	for _, a := range prev.Activity {
+		switch a.Kind {
+		case runner.ActCommand:
+			head := "$ " + a.Title
+			if a.ExitCode != nil {
+				head += fmt.Sprintf(" (exit %d)", *a.ExitCode)
+			}
+			if a.State == runner.ActFailed {
+				failedCmds = append(failedCmds, joinNonEmpty(head, tail(full(a), replyFailedTail)))
+			} else {
+				okCmds = append(okCmds, joinNonEmpty(head, tail(full(a), replyOKTail)))
+			}
+		case runner.ActError:
+			errs = append(errs, joinNonEmpty("error: "+a.Title, tail(full(a), replyFailedTail)))
+		case runner.ActEdit, runner.ActWrite:
+			add(files, &fileList, a.Title)
+		case runner.ActMessage:
+			if m := full(a); m != "" {
+				lastMsg = m
+			} else if a.Title != "" {
+				lastMsg = a.Title
+			}
+		}
+	}
+	if s := strings.TrimSpace(prev.Summary); s != "" {
+		parts = append(parts, "Summary: "+s)
+	}
+	if len(okCmds) > replyMaxOKCmds {
+		okCmds = okCmds[len(okCmds)-replyMaxOKCmds:]
+	}
+	parts = append(parts, failedCmds...)
+	parts = append(parts, okCmds...)
+	parts = append(parts, errs...)
+	if e := strings.TrimSpace(prev.Error); e != "" && len(failedCmds) == 0 && e != "stopped" {
+		parts = append(parts, "Error: "+e)
+	}
+	for _, fs := range prev.FileStats {
+		add(files, &fileList, fs.Path)
+	}
+	if len(fileList) > 0 {
+		parts = append(parts, "Files touched: "+strings.Join(fileList, ", "))
+	}
+	if lastMsg != "" {
+		parts = append(parts, "Last message: "+runner.Clip(lastMsg, replyMessageChars))
+	}
+	return fitParts(parts, maxChars)
 }

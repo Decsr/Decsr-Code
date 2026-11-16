@@ -76,7 +76,7 @@ func profileAgent(ac AgentConfig) AgentConfig {
 	return AgentConfig{
 		Runner: ac.Runner, Model: ac.Model, Effort: ac.Effort,
 		BaseURL: ac.BaseURL, APIKeyEnv: ac.APIKeyEnv, Provider: ac.Provider,
-		Description: ac.Description, ReadOnly: ac.ReadOnly, UserSkills: ac.UserSkills,
+		Description: ac.Description, ReadOnly: ac.ReadOnly, Mode: ac.Mode, UserSkills: ac.UserSkills,
 	}
 }
 
@@ -113,7 +113,7 @@ func LoadProfile(name string) (Profile, error) {
 }
 
 // SaveProfile stores agents as profile name. Only runner, model, effort, base_url, api_key_env,
-// description, read_only and skills are kept; roles with none of them set are
+// description, read_only, mode and skills are kept; roles with none of them set are
 // left out.
 func SaveProfile(name string, agents map[string]AgentConfig) error {
 	dir, file, err := profileFile(name)
@@ -123,7 +123,7 @@ func SaveProfile(name string, agents map[string]AgentConfig) error {
 	p := Profile{Agents: make(map[string]AgentConfig, len(agents))}
 	for role, ac := range agents {
 		ac = profileAgent(ac)
-		if ac.Runner == "" && ac.Model == "" && ac.Effort == "" && ac.BaseURL == "" && ac.APIKeyEnv == "" && ac.Description == "" && !ac.ReadOnly && len(ac.UserSkills) == 0 {
+		if ac.Runner == "" && ac.Model == "" && ac.Effort == "" && ac.BaseURL == "" && ac.APIKeyEnv == "" && ac.Description == "" && ac.Mode == "" && !ac.ReadOnly && len(ac.UserSkills) == 0 {
 			continue
 		}
 		p.Agents[role] = ac
@@ -187,6 +187,7 @@ func ApplyProfile(root, name string) error {
 			{&existing.Runner, pa.Runner}, {&existing.Model, pa.Model},
 			{&existing.Effort, pa.Effort}, {&existing.Description, pa.Description},
 			{&existing.BaseURL, pa.BaseURL}, {&existing.APIKeyEnv, pa.APIKeyEnv},
+			{&existing.Mode, pa.Mode},
 		} {
 			if f.src != "" {
 				*f.dst = f.src

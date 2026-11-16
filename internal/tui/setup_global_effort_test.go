@@ -36,7 +36,7 @@ func finishSave(t *testing.T, m SetupModel) tea.Msg {
 func TestGlobalSetup_ModelChangeKeepsAgentEffort(t *testing.T) {
 	m := globalSetupWithEffort(t, "max")
 
-	m, _ = m.handleModelKeys(tea.KeyMsg{Type: tea.KeyDown}) // sonnet -> opus
+	m, _ = m.handleModelKeys(tea.KeyMsg{Type: tea.KeyUp}) // sonnet -> opus
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
 	if m.pendingSave == nil {
 		t.Fatal("expected pending save")
@@ -76,7 +76,7 @@ func TestGlobalSetup_EffortSectionDefaultsToCurrent(t *testing.T) {
 
 func TestGlobalSetup_ExplicitEffortStillSaved(t *testing.T) {
 	m := globalSetupWithEffort(t, "max")
-	m, _ = m.handleModelKeys(tea.KeyMsg{Type: tea.KeyDown})
+	m, _ = m.handleModelKeys(tea.KeyMsg{Type: tea.KeyUp}) // sonnet -> opus
 	m, cmd := m.handleModelKeys(tea.KeyMsg{Type: tea.KeyEnter})
 	m, _ = m.Update(cmd())
 	m, _ = m.handleEffortKeys(tea.KeyMsg{Type: tea.KeyUp}) // one level below max

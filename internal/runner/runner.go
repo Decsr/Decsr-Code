@@ -49,6 +49,14 @@ type CompletionRequest struct {
 	// Dir is the working directory for CLI runners that run an agent process.
 	// Empty keeps the process working directory; HTTP runners ignore it.
 	Dir string
+	// Agent asks a CLI runner to work as a coding agent that edits files in Dir
+	// with its own tools. False keeps it a text generator: decsr writes the
+	// files. HTTP runners ignore it.
+	Agent bool
+	// AllowedTools lists the tools an agent run may use, in Claude's
+	// --allowedTools syntax ("Read", "Bash(go test:*)"). Only the Claude runner
+	// uses it; empty with Agent set means no tools.
+	AllowedTools []string
 }
 
 // LLMRunner is the common interface for all LLM backends.

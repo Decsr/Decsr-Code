@@ -39,6 +39,7 @@ type Agent struct {
 	BaseURL   string
 	APIKeyEnv string
 	Provider  string // saved custom provider (runner openai)
+	ModeErr   string // why the agent's mode cannot run, "" when it can
 }
 
 // Layer is one config source and whether it was found.
@@ -91,6 +92,7 @@ func Run(d Deps) []Result {
 	rs = append(rs, checkWritable(d))
 	rs = append(rs, checkConfig(d))
 	rs = append(rs, checkRunners(d)...)
+	rs = append(rs, checkModes(d)...)
 	rs = append(rs, checkOptional(d)...)
 	return rs
 }
@@ -500,4 +502,15 @@ func Print(w io.Writer, rs []Result) {
 		verdict = "not ready (a required check failed)"
 	}
 	_, _ = fmt.Fprintf(w, "\n%d ok, %d warnings, %d failed: %s\n", ok, warn, fail, verdict)
+}
+
+// checkModes reports one line for each role whose mode its runner cannot run.
+func checkModes(d Deps) []Result {
+	var rs []Result
+	for _, a := range d.Agents {
+		if a.ModeErr != "" {
+			rs = append(rs, Result{Name: "mode " + a.Name, Status: Warn, Detail: a.ModeErr, Hint: "set mode: text or agent for this role in .decsr/project.yaml, or change its runner"})
+		}
+	}
+	return rs
 }

@@ -392,6 +392,19 @@ func TestIsolatorFallbackIdentity(t *testing.T) {
 	}
 }
 
+// textModeConfig is the default config with every role on claude, whose
+// default mode is text (an empty runner is opencode, which defaults to agent).
+func textModeConfig() config.Config {
+	cfg := config.DefaultConfig()
+	agents := map[string]config.AgentConfig{}
+	for k, v := range cfg.Agents {
+		v.Runner = "claude"
+		agents[k] = v
+	}
+	cfg.Agents = agents
+	return cfg
+}
+
 // fileAnswer is an LLM that answers with one file block.
 func fileAnswer(path, content string) *execFake {
 	return &execFake{text: "**" + path + "**\n```go\n" + content + "```\n===SUMMARY===\nwrote " + path}
@@ -400,7 +413,7 @@ func fileAnswer(path, content string) *execFake {
 func isolatedExec(t *testing.T, root string, iso *Isolator, f *execFake) *executor {
 	t.Helper()
 	return &executor{
-		root: root, cfg: config.DefaultConfig(), iso: iso,
+		root: root, cfg: textModeConfig(), iso: iso,
 		newRunner: func(config.AgentConfig) (runner.LLMRunner, error) { return f, nil },
 	}
 }
@@ -541,5 +554,33 @@ func TestIsolatorFinishStatsEmptyWithoutChanges(t *testing.T) {
 	stats, err := iso.FinishStats("T1", "nothing")
 	if err != nil || len(stats) != 0 {
 		t.Errorf("stats = %v, err = %v", stats, err)
+	}
+}
+
+func TestIsolatorNodeAndIntegrationDir(t *testing.T) {
+	repo := newRepo(t)
+	iso := newIso(t, repo)
+	if _, ok := iso.NodeDir("T1"); ok {
+		t.Error("no worktree yet")
+	}
+	if _, ok := iso.IntegrationDir(); ok {
+		t.Error("the integration worktree must not exist before first use")
+	}
+	root, _, err := iso.Start("T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, ok := iso.NodeDir("T1"); !ok || d != root {
+		t.Errorf("NodeDir = %q, %v; want %q", d, ok, root)
+	}
+	if _, ok := iso.IntegrationDir(); !ok {
+		t.Error("starting a node creates the integration worktree")
+	}
+	iso.Discard("T1")
+	if _, ok := iso.NodeDir("T1"); ok {
+		t.Error("a discarded node has no worktree")
+	}
+	if _, ok := iso.NodeDir("../x"); ok {
+		t.Error("an invalid id has no worktree")
 	}
 }

@@ -114,7 +114,7 @@ func (r CodexRunner) Complete(ctx context.Context, req CompletionRequest) (<-cha
 		model = r.Model
 	}
 
-	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, userContent.String(), req.SystemPrompt, model, NormalizeEffort(req.Effort), req.Dir)
+	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, userContent.String(), req.SystemPrompt, model, NormalizeEffort(req.Effort), req.Dir, req.Agent)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +125,7 @@ func (r CodexRunner) Complete(ctx context.Context, req CompletionRequest) (<-cha
 	return ch, nil
 }
 
-func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, model, effort, dir string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
+func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, model, effort, dir string, agent bool) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "codex"
@@ -137,7 +137,13 @@ func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPr
 		fullPrompt = systemPrompt + "\n\n" + prompt
 	}
 
-	args := []string{"exec", "--full-auto", "--json"}
+	// Text mode must not let codex edit files (decsr writes them), so its
+	// sandbox is read-only. Agent mode may write inside the working directory.
+	sandbox := "read-only"
+	if agent {
+		sandbox = "workspace-write"
+	}
+	args := []string{"exec", "--sandbox", sandbox, "--json"}
 	if model != "" {
 		args = append(args, "--model", model)
 	}

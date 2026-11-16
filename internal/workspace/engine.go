@@ -39,8 +39,12 @@ type Engine struct {
 	cost    CostFunc
 	budget  func() Budget
 	pending []Event // engine events queued under the lock, sent by flush
-	warned  bool    // the warn threshold was announced
-	reached bool    // the budget-reached message was sent
+	// parent is the context of the latest node start; a reply starts under it.
+	parent context.Context
+	// startNotes are output lines to send right after a node's started event.
+	startNotes map[string][]Event
+	warned     bool // the warn threshold was announced
+	reached    bool // the budget-reached message was sent
 
 	// details holds the full activity detail (up to 2000 chars) per node and
 	// activity ID, in memory only. It follows the 200-per-node cap of Node.Activity.
@@ -89,6 +93,7 @@ func NewEngineWithSave(g *Graph, ex Executor, maxParallel int, save func(*Graph)
 		cancels:    make(map[string]context.CancelFunc),
 		costBase:   make(map[string]costBase),
 		stopped:    make(map[string]bool),
+		startNotes: make(map[string][]Event),
 		details:    make(map[string]*detailLog),
 		actSaveGap: activitySaveEvery,
 		now:        time.Now,
@@ -423,6 +428,13 @@ func (e *Engine) StopAll() {
 // startLocked marks n running and reserves its goroutine slot.
 func (e *Engine) startLocked(parent context.Context, n *Node) started {
 	ctx, cancel := context.WithCancel(parent)
+	e.parent = parent
+	// A reply attempt is given an account of the previous attempt. It is built
+	// here because the full details of that attempt are dropped just below.
+	n.replyContext = ""
+	if n.Reply != "" && len(n.Attempts) > 0 {
+		n.replyContext = ReplyExcerpt(n, n.Attempts[len(n.Attempts)-1], ReplyContextChars, e.detailLocked)
+	}
 	n.Status = StatusRunning
 	n.StartedAt = time.Now()
 	n.EndedAt = time.Time{}
@@ -487,6 +499,13 @@ func (e *Engine) runNode(s started) {
 	defer s.cancel()
 	id := s.n.ID
 	e.emit(Event{NodeID: id, Type: EventStarted})
+	e.mu.Lock()
+	notes := e.startNotes[id]
+	delete(e.startNotes, id)
+	e.mu.Unlock()
+	for _, ev := range notes {
+		e.emitOutput(ev)
+	}
 
 	forward := func(ev Event) {
 		ev.NodeID = id
@@ -554,8 +573,16 @@ func (e *Engine) runNode(s started) {
 		fin = Event{NodeID: id, Type: EventDone, Text: n.Summary}
 		overlaps = e.markOverlapsLocked(n)
 	}
-	serr := e.saveLocked()
 	e.checkBudgetLocked()
+	// A reply that came in while the node ran starts the next attempt now,
+	// whatever way this one ended.
+	var replyStart *started
+	if n.PendingReply != "" {
+		var notes []Event
+		_, replyStart, notes = e.applyReplyLocked(n, n.PendingReply)
+		overlaps = append(overlaps, notes...)
+	}
+	serr := e.saveLocked()
 	next := e.pickLocked()
 	e.mu.Unlock()
 
@@ -565,6 +592,9 @@ func (e *Engine) runNode(s started) {
 		e.emitOutput(ev)
 	}
 	e.emit(fin)
+	if replyStart != nil {
+		e.launch(*replyStart)
+	}
 	for _, ns := range next {
 		e.launch(ns)
 	}

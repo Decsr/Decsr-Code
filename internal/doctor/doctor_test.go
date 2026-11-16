@@ -314,3 +314,22 @@ func TestAPIKeySourceAndCredsWarning(t *testing.T) {
 		}
 	}
 }
+
+func TestModeLinePerInvalidRole(t *testing.T) {
+	d := baseDeps()
+	d.Agents = []Agent{
+		{Name: "coder", Runner: "ollama", ModeErr: "agent mode needs claude, opencode or codex"},
+		{Name: "qa", Runner: "claude"},
+		{Name: "docs", ModeErr: "invalid mode \"x\" (use text or agent)"},
+	}
+	rs := Run(d)
+	if r, ok := find(rs, "mode coder"); !ok || r.Status != Warn || !strings.Contains(r.Detail, "agent mode needs") {
+		t.Errorf("mode coder = %+v (found=%v)", r, ok)
+	}
+	if _, ok := find(rs, "mode docs"); !ok {
+		t.Error("missing mode docs line")
+	}
+	if _, ok := find(rs, "mode qa"); ok {
+		t.Error("a valid mode has no line")
+	}
+}

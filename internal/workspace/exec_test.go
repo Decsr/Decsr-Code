@@ -34,6 +34,16 @@ func (f *execFake) Complete(_ context.Context, req runner.CompletionRequest) (<-
 
 func newTestExec(t *testing.T, cfg config.Config, f *execFake, seen *[]config.AgentConfig) *executor {
 	t.Helper()
+	// Most tests feed file blocks, which is text mode; an empty runner is
+	// opencode, which defaults to agent mode.
+	agents := map[string]config.AgentConfig{}
+	for k, v := range cfg.Agents {
+		if v.Runner == "" {
+			v.Runner = "claude"
+		}
+		agents[k] = v
+	}
+	cfg.Agents = agents
 	return &executor{
 		root:           t.TempDir(),
 		cfg:            cfg,
@@ -773,6 +783,66 @@ func TestExecCheckEmitsNoContext(t *testing.T) {
 	for _, e := range evs {
 		if e.Type == EventContext {
 			t.Errorf("unexpected context event %+v", e)
+		}
+	}
+}
+
+func TestExecAgentModeObservesFilesAndIgnoresBlocks(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents["coder"] = config.AgentConfig{Runner: "claude", Mode: config.ModeAgent}
+	ex := newDiskExec(t, map[string]string{"made.go": "package x\n"}, "**ignored.txt**\n```\nhi\n```\n===SUMMARY===\nok")
+	ex.cfg = cfg
+	g := &Graph{Nodes: []*Node{{ID: "T1", Title: "t", Kind: KindWork, Role: "coder"}}}
+	res, err := ex.Run(context.Background(), g, g.Nodes[0], func(Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Files) != 0 || strings.Join(res.Observed, ",") != "made.go" {
+		t.Errorf("files = %v, observed = %v", res.Files, res.Observed)
+	}
+	if _, err := os.Stat(filepath.Join(ex.root, "ignored.txt")); err == nil {
+		t.Error("file block was written in agent mode")
+	}
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "no files were written") {
+			t.Errorf("unexpected warning %q", w)
+		}
+	}
+}
+
+func TestExecAgentModeNoChangesWarns(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents["coder"] = config.AgentConfig{Runner: "claude", Mode: config.ModeAgent}
+	ex := newTestExec(t, cfg, &execFake{text: "nothing to do\n===SUMMARY===\nok"}, nil)
+	g := &Graph{Nodes: []*Node{{ID: "T1", Title: "t", Kind: KindWork, Role: "coder"}}}
+	res, err := ex.Run(context.Background(), g, g.Nodes[0], func(Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Warnings) != 1 || res.Warnings[0] != "no files were written" {
+		t.Errorf("warnings = %v", res.Warnings)
+	}
+}
+
+func TestExecRejectsUnsupportedMode(t *testing.T) {
+	for _, tc := range []struct {
+		ac   config.AgentConfig
+		want string
+	}{
+		{config.AgentConfig{Runner: "ollama", Mode: config.ModeAgent}, "agent mode needs claude, opencode or codex"},
+		{config.AgentConfig{Runner: "opencode", Mode: config.ModeText}, "text mode is not supported for opencode"},
+	} {
+		cfg := config.DefaultConfig()
+		cfg.Agents["coder"] = tc.ac
+		f := &execFake{text: "x"}
+		ex := newTestExec(t, cfg, f, nil)
+		g := &Graph{Nodes: []*Node{{ID: "T1", Title: "t", Kind: KindWork, Role: "coder"}}}
+		_, err := ex.Run(context.Background(), g, g.Nodes[0], func(Event) {})
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%+v: err = %v, want %q", tc.ac, err, tc.want)
+		}
+		if len(f.reqs) != 0 {
+			t.Errorf("%+v: the runner must not start", tc.ac)
 		}
 	}
 }

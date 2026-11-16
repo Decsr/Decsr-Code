@@ -92,6 +92,10 @@ type wsDeps struct {
 	// useProvider writes runner/model for the lead or all roles into the
 	// global config and returns the reloaded config.
 	useProvider connectApplyFn
+	// getenv reads TMUX and SHELL for the "!" shell; nil uses the process
+	// environment. tmuxSplit opens the split; nil runs tmux.
+	getenv    func(string) string
+	tmuxSplit func(dir string) error
 }
 
 func (d *wsDeps) fillDefaults(root string) {
@@ -589,12 +593,13 @@ type workspaceModel struct {
 	spin      int
 
 	// output screen
-	outVP     viewport.Model
-	outNode   string
-	outFollow bool
-	outRaw    bool            // the raw text instead of the activity timeline
-	outCur    int             // timeline cursor: index into the node's activity
-	outOpen   map[string]bool // expanded timeline items, by outKey
+	outVP      viewport.Model
+	outNode    string
+	outFollow  bool
+	outRaw     bool            // the raw text instead of the activity timeline
+	outAttempt int             // earlier attempt shown (its number); 0 = the current one
+	outCur     int             // timeline cursor: index into the node's activity
+	outOpen    map[string]bool // expanded timeline items, by outKey
 
 	stallNoted       map[string]time.Time // per node: the stall episode already announced
 	autoCompactFired bool                 // auto-compact ran at this many finished nodes
@@ -854,6 +859,11 @@ func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onPRMsg(msg)
 	case wsIssueMsg:
 		return m.onIssueMsg(msg)
+	case wsShellDoneMsg:
+		if msg.err != nil {
+			m.setNotice("! shell: "+msg.err.Error(), true)
+		}
+		return m, nil
 	case wsStoppedMsg:
 		if m.eng != nil {
 			m.g = m.eng.Snapshot()
@@ -1000,6 +1010,8 @@ func (m workspaceModel) promptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	empty := m.input.Value() == ""
 	open := m.paletteOpen()
 	matches := m.cmdMatches(m.input.Value())
+	mention := m.mentionOpen()
+	mentions := m.mentionMatches()
 	if sug := m.suggestion(); sug != "" {
 		switch k {
 		case "right":
@@ -1041,12 +1053,18 @@ func (m workspaceModel) promptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if mention {
+			if len(mentions) > 0 {
+				return m.completeMention(mentions[min(m.cmdIdx, len(mentions)-1)]), nil
+			}
+			return m, nil
+		}
 		return m.cycleFocus(1), nil
 	case "shift+tab":
 		return m.cycleFocus(-1), nil
 	case "esc":
 		switch {
-		case open:
+		case open, mention:
 			m.input.Reset()
 			m.cmdIdx = 0
 		case m.hasNodes():
@@ -1054,16 +1072,23 @@ func (m workspaceModel) promptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "up", "down":
-		if open {
+		if open || mention {
+			n := len(matches)
+			if mention {
+				n = len(mentions)
+			}
 			if k == "up" {
 				m.cmdIdx = max(m.cmdIdx-1, 0)
 			} else {
-				m.cmdIdx = min(m.cmdIdx+1, max(len(matches)-1, 0))
+				m.cmdIdx = min(m.cmdIdx+1, max(n-1, 0))
 			}
 			m.cmdPicked = true
 			return m, nil
 		}
 	case "enter":
+		if mention && len(mentions) > 0 {
+			return m.completeMention(mentions[min(m.cmdIdx, len(mentions)-1)]), nil
+		}
 		return m.submit()
 	}
 	was := open
@@ -1084,6 +1109,9 @@ func (m workspaceModel) submit() (tea.Model, tea.Cmd) {
 	text := strings.TrimSpace(m.input.Value())
 	if text == "" {
 		return m, nil
+	}
+	if id, msg, ok := parseReply(text); ok {
+		return m.sendReply(id, msg)
 	}
 	if !strings.HasPrefix(text, "/") || strings.Contains(text, "\n") {
 		return m.sendTask(text, text)
@@ -1414,12 +1442,14 @@ func (m workspaceModel) onEvent(msg wsEventMsg) (tea.Model, tea.Cmd) {
 		}
 	case workspace.EventDone:
 		m.setNotice("✓ "+ev.NodeID+" done", false)
+		m.sayQueuedReplyStarted(ev.NodeID)
 		if n := m.g.Node(ev.NodeID); m.iso != nil && n != nil && n.Kind == workspace.KindCheck {
 			m.say("system", "Build & test passed. Use /merge to bring the result into your checkout.")
 		}
 	case workspace.EventBudgetWarn, workspace.EventBudgetReached:
 		m.onBudgetEvent(ev)
 	case workspace.EventFailed:
+		m.sayQueuedReplyStarted(ev.NodeID)
 		if ev.Text == "stopped" {
 			m.setNotice(ev.NodeID+" stopped", false)
 		} else {
@@ -1516,7 +1546,7 @@ func (m workspaceModel) outputTail(id string, n int) []string {
 }
 
 func (m *workspaceModel) refreshOutput() {
-	if m.outTimelineOn() {
+	if m.outTimelineOn() || m.outArchived(m.g.Node(m.outNode)) != nil {
 		m.refreshTimeline()
 		return
 	}
@@ -1698,6 +1728,23 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "D":
 		m = m.openDiff(nil)
+	case "m":
+		if m.focus == wsFocusSidebar && m.sbSess >= 0 {
+			return m, nil
+		}
+		if n == nil {
+			m.setNotice("Select a node first, then m replies to it", true)
+			return m, nil
+		}
+		m = m.replyKey(n)
+		return m, nil
+	case "!":
+		if n == nil {
+			m.setNotice("Select a node first, then ! opens a shell in its worktree", true)
+			return m, nil
+		}
+		cmd := m.openShell(n)
+		return m, cmd
 	case "o", "enter":
 		if n != nil {
 			m = m.openOutput(n)
@@ -1830,13 +1877,22 @@ func (m workspaceModel) outputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	switch msg.String() {
+	case "[":
+		return m.outAttemptStep(-1), nil
+	case "]":
+		return m.outAttemptStep(1), nil
+	}
 	if msg.String() == "t" {
+		if m.outArchived(m.g.Node(m.outNode)) != nil {
+			return m, nil // the raw text is kept for the current attempt only
+		}
 		m.outRaw = !m.outRaw
 		m.outFollow = true
 		m.refreshOutput()
 		return m, nil
 	}
-	if m.outTimelineOn() {
+	if m.outTimelineOn() || m.outArchived(m.g.Node(m.outNode)) != nil {
 		if next, ok := m.timelineKey(msg.String()); ok {
 			return next, nil
 		}
@@ -2410,6 +2466,12 @@ func (m workspaceModel) graphHints() []keyHint {
 	if n := m.selNode(); n != nil && n.Kind == workspace.KindWork && (n.Status == workspace.StatusTodo || n.Status == workspace.StatusFailed) {
 		hs = append(hs, keyHint{"K", "skills"})
 	}
+	if n := m.selNode(); n != nil && n.Kind == workspace.KindWork {
+		hs = append(hs, keyHint{"m", "reply"})
+	}
+	if m.selNode() != nil {
+		hs = append(hs, keyHint{"!", "shell"})
+	}
 	switch {
 	case m.focus == wsFocusSidebar && m.sbSess >= 0:
 		hs = []keyHint{{"Enter", "resume"}}
@@ -2442,6 +2504,8 @@ func (m workspaceModel) hintLine() string {
 		hs = m.graphHints()
 	case m.paletteOpen():
 		hs = []keyHint{{"↑↓", "choose"}, {"Tab", "complete"}, {"Enter", "run"}, {"Esc", "close"}}
+	case m.mentionOpen():
+		hs = []keyHint{{"↑↓", "choose"}, {"Tab/Enter", "complete"}, {"Esc", "close"}}
 	default:
 		next := "main"
 		if m.sidebarVisible() {
@@ -2704,6 +2768,9 @@ func (m workspaceModel) promptBox() []string {
 // paletteLines is the "/" command list drawn right above the prompt box, at
 // most maxRows lines.
 func (m workspaceModel) paletteLines(maxRows int) []string {
+	if m.mentionOpen() {
+		return m.mentionLines(maxRows)
+	}
 	if !m.paletteOpen() || maxRows <= 0 {
 		return nil
 	}
@@ -2806,6 +2873,9 @@ func (m workspaceModel) outputView() string {
 	hints := []keyHint{{"↑↓", "scroll"}, {"t", "timeline"}, {"s", "stop"}, {"Esc", "back"}, {"?", "help"}}
 	if m.outTimelineOn() {
 		hints = []keyHint{{"↑↓", "step"}, {"Enter", "expand"}, {"t", "raw"}, {"s", "stop"}, {"Esc", "back"}, {"?", "help"}}
+	}
+	if n != nil && len(n.Attempts) > 0 {
+		hints = append([]keyHint{{"[ ]", "attempt"}}, hints...)
 	}
 	parts := []string{
 		m.headerLine(),

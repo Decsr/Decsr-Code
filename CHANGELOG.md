@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Per-role `mode: text | agent` in the workspace. In agent mode Claude,
+  OpenCode and Codex change files in the node's worktree with their own tools
+  and DECSR ignores file blocks; Claude only gets `Read`, `Edit`, `Write`,
+  `Glob`, `Grep`, the project's build and test commands and read-only git.
+  `opencode` and `codex` default to `agent`, other runners to `text`;
+  `decsr doctor` flags a mode the runner cannot run.
+- `!` on a workspace node opens a shell in its worktree (a tmux split under
+  tmux, otherwise the TUI is suspended).
+- Reply to a workspace node with `@T3 <message>` (`@` completes node IDs) or
+  `m` on the node. A reply starts a new attempt of the same node: the card
+  shows `attempt 2`, earlier attempts are kept (the output view switches with
+  `[` and `]`) and the result is merged again. The new attempt gets the
+  previous summary, a budgeted excerpt of what the earlier attempt did and your
+  message, for every runner. A reply to a running node is queued until the run
+  ends; a stop keeps it.
 - Workspace nodes keep an activity journal in the session (200 steps per node,
   500 characters of detail each), the estimated prompt size (`ctx`) of worker
   nodes, and fix nodes get a `What failed:` excerpt of up to 8,000 characters
@@ -129,6 +144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HOMEBREW_TAP_GITHUB_TOKEN` secret is set (skipped otherwise).
 
 ### Changed
+- Codex runs with `--sandbox read-only` (text) or `--sandbox workspace-write`
+  (agent) instead of `--full-auto`, which current Codex versions reject.
 - The `/compact` suggestion at level 1 now appears from 10 done nodes (was 6).
 - A fix node's description no longer repeats the failing command's output
   under `Failure output:` when it has a `What failed:` excerpt.
@@ -152,6 +169,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ("WIP on …" and "index on …" commits): uncommitted changes at session start
   are one plain commit on top of HEAD, so `/merge` and pull requests carry no
   stash-shaped history.
+- Claude model list includes fable and full model names, accepts a typed model
+  id, and shows which model an empty setting uses.
 
 ## [0.6.0] - 2026-11-13
 
