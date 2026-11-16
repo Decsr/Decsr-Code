@@ -377,6 +377,9 @@ func cardBody(o cardOpts, iw int) []string {
 			rows = append(rows, dim.Render(line+arrow))
 			rows = append(rows, summaryRows(n.Summary, iw)...)
 			rows = append(rows, cardFiles(n, iw)...)
+			if hasDiff(n) {
+				rows = append(rows, dim.Render("d diff"))
+			}
 		}
 		if check && o.iso {
 			rows = append(rows, dim.Render("/merge to apply"))

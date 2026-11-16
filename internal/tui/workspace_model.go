@@ -302,6 +302,7 @@ type wsScreen int
 const (
 	wsScreenMain wsScreen = iota
 	wsScreenOutput
+	wsScreenDiff
 )
 
 type wsFocus int
@@ -561,6 +562,9 @@ type workspaceModel struct {
 	outVP     viewport.Model
 	outNode   string
 	outFollow bool
+
+	// diff screen (d, D)
+	diff *wsDiffView
 
 	// overlays
 	pickNode      string
@@ -848,6 +852,9 @@ func (m workspaceModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.screen == wsScreenOutput {
 		return m.outputKey(msg)
+	}
+	if m.screen == wsScreenDiff {
+		return m.diffKey(msg)
 	}
 	if m.splitting {
 		if k == "esc" {
@@ -1615,6 +1622,19 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.g = m.eng.Snapshot()
 		m.sel = id
 		m.setNotice("Added "+id+". Assign it, run it, then run Build & test again (or press R).", false)
+	case "d":
+		if m.focus == wsFocusSidebar && m.sbSess >= 0 {
+			return m, nil
+		}
+		switch {
+		case n == nil:
+		case n.Kind != workspace.KindWork:
+			m.setNotice("Build & test has no diff", false)
+		default:
+			m = m.openDiff(n)
+		}
+	case "D":
+		m = m.openDiff(nil)
 	case "o", "enter":
 		if n != nil {
 			if m.sidebarOverlay() {
@@ -2009,6 +2029,8 @@ func (m workspaceModel) View() string {
 		v = renderHelp(w, h, "KEYBOARD — WORKSPACE", workspaceHelp(m.commandList()))
 	case m.screen == wsScreenOutput:
 		v = m.outputView()
+	case m.screen == wsScreenDiff:
+		v = m.diffView()
 	default:
 		v = m.mainView()
 	}
@@ -2094,6 +2116,7 @@ func wsKey(k string) string { return lipgloss.NewStyle().Foreground(colText).Ren
 // wsHintBar renders footer hints as "key label" pairs, the key in normal
 // weight and the label dim, separated by a dim " · ".
 func wsHintBar(width int, hints []keyHint) string {
+	hints = detachHints(hints)
 	dim := lipgloss.NewStyle().Foreground(colMuted)
 	parts := make([]string, len(hints))
 	for i, h := range hints {
@@ -2297,6 +2320,9 @@ func (m workspaceModel) graphHints() []keyHint {
 			hs = append(hs, keyHint{"r", "retry"}, keyHint{"a", "reassign"})
 		case n.Status == workspace.StatusDone:
 			hs = append(hs, keyHint{"o", "output"})
+			if hasDiff(n) {
+				hs = append(hs, keyHint{"d", "diff"})
+			}
 		case !m.g.Assigned(n):
 			hs = append(hs, keyHint{"a", "assign"}, keyHint{"A", "accept all"})
 		case len(m.g.Blockers(n.ID)) == 0:

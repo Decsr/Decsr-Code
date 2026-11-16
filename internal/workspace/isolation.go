@@ -267,37 +267,46 @@ func (i *Isolator) Finish(id, title string) error {
 // FinishStats is Finish that also returns the lines the node added and
 // removed per file; it is empty when the node changed nothing.
 func (i *Isolator) FinishStats(id, title string) ([]FileStat, error) {
+	stats, _, err := i.FinishCommit(id, title)
+	return stats, err
+}
+
+// FinishCommit is FinishStats that also returns the SHA of the node's commit,
+// which stays reachable through the merge into the integration branch after
+// the node branch is deleted. It is "" when the node changed nothing.
+func (i *Isolator) FinishCommit(id, title string) ([]FileStat, string, error) {
 	path := i.nodePath(id)
 	branch := nodeBranch(i.session, id)
 	if _, err := git(path, "add", "-A"); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	staged, err := git(path, "diff", "--cached", "--name-only")
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if staged == "" {
 		i.removeNode(id)
-		return nil, nil
+		return nil, "", nil
 	}
 	msg := id + ": " + strings.Join(strings.Fields(title), " ")
 	if _, err := git(path, append(commitArgs(path), "commit", "--no-verify", "-m", msg)...); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	stats := commitStats(path)
+	commit, _ := git(path, "rev-parse", "HEAD")
 	if _, err := git(i.integ, append(commitArgs(i.integ), "merge", "--no-ff", "--no-edit", branch)...); err != nil {
 		files, _ := git(i.integ, "diff", "--name-only", "--diff-filter=U")
 		_, _ = git(i.integ, "merge", "--abort")
 		if files == "" {
-			return nil, err
+			return nil, "", err
 		}
-		return nil, fmt.Errorf("merge conflict with earlier nodes in: %s — the branch %s is kept; run the node again to retry on top of the latest work",
+		return nil, "", fmt.Errorf("merge conflict with earlier nodes in: %s — the branch %s is kept; run the node again to retry on top of the latest work",
 			strings.Join(strings.Split(files, "\n"), ", "), branch)
 	}
 	i.removeNode(id)
-	return stats, nil
+	return stats, commit, nil
 }
 
 // commitStats is the numstat of the last commit in dir; binary files show

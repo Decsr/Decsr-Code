@@ -35,19 +35,31 @@ type Line struct {
 // Session is one conversation in one project: transcript, running summary and
 // one graph. It is stored in <project>/.decsr/sessions/<id>.json.
 type Session struct {
-	ID         string    `json:"id"`    // time-sortable: 20261113-104512-<4 hex>
-	Title      string    `json:"title"` // first task's graph title; "" until then
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	Transcript []Line    `json:"transcript,omitempty"` // capped at 500 lines (oldest dropped)
-	Summary    string    `json:"summary,omitempty"`    // compacted history
-	NextID     int       `json:"next_id,omitempty"`    // next T number; never reused
-	Graph      *Graph    `json:"graph,omitempty"`
-	In         int       `json:"input_tokens,omitempty"`  // lead usage for the session
-	Out        int       `json:"output_tokens,omitempty"` // lead usage for the session
-	PR         *PRState  `json:"pr,omitempty"`            // pull request of the session branch
-	BudgetUSD  float64   `json:"budget_usd,omitempty"`    // /budget override of workspace.budget_usd; 0 = use the config
-	Issue      *IssueRef `json:"issue,omitempty"`         // issue the session was started from
+	ID         string     `json:"id"`    // time-sortable: 20261113-104512-<4 hex>
+	Title      string     `json:"title"` // first task's graph title; "" until then
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	Transcript []Line     `json:"transcript,omitempty"` // capped at 500 lines (oldest dropped)
+	Summary    string     `json:"summary,omitempty"`    // compacted history
+	NextID     int        `json:"next_id,omitempty"`    // next T number; never reused
+	Graph      *Graph     `json:"graph,omitempty"`
+	In         int        `json:"input_tokens,omitempty"`  // lead usage for the session
+	Out        int        `json:"output_tokens,omitempty"` // lead usage for the session
+	PR         *PRState   `json:"pr,omitempty"`            // pull request of the session branch
+	BudgetUSD  float64    `json:"budget_usd,omitempty"`    // /budget override of workspace.budget_usd; 0 = use the config
+	Issue      *IssueRef  `json:"issue,omitempty"`         // issue the session was started from
+	Notes      []DiffNote `json:"notes,omitempty"`         // review notes on node diffs, not sent yet
+}
+
+// DiffNote is a review note on one line of a node's diff. Side is "new" for an
+// added or unchanged line (Line is the new file's number) and "old" for a
+// removed one.
+type DiffNote struct {
+	NodeID string `json:"node_id"`
+	Path   string `json:"path"`
+	Line   int    `json:"line"`
+	Side   string `json:"side"`
+	Text   string `json:"text"`
 }
 
 // SessionInfo is the listing entry of a saved session.

@@ -56,7 +56,10 @@ type Result struct {
 	// FileStats are the lines added and removed per file; set only when the
 	// node ran in its own worktree.
 	FileStats []FileStat
-	Warnings  []string
+	// Commit is the node's own commit; set only when the node ran in its own
+	// worktree and changed something.
+	Commit   string
+	Warnings []string
 }
 
 // Executor runs one node. It must return promptly when ctx is cancelled.
@@ -212,11 +215,12 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	}
 	if x.iso != nil && !role.ReadOnly {
 		finished = true
-		stats, err := x.iso.FinishStats(n.ID, n.Title)
+		stats, commit, err := x.iso.FinishCommit(n.ID, n.Title)
 		if err != nil {
 			return Result{}, err
 		}
 		out.FileStats = stats
+		out.Commit = commit
 	}
 	return out, nil
 }

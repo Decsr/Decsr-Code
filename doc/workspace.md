@@ -243,6 +243,8 @@ node keys work with focus on the sidebar or on the main pane, in either mode.
 | `i` | Show or hide the inspector. In Graph mode with a main pane of 100 columns or more it sits beside the graph; otherwise, and in Activity mode, it opens as a box; `i` or `Esc` closes it |
 | `a` | Pick the role for the selected node |
 | `A` | Accept all suggestions that are defined roles |
+| `d` | Open the diff of the selected node (see [Diff and review notes](#diff-and-review-notes)) |
+| `D` | Open the diff of the whole session branch |
 | `K` | Choose the plugin skills of the selected node (see [How the lead picks skills](#how-the-lead-picks-skills)) |
 | `r` | Run the selected node |
 | `R` | Run every assigned node as dependencies finish |
@@ -745,6 +747,60 @@ branches). Quitting leaves them, so `/resume` continues where you stopped.
 Read-only roles run in a worktree too, but whatever they change is dropped.
 The classic pipeline does not use worktrees.
 
+## Diff and review notes
+
+Press `d` on a node (sidebar or main pane, Activity or Graph mode) to see what
+it changed, full screen. Finished cards in the feed show `d diff` in their dim
+action row. `D` opens the diff of the whole session: everything the session
+branch `decsr/<session>` holds that your current branch does not
+(`git diff HEAD...decsr/<session>`).
+
+Where the diff comes from:
+
+- **Worktree isolation, finished node:** the node's own commit. Its SHA is saved
+  in the session as `commit`; it stays reachable through the merge into the
+  session branch after the node branch is deleted. If the commit is gone (a
+  manual `git gc` or branch surgery), the view says so in one line.
+- **Worktree isolation, running node, or a node whose merge conflicted:** the
+  node's worktree against the point it started from, including new files.
+  Untracked files are read with `git diff --no-index /dev/null <file>`, which
+  leaves the worktree's index alone.
+- **Shared checkout:** `git diff HEAD` limited to the files the node reported,
+  plus those files when untracked. The view says that it may include changes
+  from other nodes or from you.
+- Nodes that finished before `commit` was recorded show a message instead.
+
+The view has the title (`T1 · Parse the --json flag · 3 files +61 −3`), a key
+line, a file list on the left (from 100 columns; narrower, a one-line
+`[ file 1/3: cmd/version.go ]` selector) and the diff with old and new line
+numbers. Long lines are cut with `…`; `←`/`→` pan. Added and removed rows have a
+subtle tinted background over the full width.
+
+| Key | Action |
+|---|---|
+| `j` / `k`, arrows up and down | Move the line cursor (`▌`) |
+| `PgDn` / `PgUp`, `Ctrl+D` / `Ctrl+U`, `Space` | Move a page |
+| `g` / `G` | First / last row of the file |
+| `n` / `p` | Next / previous hunk (crossing into the next or previous file) |
+| `]` / `[`, `Tab` / `Shift+Tab` | Next / previous file |
+| `←` / `→`, `h` / `l`, `0` | Pan 8 columns / back to the start |
+| `c` | Add or edit a note on the cursor line (`Enter` saves, `Esc` cancels) |
+| `x` | Delete the note on the cursor line |
+| `S` | Send the notes of this node (see below) |
+| `Esc` or `q` | Back |
+
+**Review notes.** A note sits under its line in a small box (`Note · line 27`
+and the text). Notes are saved in the session file under `notes` (node, path,
+line, side `new` or `old`, text), so they survive a restart; a removed line
+carries its note on the old side. Notes are only for node diffs, not for `D`.
+
+`S` turns the notes of the open node into one follow-up node,
+`Address review notes on T1`, with the role of the source node (unassigned when
+it has none or the role is not defined) and no dependencies. Its description
+lists every note as `path:line — text`, followed by the line and the lines
+around it from the diff. The notes are then cleared, and the conversation says
+`Added T7 from 2 review notes — press r to run`.
+
 ## Start from an issue
 
 `/issue <ref>` turns an issue into the task of the session:
@@ -900,6 +956,28 @@ were running are reloaded as not started. The Workspace does not use the
 classic pipeline's run state or beads issues. Profiles live in
 `~/.decsr/profiles/`, custom commands and skills in `.decsr/commands/` and
 `.decsr/skills/` (project) or the same folders under `~/.decsr/` (user).
+
+## Detached runs
+
+`decsr --tmux` runs the whole Workspace inside a tmux session, so closing the
+terminal or losing an SSH connection does not stop your runs. It also works
+with other flags, e.g. `decsr --tmux --issue 42`.
+
+- Session name: `decsr-<slug>-<hash>`, where the slug is the project directory
+  name lowercased with every character outside `[a-z0-9-]` turned into `-`,
+  and the hash is 4 hex digits of the sha1 of the absolute path.
+- The project path is stored in the tmux user option `@decsr_project`.
+- If the session exists, `decsr --tmux` attaches to it (with `--issue` it
+  refuses: attach and use `/issue`). Inside tmux (`$TMUX` set) it just runs.
+- `decsr ls` lists the sessions (name, project, attached or detached, created).
+- `decsr attach [name|project-path]` attaches; without an argument it uses the
+  session of the current directory, or the only decsr session, and lists them
+  when several are running.
+- Detach with the tmux prefix and `d` (the Workspace footer shows the keys,
+  `Ctrl+b d` by default). Quitting decsr ends the session. Notifications tell
+  you when a run needs you.
+- `ui.tmux: true` in the config makes plain `decsr` behave like `decsr --tmux`.
+- Needs tmux; not supported on Windows. `decsr doctor` checks for tmux.
 
 ## Reaching the classic pipeline
 

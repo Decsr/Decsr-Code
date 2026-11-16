@@ -74,6 +74,8 @@ activity feed with one card per node (`g` switches to the graph); see
 
 **Start from an issue:** `/issue <N|URL|bead-id>` (or `decsr issue <ref>`) sends a GitHub issue or a bead to the lead as the task; the pull request then says `Closes #N` (see [`doc/workspace.md`](doc/workspace.md#start-from-an-issue)).
 
+**Diff and review notes:** `d` on a node shows what it changed (`D` the whole session); `c` puts a note on a line and `S` sends the notes to the agent as a new node (see [`doc/workspace.md`](doc/workspace.md#diff-and-review-notes)).
+
 **Cost and budget:** add `pricing:` to the config and set `workspace.budget_usd`; the Workspace shows cost in a bottom bar, warns at 80% and stops starting nodes at the budget; `/budget` shows the spending (see [`doc/workspace.md`](doc/workspace.md#cost-and-budget)).
 
 **Pull requests:** `/pr` pushes the session branch and opens a pull request with `gh`; `/pr watch` turns failing CI and review comments into fix nodes (see [`doc/workspace.md`](doc/workspace.md#pull-requests)).
@@ -321,6 +323,16 @@ Or, from this repository:
 ```bash
 make run
 ```
+
+**Detached runs** — keep decsr alive when the terminal closes or SSH drops (needs tmux):
+
+```bash
+decsr --tmux       # runs decsr in a tmux session "decsr-<project>-<hash>" and attaches
+decsr ls           # list running decsr sessions
+decsr attach       # come back (name or project path optional)
+```
+
+Detach with the tmux prefix then `d` (`Ctrl+b d` by default). Set `ui.tmux: true` to make plain `decsr` do this.
 
 **Task from a description** — opens the TUI by default:
 

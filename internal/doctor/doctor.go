@@ -321,7 +321,7 @@ func checkOptional(d Deps) []Result {
 	return parallel(
 		func() Result {
 			if _, err := d.LookPath("tmux"); err != nil {
-				return Result{Name: "tmux", Status: Warn, Detail: "not found on PATH (used by the multiplexer)", Hint: "install tmux, e.g. `brew install tmux` or `apt install tmux`"}
+				return Result{Name: "tmux", Status: Warn, Detail: "not found on PATH (used by the multiplexer and `decsr --tmux`)", Hint: "install tmux, e.g. `brew install tmux` or `apt install tmux`; then `decsr --tmux` keeps runs alive when the terminal closes"}
 			}
 			out, _ := d.Run("tmux", "-V")
 			return Result{Name: "tmux", Status: OK, Detail: firstLine(out)}

@@ -285,6 +285,18 @@ func (e *Engine) AddCIFix(title, desc, role string) string {
 	return f.ID
 }
 
+// AddWork adds a work node T<n> (n at least nextID) with the given title and
+// description, assigns role when it is not "", and returns its ID and the next
+// free number. It works while other nodes run.
+func (e *Engine) AddWork(title, desc, role string, nextID int) (string, int) {
+	e.mu.Lock()
+	f, next := e.g.AddWork(title, desc, role, nextID)
+	err := e.saveLocked()
+	e.mu.Unlock()
+	e.reportSave(err)
+	return f.ID, next
+}
+
 // Run starts one node now.
 func (e *Engine) Run(ctx context.Context, id string) error {
 	e.mu.Lock()
@@ -387,6 +399,7 @@ func (e *Engine) startLocked(parent context.Context, n *Node) started {
 	n.Files = nil
 	n.Observed = nil
 	n.FileStats = nil
+	n.Commit = ""
 	n.Warnings = nil
 	// The cost adds up over the attempts: this run is priced on top of what the
 	// earlier ones cost, and an unpriced earlier attempt keeps CostKnown false.
@@ -484,6 +497,7 @@ func (e *Engine) runNode(s started) {
 		n.Files = append([]string(nil), res.Files...)
 		n.Observed = append([]string(nil), res.Observed...)
 		n.FileStats = append([]FileStat(nil), res.FileStats...)
+		n.Commit = res.Commit
 		n.Warnings = append([]string(nil), res.Warnings...)
 		fin = Event{NodeID: id, Type: EventDone, Text: n.Summary}
 		overlaps = e.markOverlapsLocked(n)

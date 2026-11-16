@@ -82,6 +82,8 @@ type UIConfig struct {
 	// Icons picks the glyph set for runner identity: "unicode" (default),
 	// "ascii" or "nerd". "" = unicode.
 	Icons string `yaml:"icons,omitempty"`
+	// Tmux makes plain `decsr` behave like `decsr --tmux`.
+	Tmux bool `yaml:"tmux,omitempty"`
 }
 
 // NotifyConfig controls external notifications (e.g. cmux alerts on approval
@@ -522,6 +524,9 @@ func merge(dst *Config, src Config) {
 
 	if src.UI.Icons != "" {
 		dst.UI.Icons = src.UI.Icons
+	}
+	if src.UI.Tmux {
+		dst.UI.Tmux = true
 	}
 
 	if src.Workspace.MaxParallel > 0 {

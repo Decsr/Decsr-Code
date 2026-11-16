@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Diff view with line notes in the Workspace: `d` opens the diff of a node
+  (its commit, or the live worktree while it runs), `D` the diff of the whole
+  session. Put a note on a line with `c` and press `S` to send the notes as one
+  follow-up node (`path:line — text` with code context). Nodes now record their
+  own `commit`, and notes are saved in the session file.
+- Detached runs: `decsr --tmux` runs the Workspace inside a tmux session
+  (`decsr-<project>-<hash>`) that survives a closed terminal or dropped SSH
+  connection; `decsr attach [name|project-path]` reconnects and `decsr ls`
+  lists the sessions. `ui.tmux: true` makes plain `decsr` do the same, and the
+  Workspace shows the tmux detach keys. Not supported on Windows.
 - Money budgets in the Workspace: `pricing:` (USD per million tokens per model
   id or glob; no built-in prices) prices every node, `workspace.budget_usd`
   and `budget_warn_pct` stop new nodes from starting once the known cost

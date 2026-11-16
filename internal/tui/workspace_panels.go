@@ -759,6 +759,7 @@ func workspaceHelp(cmds []wsCommand) []helpSection {
 			{"Enter / o", "open the full output of the node"},
 			{"i", "show or hide the inspector (under 100 columns it opens over the graph; i or Esc closes it)"},
 			{"a / A", "pick the agent / accept all suggestions"},
+			{"d / D", "diff of the node / diff of the whole session (c note a line, S send the notes as a new node)"},
 			{"K", "choose the plugin skills of the node"},
 			{"r / R", "run the node / run every assigned node"},
 			{"s / S", "stop the node / stop all nodes"},

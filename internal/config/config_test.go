@@ -788,3 +788,15 @@ workspace:
 		t.Errorf("budget %v warn %v", cfg.Workspace.BudgetUSD, cfg.Workspace.BudgetWarnPct)
 	}
 }
+
+func TestMerge_UITmux(t *testing.T) {
+	var dst Config
+	merge(&dst, Config{UI: UIConfig{Tmux: true}})
+	if !dst.UI.Tmux {
+		t.Fatal("tmux not set")
+	}
+	merge(&dst, Config{})
+	if !dst.UI.Tmux {
+		t.Error("empty layer cleared tmux")
+	}
+}

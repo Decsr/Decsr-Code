@@ -35,6 +35,9 @@ var version = "dev"
 func main() {
 	logging.Setup()
 	tui.Version = version
+	if detachMain() {
+		return
+	}
 	if len(os.Args) < 2 {
 		// No sub-command: open the TUI picker and let the user choose requirements.
 		runCmd(nil)
@@ -100,6 +103,9 @@ func usage() {
 	  (both task and run accept --no-context-pack to skip the context pack phase)
 	  resume                              Open the Workspace with this project's saved sessions listed
 	  issue <N|URL|bead-id> [--force]     Open the Workspace and start a run from a GitHub issue or bead (also: --issue)
+	  attach [name|project-path]          Reattach to a detached decsr tmux session
+	  ls                                  List running decsr tmux sessions
+	  --tmux                              Run decsr inside a tmux session that survives a closed terminal (also: ui.tmux)
 	  doctor                              Check git, config, runners and optional tools
 	  report                              Summarize last run artifacts
 	  monitor                             Open the control TUI against a running bus

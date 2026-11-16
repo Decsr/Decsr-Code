@@ -46,6 +46,7 @@ type Node struct {
 	Files         []string   `json:"files,omitempty"`
 	Observed      []string   `json:"observed,omitempty"`   // changed on disk by the agent's own tools
 	FileStats     []FileStat `json:"file_stats,omitempty"` // lines added and removed per file, set when the node ran in a worktree
+	Commit        string     `json:"commit,omitempty"`     // the node's own commit when it ran in a worktree; reachable through the session branch
 	Warnings      []string   `json:"warnings,omitempty"`
 	Skills        []string   `json:"skills,omitempty"` // plugin skill ids the lead chose for this node
 	Error         string     `json:"error,omitempty"`
@@ -423,6 +424,31 @@ func (g *Graph) AddCIFix(title, desc string) *Node {
 		c.DependsOn = append(c.DependsOn, id)
 	}
 	return f
+}
+
+// AddWork appends a work node "T<n>" (n at least nextID and above every T
+// number in g) with no dependencies, assigned to role when it is not "", and
+// returns it with the next free number. A Build & test node that is not running
+// is reset to todo and made to depend on it, as AddCIFix does.
+func (g *Graph) AddWork(title, desc, role string, nextID int) (*Node, int) {
+	if m := g.nextWorkNumber(); nextID < m {
+		nextID = m
+	}
+	f := &Node{
+		ID:          fmt.Sprintf("T%d", nextID),
+		Title:       strings.Join(strings.Fields(title), " "),
+		Description: strings.TrimSpace(desc),
+		Kind:        KindWork,
+		Role:        role,
+		Status:      StatusTodo,
+	}
+	g.Nodes = append(g.Nodes, f)
+	if c := g.Node("CHECK"); c != nil && c.Kind == KindCheck && c.Status != StatusRunning {
+		c.Status = StatusTodo
+		c.Error = ""
+		c.DependsOn = append(c.DependsOn, f.ID)
+	}
+	return f, nextID + 1
 }
 
 // Append merges the work nodes of add into g under fresh IDs T<n>, T<n+1>, …
