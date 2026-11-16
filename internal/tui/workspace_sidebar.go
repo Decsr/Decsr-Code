@@ -143,6 +143,9 @@ func (m workspaceModel) nodeRows(n *workspace.Node, w int, on bool, models, runn
 		if n.Report != nil && n.Report.Status == workspace.ReportBlocked {
 			word = "blocked"
 		}
+		if n.Limit != nil {
+			word = "limit · " + limitResets(m.now(), n.Limit)
+		}
 		l2 = sbSeg("    "+word, colWarn, false, on)
 	}
 	switch n.Status {

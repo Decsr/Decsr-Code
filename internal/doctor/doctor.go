@@ -71,6 +71,10 @@ type Deps struct {
 	KeySource    func(credName, envName string) string
 	CredsErr     func() error
 	PresetKeyEnv func(name string) string
+
+	// Automations is the optional "automations" line; nil when the project has
+	// no .decsr/automations.yaml.
+	Automations *Result
 }
 
 // NotifyInfo is the notification config the "notify" check reports on.
@@ -94,6 +98,9 @@ func Run(d Deps) []Result {
 	rs = append(rs, checkRunners(d)...)
 	rs = append(rs, checkModes(d)...)
 	rs = append(rs, checkOptional(d)...)
+	if d.Automations != nil {
+		rs = append(rs, *d.Automations)
+	}
 	return rs
 }
 

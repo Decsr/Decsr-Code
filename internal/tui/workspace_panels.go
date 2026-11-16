@@ -94,6 +94,19 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 	if n.PendingReply != "" {
 		add(dim.Render("Queued  " + firstLine(workspace.SanitizeText(n.PendingReply))))
 	}
+	if l := n.Limit; l != nil && n.Status == workspace.StatusWaiting {
+		gold := lipgloss.NewStyle().Foreground(colWarn)
+		add(gold.Render("Limit  " + l.Provider + " · " + limitResets(time.Now(), l)))
+		for i, s := range wrapText(workspace.SanitizeText(l.Message), w) {
+			if i >= inspReportLines {
+				break
+			}
+			add(gold.Render(s))
+		}
+		if l.Retries > 0 {
+			add(dim.Render(fmt.Sprintf("Retries  %d of %d", l.Retries, workspace.MaxLimitRetries)))
+		}
+	}
 	if r := n.Report; r != nil {
 		gold := lipgloss.NewStyle().Foreground(colWarn)
 		switch {

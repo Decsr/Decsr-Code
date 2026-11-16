@@ -81,10 +81,7 @@ func (r *LMStudioRunner) Complete(ctx context.Context, req CompletionRequest) (<
 		defer func() { _ = resp.Body.Close() }()
 		errBody, _ := io.ReadAll(resp.Body)
 		bodyStr := strings.TrimSpace(string(errBody))
-		if resp.StatusCode == http.StatusTooManyRequests {
-			return nil, &RateLimitError{Provider: "lmstudio", Detail: bodyStr}
-		}
-		if rl := ClassifyRateLimit("lmstudio", bodyStr); rl != nil {
+		if rl := rateLimitFromHTTP("lmstudio", resp.StatusCode, resp.Header, bodyStr); rl != nil {
 			return nil, rl
 		}
 		return nil, fmt.Errorf("lmstudio: model %q returned HTTP %d: %s", model, resp.StatusCode, bodyStr)

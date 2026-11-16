@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/Decsr/Decsr-Code/internal/automation"
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/credentials"
 	"github.com/Decsr/Decsr-Code/internal/doctor"
@@ -76,12 +77,13 @@ func buildDoctorDeps(root string) doctor.Deps {
 			p, _ := runner.PresetByName(name)
 			return p.KeyEnv
 		},
-		Writable:  dirWritable,
-		Root:      root,
-		Home:      home,
-		Agents:    agents,
-		Layers:    layers,
-		ConfigErr: cfgErr,
+		Writable:    dirWritable,
+		Root:        root,
+		Home:        home,
+		Agents:      agents,
+		Layers:      layers,
+		ConfigErr:   cfgErr,
+		Automations: automationDoctor(root, automation.ExecCrontab{}),
 		Notify: doctor.NotifyInfo{
 			DisableCMux:    cfg.Notifications.DisableCMux,
 			DisableBell:    cfg.Notifications.DisableBell,

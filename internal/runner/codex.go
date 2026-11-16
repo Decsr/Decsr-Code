@@ -193,7 +193,9 @@ func streamCodexOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffer
 	output := p.text()
 	// A non-zero exit with a rate-limit stderr is a failure even if partial
 	// output was streamed first.
-	if waitErr != nil && (strings.TrimSpace(output) == "" || ClassifyRateLimit("codex", stderr.String()) != nil) {
+	// The usage-limit text arrives in turn.failed / error event messages.
+	eventErrs := strings.Join(p.errorMsgs, "; ")
+	if waitErr != nil && (strings.TrimSpace(output) == "" || ClassifyRateLimit("codex", stderr.String(), eventErrs) != nil) {
 		errMsg := strings.TrimSpace(stderr.String())
 		if errMsg == "" {
 			errMsg = strings.Join(p.errorMsgs, "; ")
@@ -201,7 +203,7 @@ func streamCodexOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffer
 		if errMsg == "" {
 			errMsg = waitErr.Error()
 		}
-		if rl := ClassifyRateLimit("codex", errMsg, output); rl != nil {
+		if rl := ClassifyRateLimit("codex", errMsg, eventErrs, output); rl != nil {
 			ch <- Token{Error: rl}
 		} else {
 			ch <- Token{Error: fmt.Errorf("codex: %w: %s", waitErr, errMsg)}

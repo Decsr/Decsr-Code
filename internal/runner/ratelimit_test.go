@@ -22,6 +22,17 @@ func TestClassifyRateLimit(t *testing.T) {
 		{"benign network error", "claude", []string{"connection refused"}, false},
 		{"benign auth error", "codex", []string{"401 unauthorized"}, false},
 		{"empty fragments", "claude", []string{"", ""}, false},
+		{"claude hit your limit", "claude", []string{"You've hit your limit · resets 2pm"}, true},
+		{"claude 5-hour limit reached", "claude", []string{"5-hour limit reached ∙ resets 2pm"}, true},
+		{"claude weekly limit reached", "claude", []string{"Weekly limit reached ∙ resets Nov 20, 9am"}, true},
+		{"codex usage limit", "codex", []string{"You’ve hit your usage limit. Try again at 2:30 PM."}, true},
+		{"rate limit tokens per minute", "openai", []string{"Rate limit reached for gpt in organization on tokens per min"}, true},
+		{"context length limit reached", "claude", []string{"context length limit reached"}, false},
+		{"token limit reached", "claude", []string{"token limit reached"}, false},
+		{"max context length", "openai", []string{"This model's maximum context length is 128000 tokens. Rate limit"}, false},
+		{"prompt too long", "claude", []string{"Prompt is too long"}, false},
+		{"max_tokens", "claude", []string{"max_tokens: limit reached, rate limit"}, false},
+		{"bare limit reached", "claude", []string{"output limit reached"}, false},
 	}
 
 	for _, tt := range tests {

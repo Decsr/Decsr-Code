@@ -113,6 +113,7 @@ func (e *Engine) applyReplyLocked(n *Node, msg string) (ReplyResult, *started, [
 	e.archiveLocked(n)
 	n.PendingReply = ""
 	n.Reply = msg
+	n.Limit = nil
 	n.Status = StatusTodo
 	n.EndedAt = time.Time{}
 	n.Error, n.Summary, n.Report = "", "", nil

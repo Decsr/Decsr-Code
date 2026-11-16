@@ -293,6 +293,8 @@ func detachMain() bool {
 	args := os.Args[1:]
 	if len(args) > 0 {
 		switch args[0] {
+		case "automation":
+			return false // its own --tmux starts a detached session and never attaches
 		case "attach", "ls":
 			cwd, _ := os.Getwd()
 			var err error

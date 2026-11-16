@@ -39,6 +39,10 @@ const (
 	// node's Report holds the details.
 	EventWaiting EventType = "waiting"
 	EventFailed  EventType = "failed"
+	// EventLimited ends a node that hit a provider usage limit; it waits to
+	// be retried. Text is the limit message and ResetAt the reset time (zero
+	// when unknown).
+	EventLimited EventType = "limited"
 	// EventBudgetWarn and EventBudgetReached are engine-level (NodeID "");
 	// Text is the message to show.
 	EventBudgetWarn    EventType = "budget_warn"
@@ -61,6 +65,8 @@ type Event struct {
 	Activity *runner.Activity
 	// ContextTokens and ContextLimit are set for EventContext.
 	ContextTokens, ContextLimit int
+	// ResetAt is set for EventLimited.
+	ResetAt time.Time
 }
 
 // Result is the outcome of a successful node run.

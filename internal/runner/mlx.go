@@ -119,10 +119,7 @@ func (r *MLXRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan
 		defer func() { _ = resp.Body.Close() }()
 		errBody, _ := io.ReadAll(resp.Body)
 		bodyStr := strings.TrimSpace(string(errBody))
-		if resp.StatusCode == http.StatusTooManyRequests {
-			return nil, &RateLimitError{Provider: "omlx", Detail: bodyStr}
-		}
-		if rl := ClassifyRateLimit("omlx", bodyStr); rl != nil {
+		if rl := rateLimitFromHTTP("omlx", resp.StatusCode, resp.Header, bodyStr); rl != nil {
 			return nil, rl
 		}
 		return nil, fmt.Errorf("omlx: model %q returned HTTP %d: %s", model, resp.StatusCode, bodyStr)

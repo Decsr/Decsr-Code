@@ -82,6 +82,8 @@ func main() {
 		cleanCmd(os.Args[2:])
 	case "memory":
 		memoryCmd(os.Args[2:])
+	case "automation":
+		automationCmd(os.Args[2:])
 	case "doctor":
 		doctorCmd(os.Args[2:])
 	case "connect":
@@ -110,6 +112,10 @@ func usage() {
 	  attach [name|project-path]          Reattach to a detached decsr tmux session
 	  ls                                  List running decsr tmux sessions
 	  --tmux                              Run decsr inside a tmux session that survives a closed terminal (also: ui.tmux)
+	  automation <list|run|install|uninstall>
+	                                      Scheduled unattended runs from .decsr/automations.yaml
+	  automation run <name> [--tmux]      Run one automation now (--tmux: in a detached session, as cron does)
+	  automation install|uninstall [name] Add or remove the crontab lines of the automations
 	  doctor                              Check git, config, runners and optional tools
 	  connect <deepseek|openai|openrouter|groq|custom> [--no-test]
 	                                      Save an API key (hidden input, or piped on stdin) and pick the roles that use it

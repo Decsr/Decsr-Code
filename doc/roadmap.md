@@ -172,11 +172,11 @@ limits usage.
 
 **Done when**
 
-- [ ] `decsr automation install` writes the crontab line, and
+- [x] `decsr automation install` writes the crontab line, and
       `decsr automation run <name> --tmux` starts a detached run.
-- [ ] An automation without L2/L3 or without a budget is refused.
-- [ ] An overlapping run is skipped, and an empty run notifies without a PR.
-- [ ] A rate-limited node shows the reset time and retries at L2/L3, up to 3
+- [x] An automation without L2/L3 or without a budget is refused.
+- [x] An overlapping run is skipped, and an empty run notifies without a PR.
+- [x] A rate-limited node shows the reset time and retries at L2/L3, up to 3
       times.
 
 **Builds on.** `--tmux`, autonomy levels, budgets, notifications, `/pr` and

@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Automations: `.decsr/automations.yaml` defines scheduled unattended runs with
+  a name, a cron schedule, a task or a GitHub issue query, autonomy 2 or 3, a
+  budget and a timeout. `decsr automation list|run|install|uninstall` manage
+  them; `install` writes an idempotent crontab line per automation that calls
+  `decsr automation run <name> --tmux`, which starts a detached tmux session.
+  A run is skipped while the previous one is active (lock file), a run that
+  changes nothing only notifies "nothing to do" and opens no pull request, and
+  every run appends a line to `.decsr/automations/<name>.log`. `decsr doctor`
+  reports the automations. See `doc/automations.md`.
+- Usage limits in the Workspace. A node that hits a provider rate limit no
+  longer fails: it waits with `◷ waiting · resets 14:30`, read from the
+  `Retry-After` and `x-ratelimit-reset-*` headers, the Claude and Codex CLI
+  error text or the error body. At autonomy level 2 and 3 it retries 30
+  seconds after the reset, up to 3 times, then fails with the limit message;
+  at level 1 `r` retries it. A notification is sent either way and the status
+  bar shows `⬡ claude · limited until 14:30`.
 - Coordinator mode in the Workspace (`workspace.coordinator`, default off;
   `/coordinator on|off` per session). After a batch of nodes finishes the lead
   reviews the graph, with the node reports and a budgeted excerpt of the

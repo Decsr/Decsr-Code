@@ -431,6 +431,10 @@ func cardBody(o cardOpts, iw int) []string {
 		if d := took(); d >= 0 {
 			line = " · Worked for " + feedDuration(d)
 		}
+		if n.Limit != nil {
+			rows = append(rows, limitCardRows(n, iw, o.now, line, arrow)...)
+			break
+		}
 		rows = append(rows, lipgloss.NewStyle().Foreground(colWarn).Render("◇ waiting")+dim.Render(line+cardMeta(n)+arrow))
 		rows = append(rows, waitingRows(n, iw)...)
 		rows = append(rows, cardFiles(n, iw)...)

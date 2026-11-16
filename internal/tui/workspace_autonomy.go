@@ -310,8 +310,8 @@ func (m workspaceModel) autoFix(checkID string) (workspaceModel, tea.Cmd) {
 // autoPR pushes the branch, opens or updates the pull request and watches it,
 // with the fix nodes of the watch running without asking. It never merges.
 func (m workspaceModel) autoPR() (workspaceModel, tea.Cmd) {
-	if m.pr.watching || m.pr.working {
-		return m, nil
+	if m.pr.watching || m.pr.working || m.autoNoChange() {
+		return m, nil // an automation that changed nothing opens no pull request
 	}
 	if m.budgetReached() {
 		m.autoSay("Build & test passed but the budget is reached: not pushing")

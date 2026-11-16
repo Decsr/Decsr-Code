@@ -362,6 +362,9 @@ func PRBody(s Session) string {
 		if n.Report != nil && n.Report.Ask() != "" {
 			what = n.Report.Ask()
 		}
+		if n.Limit != nil {
+			what = limitedText(n)
+		}
 		open = append(open, fmt.Sprintf("- %s: %s", n.ID, cell(truncRunes(what, 300))))
 	}
 	if len(open) > 0 {
@@ -545,6 +548,7 @@ type PollResult struct {
 	CIFix     *FixRequest // a new CI fix node is due
 	ReviewFix *FixRequest // a new review fix node is due
 	Exhausted bool        // checks fail on a new head but max_ci_fixes is used up
+	NoChecks  bool        // the pull request has no checks at all (yet)
 }
 
 // Poll looks at the checks and the review feedback once. It returns the
@@ -577,6 +581,7 @@ func (c *PRClient) Poll(ctx context.Context, st PRState) (PRState, PollResult, e
 		}
 	}
 	res.Passed = good
+	res.NoChecks = len(checks) == 0
 	if len(failing) > 0 && st.FixedSHA != sha {
 		st.FixedSHA = sha
 		if st.CIFixes >= c.Cfg.MaxFixes() {

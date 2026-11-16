@@ -3,7 +3,9 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 )
 
 // ErrRateLimited is the sentinel returned (wrapped) by all runners when the
@@ -18,6 +20,9 @@ var ErrRateLimited = errors.New("rate limited")
 type RateLimitError struct {
 	Provider string
 	Detail   string
+	// ResetAt is when the provider says the limit lifts. The zero value
+	// means the response carried no usable reset time.
+	ResetAt time.Time
 }
 
 func (e *RateLimitError) Error() string {
@@ -50,6 +55,26 @@ var rateLimitMarkers = []string{
 	"status: 429",
 	"statuscode=429",
 	"retry-after",
+	"hit your limit",
+	"hour limit reached",
+	"daily limit reached",
+	"weekly limit reached",
+	"session limit reached",
+}
+
+// notRateLimitMarkers are texts about the size of a request, not about usage:
+// waiting for a reset never fixes them, so they are never a rate limit.
+var notRateLimitMarkers = []string{
+	"context length",
+	"context window",
+	"context limit",
+	"context_length",
+	"maximum context",
+	"prompt is too long",
+	"prompt too long",
+	"token limit",
+	"max_tokens",
+	"max tokens",
 }
 
 // ClassifyRateLimit returns a non-nil *RateLimitError when any of the given
@@ -60,11 +85,15 @@ func ClassifyRateLimit(provider string, fragments ...string) *RateLimitError {
 			continue
 		}
 		lower := strings.ToLower(frag)
+		if containsAny(lower, notRateLimitMarkers) {
+			continue
+		}
 		for _, marker := range rateLimitMarkers {
 			if strings.Contains(lower, marker) {
 				return &RateLimitError{
 					Provider: provider,
 					Detail:   firstLine(frag),
+					ResetAt:  parseResetAt(rateLimitNow(), strings.Join(fragments, "\n")),
 				}
 			}
 		}
@@ -78,4 +107,30 @@ func firstLine(s string) string {
 		return strings.TrimSpace(s[:i])
 	}
 	return s
+}
+
+// rateLimitFromHTTP classifies a non-200 API response. It returns nil when
+// the response is neither a 429 nor a rate-limit body. The reset time comes
+// from the response headers first (Retry-After, x-ratelimit-reset-*), then
+// from the body text.
+func rateLimitFromHTTP(provider string, status int, h http.Header, body string) *RateLimitError {
+	var rl *RateLimitError
+	if status == http.StatusTooManyRequests {
+		rl = &RateLimitError{Provider: provider, Detail: body, ResetAt: parseResetAt(rateLimitNow(), body)}
+	} else if rl = ClassifyRateLimit(provider, body); rl == nil {
+		return nil
+	}
+	if at := resetFromHeaders(rateLimitNow(), h); !at.IsZero() {
+		rl.ResetAt = at
+	}
+	return rl
+}
+
+func containsAny(s string, subs []string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }

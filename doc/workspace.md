@@ -940,6 +940,54 @@ past the limit (it counts, and does not reset the counter). It is refused while
 nodes run, while a review waits for `y` or `n`, and when the budget is reached.
 `Esc` cancels a review that is running.
 
+## Usage limits
+
+When a provider limits usage, the node does not fail. It becomes a waiting node
+with a limit (`◷ waiting · resets 14:30`), its dependents stay blocked, and
+decsr either retries it by itself or waits for you.
+
+**Where the reset time comes from.** Only from data the CLIs and APIs already
+return; decsr never calls a private account endpoint. A limit that no node hit
+is not shown.
+
+| Source | Reset data |
+|---|---|
+| OpenAI-compatible, LM Studio, Ollama, oMLX APIs (HTTP 429) | `Retry-After` (seconds or date), `x-ratelimit-reset-*` durations such as `6m0s` or `1h2m`, and times in the error body |
+| Claude CLI | the `result` event with `is_error`: text such as `resets 2pm (Asia/Ho_Chi_Minh)` or the older `usage limit reached\|<unix time>` |
+| Codex CLI | `exec --json` carries no rate-limit payload; the limit arrives as the `message` of a `turn.failed` or `error` event ("Try again at 2:30 PM." or "Try again at Nov 17th, 2025 2:30 PM.") |
+| OpenCode, Copilot CLI | the error text of the CLI |
+
+The parser reads relative text ("try again in 3h 2m", "retry after 120
+seconds"), clock times ("resets 2pm", "reset at 14:30", with an optional zone
+such as `(Asia/Ho_Chi_Minh)` or `UTC`; a time already past today means
+tomorrow) and `resets_at` / `reset_at` values (RFC3339 or unix seconds). When
+nothing parses the reset time is unknown.
+
+**Display.** The reset time is local time, with the date when it is not today.
+The node card shows `◷ waiting · resets 14:30`, the provider message and
+`retry 1/3` after the first automatic retry. The sidebar shows `limit · resets
+14:30`, the graph shows `waiting`, the counters count it as waiting
+(`2/5 done · 1 waiting`) and the status bar shows `⬡ claude · limited until
+14:30` for each runner that has a limited node.
+
+**Retries.**
+
+- At autonomy level 2 and 3, when the automation is not paused and the budget
+  is not reached, the node is retried 30 seconds after the reset time
+  (`auto › T3 retry 1/3 after the claude limit reset`). A retry continues the
+  same attempt; it is not a reply.
+- At level 1, or when the reset time is unknown, the node waits for you: `r`
+  retries it. Retries you start with `r` do not count toward the automatic ones.
+- A node gets at most 3 automatic retries. After the third limit hit it fails
+  with `limit reached on <provider>: <message> (3 automatic retries used)`.
+- A reply (`m`) to a limited node retries it with your message and resets the
+  retry count.
+
+**Notifications.** At level 1 or with an unknown reset time you get a
+needs-you note (`T3 hit the claude limit — resets 14:30, press r to retry`). At
+level 2 and 3 you get an info note (`T3 waits for the claude limit — retrying
+after 14:30`). A node that gives up sends a failed note.
+
 ## Cost and budget
 
 DECSR knows tokens, not prices. To see money, give it prices in

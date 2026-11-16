@@ -154,6 +154,10 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 	var finalUsage TokenUsage
 	gotUsage := false
 	acts := newClaudeActivities()
+	// limited is set when the result event reports an error that reads as a
+	// usage limit ("... limit reached ∙ resets 2pm"). The same text may also
+	// arrive as assistant text, so it is reported even after text was emitted.
+	var limited *RateLimitError
 
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
@@ -186,6 +190,11 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 				ch <- Token{Activity: a}
 			}
 		case "result":
+			if evt.IsError {
+				if rl := ClassifyRateLimit("claude", evt.Result); rl != nil {
+					limited = rl
+				}
+			}
 			// The result text is only the last message, so it duplicates
 			// assistant text already emitted; use it only as a fallback.
 			if evt.Result != "" && emitted.Len() == 0 {
@@ -206,6 +215,10 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 	}
 
 	waitErr := cmd.Wait()
+	if limited != nil {
+		ch <- Token{Error: limited}
+		return
+	}
 	if waitErr != nil && emitted.Len() == 0 {
 		errMsg := strings.TrimSpace(stderr.String())
 		if errMsg == "" {
@@ -247,6 +260,7 @@ type claudeStreamEvent struct {
 	Type    string                  `json:"type"`
 	Message claudeStreamMessage     `json:"message"`
 	Result  string                  `json:"result"`
+	IsError bool                    `json:"is_error"`
 	Usage   claudeStreamUsageFields `json:"usage"`
 }
 

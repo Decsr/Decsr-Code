@@ -30,8 +30,11 @@ type Engine struct {
 
 	auto    bool
 	autoCtx context.Context
-	cancels map[string]context.CancelFunc // running nodes
-	stopped map[string]bool               // nodes whose stop was requested
+	// resumeAuto is set when a node hit a usage limit during a run-all: its
+	// retry turns auto mode on again so its dependents follow.
+	resumeAuto bool
+	cancels    map[string]context.CancelFunc // running nodes
+	stopped    map[string]bool               // nodes whose stop was requested
 	// costBase is what a node's earlier attempts cost when its current run began.
 	costBase map[string]costBase
 	wg       sync.WaitGroup
@@ -372,6 +375,9 @@ func (e *Engine) Run(ctx context.Context, id string) error {
 	case n.Status == StatusDone:
 		e.mu.Unlock()
 		return fmt.Errorf("node %s is already done", id)
+	case n.Limited():
+		e.mu.Unlock()
+		return fmt.Errorf("node %s waits for the %s limit to lift: retry it with r", id, n.Limit.Provider)
 	case n.Status == StatusWaiting:
 		e.mu.Unlock()
 		return fmt.Errorf("node %s is waiting for your reply: answer it with m", id)
@@ -436,6 +442,7 @@ func (e *Engine) StopAll() {
 	e.stopOnce.Do(func() { close(e.stopCh) })
 	e.mu.Lock()
 	e.auto = false
+	e.resumeAuto = false
 	for id, cancel := range e.cancels {
 		e.stopped[id] = true
 		cancel()
@@ -583,14 +590,27 @@ func (e *Engine) runNode(s started) {
 	n.EndedAt = time.Now()
 	var fin Event
 	var overlaps []Event
-	if err != nil {
+	if rl := asRateLimit(err); rl != nil && !wasStopped && s.ctx.Err() == nil {
+		retries := 0
+		if n.Limit != nil {
+			retries = n.Limit.Retries
+		}
+		n.Status = StatusWaiting
+		n.Limit = &LimitInfo{Provider: rl.Provider, ResetAt: rl.ResetAt, Message: limitMessage(rl), Retries: retries}
+		if e.auto {
+			e.resumeAuto = true
+		}
+		fin = Event{NodeID: id, Type: EventLimited, Text: n.Limit.Message, ResetAt: rl.ResetAt}
+	} else if err != nil {
 		n.Status = StatusFailed
+		n.Limit = nil
 		n.Error = err.Error()
 		if wasStopped || s.ctx.Err() != nil {
 			n.Error = "stopped"
 		}
 		fin = Event{NodeID: id, Type: EventFailed, Text: n.Error}
 	} else {
+		n.Limit = nil
 		n.Status = StatusDone
 		n.Summary = res.Summary
 		if res.Report.Status != "" {

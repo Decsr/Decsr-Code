@@ -103,10 +103,7 @@ func (r *OpenAIRunner) Complete(ctx context.Context, req CompletionRequest) (<-c
 		defer func() { _ = resp.Body.Close() }()
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		bodyStr := strings.TrimSpace(string(errBody))
-		if resp.StatusCode == http.StatusTooManyRequests {
-			return nil, &RateLimitError{Provider: r.Provider, Detail: bodyStr}
-		}
-		if rl := ClassifyRateLimit(r.Provider, bodyStr); rl != nil {
+		if rl := rateLimitFromHTTP(r.Provider, resp.StatusCode, resp.Header, bodyStr); rl != nil {
 			return nil, rl
 		}
 		return nil, fmt.Errorf("%s: model %q returned HTTP %d: %s", r.Provider, model, resp.StatusCode, truncate(bodyStr, apiErrBodyMaxSize))

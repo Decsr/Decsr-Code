@@ -274,8 +274,18 @@ func (m workspaceModel) statusBar() string {
 	cost := m.costSegment(u, limit, warn)
 	sep := dim.Render("  ·  ")
 	var runners []string
+	limited := m.limitedRunners()
 	for _, r := range u.runners {
+		if lr, ok := findLimited(limited, r.name); ok {
+			runners = append(runners, m.limitStatusSegment(lr))
+			continue
+		}
 		runners = append(runners, dim.Render(runnerGlyph(r.name, m.cfg.UI.Icons)+" "+r.name+" "+formatTokensCompact(r.tokens)))
+	}
+	for _, lr := range limited {
+		if !usedRunner(u, lr.name) {
+			runners = append(runners, m.limitStatusSegment(lr))
+		}
 	}
 	join := func(rs []string, tail string) string {
 		parts := append([]string(nil), rs...)

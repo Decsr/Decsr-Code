@@ -118,6 +118,9 @@ func nodeStatusGlyph(g *workspace.Graph, n *workspace.Node) (glyph, label string
 	case workspace.StatusFailed:
 		return "!", "failed"
 	case workspace.StatusWaiting:
+		if n.Limit != nil {
+			return "◷", "waiting"
+		}
 		return "◇", "waiting"
 	case workspace.StatusRunning:
 		return "▖", "running"

@@ -76,6 +76,9 @@ func (m workspaceModel) notifyEvent(ev workspace.Event) {
 		} else {
 			m.notifyNote(notify.NeedsYou, ev.NodeID+" asks: "+wsShort(ev.Text))
 		}
+	case workspace.EventLimited:
+		m.notifyLimited(ev)
+		return
 	case workspace.EventFailed:
 		if ev.Text == "stopped" {
 			return

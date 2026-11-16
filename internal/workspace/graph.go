@@ -33,6 +33,7 @@ const (
 	StatusFailed  Status = "failed"
 	// StatusWaiting is a node that ended with a question or a blocked report:
 	// its changes are merged, but it is not done. A reply starts its next attempt.
+	// With Node.Limit set it instead waits for a provider usage limit to lift.
 	StatusWaiting Status = "waiting"
 )
 
@@ -98,6 +99,9 @@ type Node struct {
 	PendingReply string `json:"pending_reply,omitempty"`
 	// Attempts are the finished earlier attempts, oldest first.
 	Attempts []Attempt `json:"attempts,omitempty"`
+	// Limit is set while the node waits for a provider usage limit to lift
+	// (Status waiting). It tells such a node from one that waits for a reply.
+	Limit *LimitInfo `json:"limit,omitempty"`
 
 	// replyContext is the excerpt of the previous attempt the engine built when
 	// this attempt started (it can read details that are kept in memory only).
@@ -443,6 +447,10 @@ func (g *Graph) Clone() *Graph {
 		if n.Spec != nil {
 			sr := *n.Spec
 			nn.Spec = &sr
+		}
+		if n.Limit != nil {
+			l := *n.Limit
+			nn.Limit = &l
 		}
 		c.Nodes[i] = &nn
 	}

@@ -92,6 +92,10 @@ activity feed with one card per node (`g` switches to the graph); see
 
 **Pull requests:** `/pr` pushes the session branch and opens a pull request with `gh`; `/pr watch` turns failing CI and review comments into fix nodes (see [`doc/workspace.md`](doc/workspace.md#pull-requests)).
 
+**Usage limits:** a node that hits a provider rate limit waits (`◷ waiting · resets 14:30`) instead of failing; at autonomy level 2 and 3 it retries after the reset, up to 3 times (see [`doc/workspace.md`](doc/workspace.md#usage-limits)).
+
+**Automations:** `.decsr/automations.yaml` defines scheduled, unattended runs (task or issue query, autonomy L2/L3, budget); `decsr automation install` writes the crontab lines and `decsr automation run <name> --tmux` starts one in a detached tmux session (see [`doc/automations.md`](doc/automations.md)).
+
 **Needs-you notifications:** when a split waits for roles, a node or Build &
 test fails or passes, or a run ends, DECSR rings the terminal bell, sends a
 desktop notification and can post to an ntfy, Slack or Discord webhook

@@ -47,12 +47,15 @@ type WorkspaceResult struct {
 	OpenMenu      bool
 	SwitchProject string // directory to reopen the Workspace in; "" = stay
 	Cfg           config.Config
+	Automation    AutomationResult // set for an automation run
 }
 
 // WorkspaceOptions configures how the Workspace opens.
 type WorkspaceOptions struct {
 	Resume bool   // open with the session picker showing
 	Issue  string // /issue arguments to run after start ("42", "<URL> --force")
+	// Automation makes this an unattended automation run.
+	Automation AutomationOptions
 }
 
 // wsDeps are the seams between the model and the outside world. The optional
@@ -337,7 +340,11 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 		return WorkspaceResult{Cfg: getCfg()}, err
 	}
 	if final, ok := res.(workspaceModel); ok {
-		return WorkspaceResult{OpenMenu: final.openMenu, SwitchProject: final.switchTo, Cfg: final.cfg}, nil
+		res := WorkspaceResult{OpenMenu: final.openMenu, SwitchProject: final.switchTo, Cfg: final.cfg}
+		if final.auto != nil {
+			res.Automation = final.auto.result
+		}
+		return res, nil
 	}
 	return WorkspaceResult{Cfg: getCfg()}, nil
 }
@@ -571,7 +578,8 @@ type workspaceModel struct {
 	cmdIdx       int
 	cmdPicked    bool // the highlight was moved with the arrows
 	splitting    bool
-	startIssue   string // /issue arguments to run at start
+	startIssue   string  // /issue arguments to run at start
+	auto         *wsAuto // automation run; nil in a normal Workspace
 	splitGen     int
 	splitTask    string
 	cancelSplit  context.CancelFunc
@@ -624,6 +632,7 @@ type workspaceModel struct {
 	outOpen    map[string]bool // expanded timeline items, by outKey
 
 	stallNoted       map[string]time.Time // per node: the stall episode already announced
+	limitBackoff     map[string]time.Time // per limited node: when an automatic retry may be tried again
 	autoCompactFired bool                 // auto-compact ran at this many finished nodes
 
 	// diff screen (d, D)
@@ -720,6 +729,7 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...Work
 	m.rescanSpec()
 	if len(opts) > 0 {
 		m.startIssue = opts[0].Issue
+		m.initAutomation(opts[0].Automation)
 	}
 	if len(opts) > 0 && opts[0].Resume {
 		m = m.openSessions()
@@ -727,7 +737,7 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...Work
 	return m
 }
 
-func (m workspaceModel) Init() tea.Cmd { return m.startIssueCmd() }
+func (m workspaceModel) Init() tea.Cmd { return tea.Batch(m.startIssueCmd(), m.autoStartCmd()) }
 
 func (m workspaceModel) project() string {
 	if m.cfg.Project.Name != "" {
@@ -849,7 +859,7 @@ func (m *workspaceModel) say(who, text string) {
 
 // ── Update ───────────────────────────────────────────────────────────────────
 
-func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m workspaceModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		was := m.inspDefault()
@@ -899,7 +909,8 @@ func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshOutput() // keeps the timers moving
 		}
 		m.checkStalls()
-		if m.splitting || m.reviewing || m.running() > 0 || m.installing != "" {
+		m.checkLimitRetries()
+		if m.splitting || m.reviewing || m.running() > 0 || m.installing != "" || m.hasLimitedAuto() {
 			return m, wsTick()
 		}
 		m.ticking = false
@@ -1484,6 +1495,9 @@ func (m workspaceModel) onEvent(msg wsEventMsg) (tea.Model, tea.Cmd) {
 	case workspace.EventWaiting:
 		m.setNotice("◇ "+ev.NodeID+" waits for you: "+oneLine(ev.Text), false)
 		m.sayQueuedReplyStarted(ev.NodeID)
+	case workspace.EventLimited:
+		m.limitNotice(ev)
+		m.sayQueuedReplyStarted(ev.NodeID)
 	case workspace.EventBudgetWarn, workspace.EventBudgetReached:
 		m.onBudgetEvent(ev)
 	case workspace.EventFailed:
@@ -1726,6 +1740,10 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.installing != "" {
 			m.setNotice("Wait for the plugin install to finish, then run the node", true)
 			return m, nil
+		}
+		if n.Limited() {
+			m.retryLimitedKey(n)
+			return m, m.startTick()
 		}
 		if err := m.eng.Run(m.runCtx, n.ID); err != nil {
 			m.setNotice("! "+err.Error(), true)
@@ -2400,6 +2418,13 @@ func (m workspaceModel) guidanceParts() (short, long string, isErr bool) {
 		if n.Status != workspace.StatusWaiting {
 			continue
 		}
+		if n.Limit != nil {
+			what := fmt.Sprintf("◷ %s waits for the %s limit", n.ID, n.Limit.Provider)
+			if !n.Limit.ResetAt.IsZero() {
+				what += " (" + limitClock(m.now(), n.Limit.ResetAt) + ")"
+			}
+			return what, via + "select it: r retries", false
+		}
 		if n.Report != nil && n.Report.Status == workspace.ReportBlocked {
 			return fmt.Sprintf("◇ %s is blocked", n.ID), fmt.Sprintf("%sselect it: m replies", via), false
 		}
@@ -2509,6 +2534,8 @@ func (m workspaceModel) graphHints() []keyHint {
 			hs = append(hs, keyHint{"f", "add fix"}, keyHint{"r", "retry"})
 		case n.Status == workspace.StatusFailed:
 			hs = append(hs, keyHint{"r", "retry"}, keyHint{"a", "reassign"})
+		case n.Limited():
+			hs = append(hs, keyHint{"r", "retry"}, keyHint{"o", "output"})
 		case n.Status == workspace.StatusWaiting:
 			hs = append(hs, keyHint{"m", "reply"}, keyHint{"o", "output"})
 			if hasDiff(n) {

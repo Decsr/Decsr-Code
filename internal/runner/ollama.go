@@ -85,10 +85,7 @@ func (r *OllamaRunner) Complete(ctx context.Context, req CompletionRequest) (<-c
 		defer func() { _ = resp.Body.Close() }()
 		errBody, _ := io.ReadAll(resp.Body)
 		bodyStr := strings.TrimSpace(string(errBody))
-		if resp.StatusCode == http.StatusTooManyRequests {
-			return nil, &RateLimitError{Provider: "ollama", Detail: bodyStr}
-		}
-		if rl := ClassifyRateLimit("ollama", bodyStr); rl != nil {
+		if rl := rateLimitFromHTTP("ollama", resp.StatusCode, resp.Header, bodyStr); rl != nil {
 			return nil, rl
 		}
 		return nil, fmt.Errorf("ollama: model %q returned HTTP %d: %s", model, resp.StatusCode, bodyStr)
