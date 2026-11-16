@@ -1,0 +1,14 @@
+{"type":"system","subtype":"init","session_id":"s1"}
+{"type":"assistant","message":{"id":"msg_1","content":[{"type":"thinking","thinking":"I should look at main.go first, then change the greeting and run the tests. I should look at main.go first, then change the greeting and run the tests. I should look at main.go first, then change the greeting and run the tests. I should look at main.go first, then change the greeting and run the tests. I should look at main.go first, then change the greeting and run the tests. I should look at main.go first, then change the greeting and run the tests.","signature":"sig"}]}}
+{"type":"assistant","message":{"id":"msg_1","content":[{"type":"tool_use","id":"toolu_read","name":"Read","input":{"file_path":"main.go"}}]}}
+this line is not json
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_read","content":"package main"}]}}
+{"type":"assistant","message":{"id":"msg_1","content":[{"type":"tool_use","id":"toolu_edit","name":"Edit","input":{"file_path":"main.go","old_string":"a\nb","new_string":"a\nb\nc\nd"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_edit","content":[{"type":"text","text":"edited"}]}]}}
+{"type":"assistant","message":{"id":"msg_1","content":[{"type":"tool_use","id":"toolu_bash","name":"Bash","input":{"command":"go test ./..."}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_bash","content":"FAIL main","is_error":true}]}}
+{"type":"assistant","message":{"id":"msg_1","content":[{"type":"tool_use","id":"toolu_write","name":"Write","input":{"file_path":"new.txt","content":"x\ny\nz\n"}},{"type":"tool_use","id":"toolu_grep","name":"Grep","input":{"pattern":"TODO"}},{"type":"tool_use","id":"toolu_mcp","name":"mcp__x__thing","input":{}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_write","content":"ok"},{"type":"tool_result","tool_use_id":"unknown","content":"ignored"}]}}
+{"type":"future_event","x":1}
+{"type":"assistant","message":{"id":"msg_2","content":[{"type":"text","text":"All done."}]}}
+{"type":"result","subtype":"success","result":"All done.","usage":{"input_tokens":10,"output_tokens":5}}

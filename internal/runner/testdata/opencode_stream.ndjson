@@ -1,0 +1,14 @@
+{"type":"step_start","timestamp":1,"sessionID":"ses_1","part":{"id":"prt_s","type":"step-start"}}
+{"type":"reasoning","timestamp":2,"part":{"id":"prt_r","type":"reasoning","text":"let me think about it"}}
+{"type":"tool_use","part":{"id":"prt_read","type":"tool","tool":"read","state":{"status":"completed","input":{"path":"a.go"},"output":"1: package a","title":"a.go","metadata":{},"time":{"start":1000,"end":1250}}}}
+{"type":"tool_use","part":{"id":"prt_edit","type":"tool","tool":"edit","state":{"status":"running","input":{"filePath":"a.go","oldString":"x","newString":"x\ny"},"time":{"start":2000}}}}
+{"type":"tool_use","part":{"id":"prt_edit","type":"tool","tool":"edit","state":{"status":"completed","input":{"filePath":"a.go","oldString":"x","newString":"x\ny"},"output":"","metadata":{"filediff":{"additions":3,"deletions":1}},"time":{"start":2000,"end":2100}}}}
+{broken json
+{"type":"tool_use","part":{"id":"prt_bash","type":"tool","tool":"bash","state":{"status":"error","input":{"command":"go build ./..."},"error":"exit status 2","time":{"start":3000,"end":4000}}}}
+{"type":"tool_use","part":{"id":"prt_ls","type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"a.go","metadata":{"exit":0}}}}
+{"type":"tool_use","part":{"id":"prt_write","type":"tool","tool":"write","state":{"status":"completed","input":{"filePath":"b.txt","content":"1\n2\n"},"output":"ok"}}}
+{"type":"tool_use","part":{"id":"prt_grep","type":"tool","tool":"grep","state":{"status":"completed","input":{"pattern":"TODO"},"output":"a.go:3"}}}
+{"type":"mystery","part":{}}
+{"type":"text","part":{"id":"prt_t1","type":"text","text":"All "}}
+{"type":"text","part":{"id":"prt_t2","type":"text","text":"done."}}
+{"type":"step_finish","part":{"id":"prt_f","type":"step-finish","tokens":{"input":100,"output":20,"reasoning":5}}}

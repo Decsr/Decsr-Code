@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Decsr/Decsr-Code/internal/tokenutil"
 )
@@ -130,6 +131,7 @@ func (r *OllamaRunner) streamResponse(body io.ReadCloser, inputText string, ch c
 func (r *OllamaRunner) streamResponseFromBytes(data []byte, inputText string, ch chan<- Token) {
 	defer close(ch)
 	var buf strings.Builder
+	var think thinkingTracker
 	for _, line := range bytes.Split(data, []byte("\n")) {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
@@ -137,19 +139,32 @@ func (r *OllamaRunner) streamResponseFromBytes(data []byte, inputText string, ch
 		}
 		var chunk ollamaChatResponse
 		if err := json.Unmarshal(line, &chunk); err != nil {
+			emitActivity(ch, think.finish(time.Now()))
 			ch <- Token{Error: fmt.Errorf("ollama: decode stream chunk: %w", err)}
 			ch <- Token{Done: true}
 			return
 		}
 		if chunk.Error != "" {
+			emitActivity(ch, think.finish(time.Now()))
 			ch <- Token{Error: fmt.Errorf("ollama: %s", chunk.Error)}
 			ch <- Token{Done: true}
 			return
 		}
+		// Models run with think enabled stream their reasoning in message.thinking.
+		var thought struct {
+			Message struct {
+				Thinking string `json:"thinking"`
+			} `json:"message"`
+		}
+		if json.Unmarshal(line, &thought) == nil {
+			emitActivity(ch, think.add(thought.Message.Thinking, time.Now()))
+		}
 		if chunk.Message.Content != "" {
+			emitActivity(ch, think.finish(time.Now()))
 			buf.WriteString(chunk.Message.Content)
 		}
 		if chunk.Done {
+			emitActivity(ch, think.finish(time.Now()))
 			text := unwrapJSONResponse(buf.String())
 			if text != "" {
 				ch <- Token{Text: text}
@@ -169,6 +184,7 @@ func (r *OllamaRunner) streamResponseFromBytes(data []byte, inputText string, ch
 			return
 		}
 	}
+	emitActivity(ch, think.finish(time.Now()))
 	// Stream ended without an explicit done:true chunk — emit whatever we
 	// collected and an estimated usage so the agent still reports tokens.
 	text := unwrapJSONResponse(buf.String())

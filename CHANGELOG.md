@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Workspace nodes keep an activity journal in the session (200 steps per node,
+  500 characters of detail each), the estimated prompt size (`ctx`) of worker
+  nodes, and fix nodes get a `What failed:` excerpt of up to 8,000 characters
+  (failing commands, then errors, then files touched).
+- Workspace node cards show the last 5 activity steps while a node runs and
+  fold them into `Worked for 1m 12s ›` when it ends (`Space` expands the whole
+  timeline); `ctx 18k` / `ctx 18k / 128k` on the card and in the inspector,
+  `Activity  42 steps (3 failed)` in the inspector, the current action in the
+  sidebar row, and a timeline in the output view (`j`/`k`, `Enter` to expand a
+  step, `t` for the raw text).
+- A running node with no activity for 60 s shows `no activity for 1m` on its
+  card and sidebar row; after 5 minutes one needs-you notification is sent.
+- At autonomy level 2 and 3 `/compact` runs by itself when 10 or more nodes are
+  done and nothing runs.
 - `/config` lists every saved custom provider as `<name> (custom)` plus a
   `+ custom…` entry (name, base URL, key) in the provider row and the per-agent
   runner step, and selecting one writes `runner: openai` with `provider: <name>`.
@@ -115,6 +129,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HOMEBREW_TAP_GITHUB_TOKEN` secret is set (skipped otherwise).
 
 ### Changed
+- The `/compact` suggestion at level 1 now appears from 10 done nodes (was 6).
+- A fix node's description no longer repeats the failing command's output
+  under `Failure output:` when it has a `What failed:` excerpt.
 - The token total moved from the Workspace header to the bottom status bar.
 - Node cards and sidebar rows show the runner glyph and the effective model
   also when the node's model is the runner's default; the card header reads

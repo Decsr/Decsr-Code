@@ -8,6 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
+
+	"github.com/Decsr/Decsr-Code/internal/runner"
 )
 
 const eventBuffer = 256
@@ -38,6 +41,13 @@ type Engine struct {
 	pending []Event // engine events queued under the lock, sent by flush
 	warned  bool    // the warn threshold was announced
 	reached bool    // the budget-reached message was sent
+
+	// details holds the full activity detail (up to 2000 chars) per node and
+	// activity ID, in memory only. It follows the 200-per-node cap of Node.Activity.
+	details     map[string]*detailLog
+	lastActSave time.Time
+	actSaveGap  time.Duration    // minimum time between saves caused by activity
+	now         func() time.Time // clock; time.Now unless a test sets it
 
 	stopping  atomic.Bool // set once StopAll begins; event sends never block after that
 	stopCh    chan struct{}
@@ -71,16 +81,19 @@ func NewEngineWithSave(g *Graph, ex Executor, maxParallel int, save func(*Graph)
 		maxParallel = 1
 	}
 	return &Engine{
-		g:        g,
-		ex:       ex,
-		max:      maxParallel,
-		save:     save,
-		events:   make(chan Event, eventBuffer),
-		cancels:  make(map[string]context.CancelFunc),
-		costBase: make(map[string]costBase),
-		stopped:  make(map[string]bool),
-		stopCh:   make(chan struct{}),
-		done:     make(chan struct{}),
+		g:          g,
+		ex:         ex,
+		max:        maxParallel,
+		save:       save,
+		events:     make(chan Event, eventBuffer),
+		cancels:    make(map[string]context.CancelFunc),
+		costBase:   make(map[string]costBase),
+		stopped:    make(map[string]bool),
+		details:    make(map[string]*detailLog),
+		actSaveGap: activitySaveEvery,
+		now:        time.Now,
+		stopCh:     make(chan struct{}),
+		done:       make(chan struct{}),
 	}
 }
 
@@ -261,7 +274,14 @@ func (e *Engine) AddFix(checkID string) (string, error) {
 		e.mu.Unlock()
 		return "", fmt.Errorf("node %s has not failed", checkID)
 	}
-	f, err := e.g.AddFix(checkID, c.Error)
+	failed := []*Node{c}
+	for _, d := range c.DependsOn {
+		if dn := e.g.Node(d); dn != nil && dn.Status == StatusFailed {
+			failed = append(failed, dn)
+		}
+	}
+	excerpt := FixExcerptWith(failed, FixExcerptChars, e.detailLocked)
+	f, err := e.g.AddFixExcerpt(checkID, c.Error, excerpt)
 	if err != nil {
 		e.mu.Unlock()
 		return "", err
@@ -277,6 +297,18 @@ func (e *Engine) AddFix(checkID string) (string, error) {
 // other nodes run.
 func (e *Engine) AddCIFix(title, desc, role string) string {
 	e.mu.Lock()
+	// The excerpt of failed nodes goes after the CI text, only if budget remains.
+	if room := FixExcerptChars - utf8.RuneCountInString(desc); room > 200 {
+		var failed []*Node
+		for _, n := range e.g.Nodes {
+			if n.Status == StatusFailed {
+				failed = append(failed, n)
+			}
+		}
+		if ex := FixExcerptWith(failed, room-len("\n\nWhat failed:\n"), e.detailLocked); ex != "" {
+			desc += whatFailed(ex)
+		}
+	}
 	f := e.g.AddCIFix(title, desc)
 	f.Role = role
 	err := e.saveLocked()
@@ -401,6 +433,12 @@ func (e *Engine) startLocked(parent context.Context, n *Node) started {
 	n.FileStats = nil
 	n.Commit = ""
 	n.Warnings = nil
+	// The activity journal belongs to one attempt: a re-run starts it empty
+	// (the history of earlier attempts is not kept).
+	n.Activity, n.ActivityDropped = nil, 0
+	delete(e.details, n.ID)
+	n.LastActivityAt = time.Now()
+	n.ContextTokens, n.ContextLimit = 0, 0
 	// The cost adds up over the attempts: this run is priced on top of what the
 	// earlier ones cost, and an unpriced earlier attempt keeps CostKnown false.
 	e.costBase[n.ID] = costBase{usd: n.CostUSD, unpriced: (n.InputTokens > 0 || n.OutputTokens > 0) && !n.CostKnown}
@@ -454,7 +492,21 @@ func (e *Engine) runNode(s started) {
 		ev.NodeID = id
 		switch ev.Type {
 		case EventOutput:
+			e.mu.Lock()
+			e.touchLocked(id)
+			e.mu.Unlock()
 			e.emitOutput(ev)
+		case EventActivity:
+			serr := e.recordActivity(id, ev.Activity)
+			e.reportSave(serr)
+			e.emitOutput(ev)
+		case EventContext:
+			e.mu.Lock()
+			if n := e.g.Node(id); n != nil {
+				n.ContextTokens, n.ContextLimit = ev.ContextTokens, ev.ContextLimit
+			}
+			e.mu.Unlock()
+			e.emit(ev)
 		case EventUsage:
 			e.mu.Lock()
 			if n := e.g.Node(id); n != nil {
@@ -556,4 +608,106 @@ func (e *Engine) markOverlapsLocked(n *Node) []Event {
 		}
 	}
 	return evs
+}
+
+// Activity journal limits.
+const (
+	// maxNodeActivity caps Node.Activity (and the in-memory details).
+	maxNodeActivity = 200
+	// maxStoredDetail is the longest Detail kept in a node (and so in the
+	// session file); ActivityDetail returns the full text from memory.
+	maxStoredDetail = 500
+	// activitySaveEvery is the shortest time between saves caused only by
+	// activity events.
+	activitySaveEvery = 2 * time.Second
+)
+
+// detailLog is the full detail of one node's activity items, oldest first.
+type detailLog struct {
+	ids []string
+	m   map[string]string
+}
+
+func (d *detailLog) set(id, detail string) {
+	if _, ok := d.m[id]; !ok {
+		d.ids = append(d.ids, id)
+		if len(d.ids) > maxNodeActivity {
+			delete(d.m, d.ids[0])
+			d.ids = d.ids[1:]
+		}
+	}
+	d.m[id] = detail
+}
+
+// touchLocked records that a running node just did something.
+func (e *Engine) touchLocked(id string) {
+	if n := e.g.Node(id); n != nil && n.Status == StatusRunning {
+		n.LastActivityAt = e.now()
+	}
+}
+
+// recordActivity adds a to the journal of node id: an item with a known ID is
+// replaced in place, a new ID is appended (the oldest item is dropped beyond
+// 200). The graph is saved at most every 2 seconds this way.
+func (e *Engine) recordActivity(id string, a *runner.Activity) error {
+	if a == nil {
+		return nil
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	n := e.g.Node(id)
+	if n == nil || n.Status != StatusRunning {
+		return nil
+	}
+	n.LastActivityAt = e.now()
+	d := e.details[id]
+	if d == nil {
+		d = &detailLog{m: make(map[string]string)}
+		e.details[id] = d
+	}
+	d.set(a.ID, a.Detail)
+	stored := *a
+	if a.ExitCode != nil {
+		c := *a.ExitCode
+		stored.ExitCode = &c
+	}
+	stored.Detail = runner.Clip(a.Detail, maxStoredDetail)
+	replaced := false
+	for i := len(n.Activity) - 1; i >= 0; i-- {
+		if n.Activity[i].ID == a.ID {
+			n.Activity[i] = stored
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		n.Activity = append(n.Activity, stored)
+		if over := len(n.Activity) - maxNodeActivity; over > 0 {
+			n.Activity = append([]runner.Activity(nil), n.Activity[over:]...)
+			n.ActivityDropped += over
+		}
+	}
+	if now := e.now(); now.Sub(e.lastActSave) >= e.actSaveGap {
+		e.lastActSave = now
+		return e.saveLocked()
+	}
+	return nil
+}
+
+// ActivityDetail returns the full detail (up to 2000 characters) of one
+// activity item of a node. It is kept in memory only: false after a restart of
+// the program or of the node, or when the item was dropped from the journal.
+func (e *Engine) ActivityDetail(nodeID, activityID string) (string, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.detailLocked(nodeID, activityID)
+}
+
+func (e *Engine) detailLocked(nodeID, activityID string) (string, bool) {
+	d := e.details[nodeID]
+	if d == nil {
+		return "", false
+	}
+	s, ok := d.m[activityID]
+	return s, ok
 }

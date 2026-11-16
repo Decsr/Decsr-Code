@@ -239,12 +239,30 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 	if n.Summary != "" {
 		sumBlock = mk(head, "Summary", styled(n.Summary, lipgloss.NewStyle().Foreground(colText), inspTextLines))
 	}
+	var tokBody []string
 	if n.InputTokens > 0 || n.OutputTokens > 0 {
 		mark := ""
 		if n.Estimated {
 			mark = "~"
 		}
-		tokBlock = mk(head, "Tokens", []string{dim.Render(fmt.Sprintf("in %s%s · out %s%s", mark, formatTokensCompact(n.InputTokens), mark, formatTokensCompact(n.OutputTokens)))})
+		tokBody = append(tokBody, dim.Render(fmt.Sprintf("in %s%s · out %s%s", mark, formatTokensCompact(n.InputTokens), mark, formatTokensCompact(n.OutputTokens))))
+	}
+	if n.ContextTokens > 0 {
+		ctx := "Context  " + ctxK(n.ContextTokens)
+		if n.ContextLimit > 0 {
+			ctx += " / " + ctxK(n.ContextLimit)
+		}
+		tokBody = append(tokBody, dim.Render(ctx+" tokens"))
+	}
+	if total, failed := activityCounts(n); total > 0 {
+		act := fmt.Sprintf("Activity  %d %s", total, pluralize(total, "step", "steps"))
+		if failed > 0 {
+			act += fmt.Sprintf(" (%d failed)", failed)
+		}
+		tokBody = append(tokBody, dim.Render(act))
+	}
+	if len(tokBody) > 0 {
+		tokBlock = mk(head, "Tokens", tokBody)
 	}
 	running := n.Status == workspace.StatusRunning
 	showOutput := len(outputTail) > 0 || running

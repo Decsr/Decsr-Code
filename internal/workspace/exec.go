@@ -25,7 +25,14 @@ type EventType string
 const (
 	EventStarted EventType = "started"
 	EventOutput  EventType = "output"
-	EventUsage   EventType = "usage"
+	// EventActivity carries a structured agent activity in Event.Activity
+	// (thinking, a command, a file edit, ...). A later activity with the same
+	// ID replaces the earlier one.
+	EventActivity EventType = "activity"
+	EventUsage    EventType = "usage"
+	// EventContext reports the size of the prompt a worker is about to get:
+	// Event.ContextTokens (estimated) and Event.ContextLimit (0 = unknown).
+	EventContext EventType = "context"
 	EventDone    EventType = "done"
 	EventFailed  EventType = "failed"
 	// EventBudgetWarn and EventBudgetReached are engine-level (NodeID "");
@@ -46,6 +53,10 @@ type Event struct {
 	// Runner and Model of the agent that used the tokens (EventUsage), to
 	// price them.
 	Runner, Model string
+	// Activity is set for EventActivity.
+	Activity *runner.Activity
+	// ContextTokens and ContextLimit are set for EventContext.
+	ContextTokens, ContextLimit int
 }
 
 // Result is the outcome of a successful node run.
@@ -187,6 +198,10 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 		Description: n.Description,
 		Context:     wx.workContext(g, n),
 		ReadOnly:    role.ReadOnly,
+		OnActivity:  func(a runner.Activity) { emit(Event{NodeID: n.ID, Type: EventActivity, Activity: &a}) },
+		OnContext: func(tokens int) {
+			emit(Event{NodeID: n.ID, Type: EventContext, ContextTokens: tokens, ContextLimit: max(role.Agent.MaxContextTokens, 0)})
+		},
 	}, func(s string) { emit(Event{NodeID: n.ID, Type: EventOutput, Text: s}) })
 	if res.Usage.InputTokens > 0 || res.Usage.OutputTokens > 0 {
 		emit(Event{NodeID: n.ID, Type: EventUsage, In: res.Usage.InputTokens, Out: res.Usage.OutputTokens, Estimated: res.Usage.Estimated,
@@ -450,11 +465,18 @@ func (x *executor) runCheck(ctx context.Context, n *Node, emit func(Event)) (Res
 		emit(Event{NodeID: n.ID, Type: EventOutput, Text: "\u26a0 " + noCheckCommandsMsg + "\n"})
 		return Result{Summary: noCheckCommandsMsg, Warnings: []string{noCheckCommandsMsg}}, nil
 	}
-	for _, cmd := range commands {
+	runID := time.Now().UnixNano()
+	for i, cmd := range commands {
 		if err := ctx.Err(); err != nil {
 			return Result{}, err
 		}
 		emit(Event{NodeID: n.ID, Type: EventOutput, Text: "$ " + cmd + "\n"})
+		act := runner.Activity{
+			ID: fmt.Sprintf("check-%s-%d-%d", n.ID, runID, i), Kind: runner.ActCommand,
+			State: runner.ActRunning, Title: runner.Clip(cmd, 200), At: time.Now(),
+		}
+		started := act
+		emit(Event{NodeID: n.ID, Type: EventActivity, Activity: &started})
 		res := run.RunContext(ctx, cmd)
 		out := res.Stdout
 		if res.Stderr != "" {
@@ -463,6 +485,16 @@ func (x *executor) runCheck(ctx context.Context, n *Node, emit func(Event)) (Res
 			}
 			out += res.Stderr
 		}
+		code := res.ExitCode
+		act.ExitCode = &code
+		act.State = runner.ActDone
+		if code != 0 {
+			act.State = runner.ActFailed
+		}
+		act.Detail = runner.Clip(tailLines(out, 2000), 2000)
+		act.Duration = time.Since(act.At)
+		act.At = time.Now()
+		emit(Event{NodeID: n.ID, Type: EventActivity, Activity: &act})
 		if out != "" {
 			emit(Event{NodeID: n.ID, Type: EventOutput, Text: out + "\n"})
 		}

@@ -592,6 +592,12 @@ type workspaceModel struct {
 	outVP     viewport.Model
 	outNode   string
 	outFollow bool
+	outRaw    bool            // the raw text instead of the activity timeline
+	outCur    int             // timeline cursor: index into the node's activity
+	outOpen   map[string]bool // expanded timeline items, by outKey
+
+	stallNoted       map[string]time.Time // per node: the stall episode already announced
+	autoCompactFired bool                 // auto-compact ran at this many finished nodes
 
 	// diff screen (d, D)
 	diff *wsDiffView
@@ -855,9 +861,10 @@ func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case wsTickMsg:
 		m.spin++
-		if m.screen == wsScreenOutput && len(m.outputs[m.outNode]) == 0 {
-			m.refreshOutput() // keeps the waiting timer moving
+		if m.screen == wsScreenOutput && (m.outTimelineOn() || len(m.outputs[m.outNode]) == 0) {
+			m.refreshOutput() // keeps the timers moving
 		}
+		m.checkStalls()
 		if m.splitting || m.running() > 0 || m.installing != "" {
 			return m, wsTick()
 		}
@@ -1509,6 +1516,10 @@ func (m workspaceModel) outputTail(id string, n int) []string {
 }
 
 func (m *workspaceModel) refreshOutput() {
+	if m.outTimelineOn() {
+		m.refreshTimeline()
+		return
+	}
 	lines := m.outputLines(m.outNode)
 	content := strings.Join(lines, "\n")
 	if len(lines) == 0 {
@@ -1689,13 +1700,7 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.openDiff(nil)
 	case "o", "enter":
 		if n != nil {
-			if m.sidebarOverlay() {
-				m.sbFlip = false
-			}
-			m.screen = wsScreenOutput
-			m.outNode = n.ID
-			m.outFollow = true
-			m.refreshOutput()
+			m = m.openOutput(n)
 		}
 	}
 	return m, nil
@@ -1824,6 +1829,17 @@ func (m workspaceModel) outputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.eng.Stop(m.outNode)
 		}
 		return m, nil
+	}
+	if msg.String() == "t" {
+		m.outRaw = !m.outRaw
+		m.outFollow = true
+		m.refreshOutput()
+		return m, nil
+	}
+	if m.outTimelineOn() {
+		if next, ok := m.timelineKey(msg.String()); ok {
+			return next, nil
+		}
 	}
 	var cmd tea.Cmd
 	m.outVP, cmd = m.outVP.Update(msg)
@@ -2781,17 +2797,19 @@ func (m workspaceModel) mainView() string {
 func (m workspaceModel) outputView() string {
 	w, h := m.width, m.height
 	n := m.g.Node(m.outNode)
-	title := m.outNode
-	if n != nil {
-		_, label := nodeStatusGlyph(m.g, n)
-		title = fmt.Sprintf("%s · %s · %s", n.ID, n.Title, label)
+	title := m.outputHeader(w)
+	if n == nil {
+		title = m.outNode
 	}
 	vp := m.outVP
 	vp.Width, vp.Height = w, h-3
-	hints := []keyHint{{"↑↓", "scroll"}, {"s", "stop"}, {"Esc", "back"}, {"?", "help"}}
+	hints := []keyHint{{"↑↓", "scroll"}, {"t", "timeline"}, {"s", "stop"}, {"Esc", "back"}, {"?", "help"}}
+	if m.outTimelineOn() {
+		hints = []keyHint{{"↑↓", "step"}, {"Enter", "expand"}, {"t", "raw"}, {"s", "stop"}, {"Esc", "back"}, {"?", "help"}}
+	}
 	parts := []string{
 		m.headerLine(),
-		"  " + lipgloss.NewStyle().Foreground(colText).Bold(true).Render(truncateOneLine(title, w-4)),
+		"  " + title,
 		vp.View(),
 		wsHintBar(w, fitHints(w, hints)),
 	}

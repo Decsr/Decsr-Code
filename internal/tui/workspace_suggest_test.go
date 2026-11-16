@@ -45,7 +45,11 @@ func TestWorkspaceSuggestionRules(t *testing.T) {
 		if got := h.m.suggestion(); got != "review the changes and add any missing tests" {
 			t.Fatalf("got %q", got)
 		}
-		h.m.g = wsSuggestGraph(5, workspace.StatusDone) // 6 done nodes with CHECK
+		h.m.g = wsSuggestGraph(8, workspace.StatusDone) // 9 done nodes with CHECK
+		if got := h.m.suggestion(); got != "review the changes and add any missing tests" {
+			t.Fatalf("9 done nodes: got %q", got)
+		}
+		h.m.g = wsSuggestGraph(9, workspace.StatusDone) // 10 done nodes with CHECK
 		if got := h.m.suggestion(); got != "/compact" {
 			t.Fatalf("got %q", got)
 		}

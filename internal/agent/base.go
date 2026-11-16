@@ -11,6 +11,10 @@ import (
 type BaseAgent struct {
 	role bus.AgentRole
 	Bus  *bus.Bus
+	// OnActivity, when set, receives the structured activity of the agent:
+	// runner activity tokens and the files the agent writes. It may be called
+	// from the agent's goroutine and must not block.
+	OnActivity func(runner.Activity)
 }
 
 // NewBase creates a BaseAgent for the given role.
@@ -26,6 +30,13 @@ func (a *BaseAgent) emit(typ bus.MessageType, payload any) {
 // emitToken publishes a streaming token event.
 func (a *BaseAgent) emitToken(text string, done bool) {
 	a.emit(bus.MsgEvent, bus.TokenPayload{Text: text, Done: done})
+}
+
+// forwardActivity passes a runner activity token to OnActivity.
+func (a *BaseAgent) forwardActivity(tok runner.Token) {
+	if tok.Activity != nil && a.OnActivity != nil {
+		a.OnActivity(*tok.Activity)
+	}
 }
 
 // emitUsage publishes a token usage event for this agent.
@@ -73,6 +84,7 @@ func (a *BaseAgent) collectStream(ch <-chan runner.Token) (string, error) {
 		if tok.Reasoning != "" {
 			a.emitToken(tok.Reasoning, false)
 		}
+		a.forwardActivity(tok)
 		if tok.Text != "" {
 			a.emitToken(tok.Text, false)
 			sb.WriteString(tok.Text)

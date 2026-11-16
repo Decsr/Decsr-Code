@@ -123,9 +123,25 @@ func (m workspaceModel) nodeRows(n *workspace.Node, w int, on bool, models, runn
 			l2 += sbSeg(" "+md, colMuted, false, on)
 		}
 	}
+	acting := false // line 2 shows what the node is doing, in place of the age
+	if n.Status == workspace.StatusRunning {
+		if st := stallText(n, m.now()); st != "" {
+			acting = true
+			l2 = sbSeg("    "+st, colWarn, false, on)
+		} else if a, ok := currentAction(n); ok {
+			acting = true
+			col := actColor(a)
+			if col == colText {
+				col = colMuted
+			}
+			l2 = sbSeg("    "+actGlyph(a.Kind)+" "+actText(a, max(w-7, 4), true), col, false, on)
+		}
+	}
 	switch n.Status {
 	case workspace.StatusRunning:
-		age = "now"
+		if !acting {
+			age = "now"
+		}
 	case workspace.StatusFailed:
 		age = "failed"
 	case workspace.StatusDone:

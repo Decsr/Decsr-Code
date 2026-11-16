@@ -68,7 +68,9 @@ columns there is no sidebar; `b` shows it as a box over the left side.
 two rows per node: the status glyph, id and title, and under it the runner
 glyph, short model and the age on the right (`now` while running, then `2m`,
 `1h`, `3d` since it ended; `failed` for a failed node; an unassigned node shows
-`→ role` for the lead's suggestion). Below a divider, `Sessions` lists up to
+`→ role` for the lead's suggestion). While a node runs, the second row shows
+what it is doing instead (`▸ go test ./…`, `✎ cmd/version.go`, `· thinking…`);
+after 60 s without activity it shows `no activity for 2m` in the warning colour. Below a divider, `Sessions` lists up to
 five other saved sessions of the project (`○ title  2/5`); `Enter` on one
 resumes it like `/resume` does, and is refused while nodes run. The list
 scrolls when it is taller than the pane.
@@ -79,14 +81,33 @@ shows the other one (`Activity · g graph`, `Graph · g activity`).
 - **Activity** (default) is a feed in time order. Your messages, the lead's
   answers and system lines read like a chat. Each node that has started gets a
   card at the time it started: the status glyph, id, title, runner, model and
-  start time; `Working for 37s` and the last output line while it runs; `Worked
-  for 1m 10s`, the summary (3 lines at most) and the files it changed once done
+  start time; `Working for 37s · ctx 18k` and its last 5 activity steps while it
+  runs (the last output line for a node without activity); `Worked for 1m 10s ›`
+  folded, the summary (3 lines at most) and the files it changed once done
   (`Edited cmd/version.go   +18 −2`, `Added` for a new file, at most 5 rows and
   then `+3 more files`); `Failed after 2m`, the error and the keys that help on
   failure. The counts come from git and exist when the node ran in its own
   worktree; otherwise only the file names are shown. The selected card has an
   accent border and a failed one a red border. The feed follows the newest
   item until you scroll up.
+
+  **Activity steps.** Every step is one line, a glyph, the text and a dim meta
+  on the right: `▸ go test ./…  12s` (then `✓ 3.2s`, or `✗ exit 1 · 3.2s`),
+  `✎ Edited cmd/version.go  +18 −2`, `◦ Read cmd/version.go`,
+  `⌕ Searched "flag.Parse"`, `⚙ <tool>`, `◷ Waiting · <reason>`, `! <error>`,
+  `› <message>` and `· thinking… "first words"`. A running step is accent
+  coloured, a failed one red. When the node ends, the steps fold into `Worked
+  for 1m 12s ›`; `Space` expands them into the whole saved timeline (at most 200
+  steps, `… 37 earlier steps` when older ones were dropped, the thinking text
+  wrapped under its line). `ctx 18k` is the estimated size of the worker prompt;
+  `ctx 18k / 128k` shows when the model limit is known. Nodes of older sessions
+  keep the old card: `Space` shows the last 15 output lines.
+
+  **Stall.** A running node with no activity for 60 s shows
+  `no activity for 1m` (minutes rounded down) on its card and in the sidebar.
+  After 5 minutes one `needs you` notification is sent for that stall
+  (`T3 has had no activity for 5m`); a new one follows only after the node was
+  active again.
 - **Graph** is the node graph below, with the conversation under it and the
   inspector beside it when there is room (the main pane is at least 100 columns).
 
@@ -221,7 +242,7 @@ It is picked from the session state, with no model call, and only while no
 node runs and no overlay is open:
 
 1. Build & test failed and has no fix node: `fix the failing build and tests`
-2. Every node is done: `/compact` with 6 or more done nodes, otherwise
+2. Every node is done: `/compact` with 10 or more done nodes, otherwise
    `review the changes and add any missing tests`
 3. A fresh session where a `specs/*/tasks.md` has open tasks (see
    [Auto-detect](#import-from-spec-kit)): `/import speckit`
@@ -238,7 +259,7 @@ node keys work with focus on the sidebar or on the main pane, in either mode.
 | arrows or `h j k l` | Graph mode: move between nodes. Activity mode: select the previous or next card. Sidebar: move through the nodes, then the saved sessions |
 | `PgUp` / `PgDn`, `Ctrl+U` / `Ctrl+D` | Activity mode: scroll the feed a page |
 | `G` | Activity mode: jump to the newest item and follow it again |
-| `Space` | Activity mode: expand or collapse the selected card (its last 15 output lines) |
+| `Space` | Activity mode: expand or collapse the selected card (its whole activity timeline; the last 15 output lines for a node without activity) |
 | `g` | Switch the main pane between Activity and Graph (text in the prompt) |
 | `b` | Hide or show the sidebar; under 100 columns it opens as a box (`Esc` or `b` closes it) |
 | `Enter` or `o` | Open the full output of the node (in the sidebar, on a saved session: resume it) |
@@ -258,9 +279,16 @@ node keys work with focus on the sidebar or on the main pane, in either mode.
 | `?` | Help |
 | `q` | Quit (asks first while nodes run) |
 
-In the output view: `Esc` or `q` returns to the graph, `s` stops the node, and
-the arrow and page keys scroll. The old `n` key (new task) is gone; use
-`/clear`.
+**Output view.** `o` or `Enter` opens the timeline of the node: one line per
+step, the newest at the bottom, following while the node runs. The header shows
+the node, its status, `Worked for …` and `ctx`. `j`/`k` or the arrows move the
+cursor over the steps (`g`/`G` jump to the first and last), `Enter` or `Space`
+expands the step under the cursor to its detail (the full text while decsr
+still holds it, else the 500 characters saved in the session), and `t` toggles
+the raw output text. A node without activity (an old session) opens in raw
+mode. `Esc` or `q` returns, `s` stops the node, and `PgUp`/`PgDn` scroll.
+
+The old `n` key (new task) is gone; use `/clear`.
 
 Quitting while nodes run asks for confirmation, then stops them and kills the
 agent processes.
@@ -354,6 +382,12 @@ on a removed node is dropped. Build & test stays. The summary is capped at
 task and to every worker as an `Earlier in this session` section of its context
 (the most recent 4,000 characters). Running it again with nothing to fold says
 `nothing to compact`.
+
+At autonomy level 2 and 3 `/compact` runs by itself once 10 or more work and
+fix nodes are done and nothing runs (not while automation is paused or the
+budget is reached). It writes `auto › compacted 10 finished nodes` and runs
+again only after the count has dropped below 10 and reached it again. At
+level 1 the prompt suggests `/compact` instead.
 
 ## Profiles
 
@@ -1120,6 +1154,21 @@ with other flags, e.g. `decsr --tmux --issue 42`.
   you when a run needs you.
 - `ui.tmux: true` in the config makes plain `decsr` behave like `decsr --tmux`.
 - Needs tmux; not supported on Windows. `decsr doctor` checks for tmux.
+
+## Activity, context and fix excerpts
+
+- Each node keeps a journal of what its agent did (thinking, commands, file
+  reads and edits, errors). It is saved in the session: at most 200 steps per
+  node, each detail cut to 500 characters. Older steps are dropped and counted.
+  The full detail (up to 2,000 characters) stays in memory only. A re-run starts
+  the journal empty.
+- A worker node records the estimated size of its prompt (`ctx`), with the
+  model limit when `max_context_tokens` is set for its role. Build & test nodes
+  have no context size.
+- A fix node gets a `What failed:` excerpt of up to 8,000 characters: failing
+  commands with the end of their output first, then errors, then the files
+  touched. Reasoning and messages are left out, and `[… N characters omitted]`
+  shows where text was cut.
 
 ## Reaching the classic pipeline
 

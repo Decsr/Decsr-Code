@@ -123,8 +123,7 @@ func TestAddCheck(t *testing.T) {
 func TestAddFix(t *testing.T) {
 	g := &Graph{Nodes: []*Node{n("T1")}}
 	c := g.AddCheck([]string{"go test"})
-	c.Status = StatusFailed
-	c.Error = "boom"
+	c.Status = StatusFailed // no activity and no error: no excerpt, so the failure text stays
 	long := strings.Repeat("x", 5000) + "TAIL"
 	f, err := g.AddFix("CHECK", long)
 	if err != nil {

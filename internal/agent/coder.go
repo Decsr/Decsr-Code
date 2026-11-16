@@ -238,6 +238,7 @@ func (a *CoderAgent) Research(ctx context.Context, p CoderResearchPayload) (stri
 		if tok.Reasoning != "" {
 			a.emitToken(tok.Reasoning, false)
 		}
+		a.forwardActivity(tok)
 		if tok.Text == "" {
 			continue
 		}
@@ -388,6 +389,7 @@ func (a *CoderAgent) streamAndWriteFiles(ch <-chan runner.Token) ([]string, stri
 	inFence := false
 	var fence fenceState
 	currentPath := ""
+	writes := newWriteTracker(a.root, a.OnActivity)
 
 	isFence := func(trimmed string) bool {
 		return strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
@@ -418,7 +420,7 @@ func (a *CoderAgent) streamAndWriteFiles(ch <-chan runner.Token) ([]string, stri
 				a.emitToken(fmt.Sprintf("skipped guessed path (file exists): %s\n", currentPath), false)
 			} else if currentPath != "" {
 				content := strings.Join(contentLines, "\n") + "\n"
-				if err := a.writeOneFile(currentPath, content); err != nil {
+				if err := writes.write(currentPath, content, func() error { return a.writeOneFile(currentPath, content) }); err != nil {
 					if errors.Is(err, errNoOpRewrite) {
 						// A no-op rewrite means the model emitted a valid
 						// file block whose content happens to be identical
@@ -451,6 +453,9 @@ func (a *CoderAgent) streamAndWriteFiles(ch <-chan runner.Token) ([]string, stri
 			}
 			inFence = true
 			contentLines = nil
+			if currentPath != "" {
+				writes.begin(currentPath)
+			}
 		} else if inFence {
 			contentLines = append(contentLines, line)
 		}
@@ -466,6 +471,7 @@ func (a *CoderAgent) streamAndWriteFiles(ch <-chan runner.Token) ([]string, stri
 
 	for tok := range ch {
 		if tok.Error != nil {
+			writes.finish()
 			return written, fullOutput.String(), capturedUsage, tok.Error
 		}
 		if tok.Done {
@@ -480,6 +486,7 @@ func (a *CoderAgent) streamAndWriteFiles(ch <-chan runner.Token) ([]string, stri
 		if tok.Reasoning != "" {
 			a.emitToken(tok.Reasoning, false)
 		}
+		a.forwardActivity(tok)
 		if tok.Text == "" {
 			continue
 		}
@@ -505,6 +512,7 @@ func (a *CoderAgent) streamAndWriteFiles(ch <-chan runner.Token) ([]string, stri
 		flushLine(lineBuf.String())
 	}
 
+	writes.finish()
 	a.emitToken("", true)
 	return written, fullOutput.String(), capturedUsage, nil
 }

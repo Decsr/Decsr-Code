@@ -191,20 +191,12 @@ func (m workspaceModel) cmdCompact(string) (tea.Model, tea.Cmd) {
 		m.say("system", "nothing to compact")
 		return m, nil
 	}
-	var folded []*workspace.Node
-	kept := 0 // finished nodes left because unfinished nodes still depend on them
-	if err := m.eng.Replace(func(g *workspace.Graph) {
-		folded = g.Compact()
-		for _, n := range g.Nodes {
-			if n.Kind == workspace.KindWork && n.Status == workspace.StatusDone {
-				kept++
-			}
-		}
-	}); err != nil {
+	folded, kept, err := m.applyCompact()
+	if err != nil {
 		m.say("error", oneLine(err.Error()))
 		return m, nil
 	}
-	if len(folded) == 0 {
+	if folded == 0 {
 		if kept > 0 {
 			m.say("system", fmt.Sprintf("nothing to compact; %d finished %s still needed by unfinished nodes", kept, pluralize(kept, "node is", "nodes are")))
 		} else {
@@ -212,12 +204,33 @@ func (m workspaceModel) cmdCompact(string) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	m.sess.update(func(s *workspace.Session) { s.Summary = workspace.CompactSummary(s.Summary, folded) })
-	msg := fmt.Sprintf("compacted %d finished %s", len(folded), pluralize(len(folded), "node", "nodes"))
+	msg := fmt.Sprintf("compacted %d finished %s", folded, pluralize(folded, "node", "nodes"))
 	if kept > 0 {
 		msg += fmt.Sprintf("; kept %d that unfinished nodes still depend on", kept)
 	}
 	m.say("system", msg)
+	return m, nil
+}
+
+// applyCompact folds the finished nodes into the session summary. It returns
+// how many nodes were folded and how many finished ones stay because
+// unfinished nodes depend on them. m.eng must not be nil.
+func (m *workspaceModel) applyCompact() (folded, kept int, err error) {
+	var gone []*workspace.Node
+	if err := m.eng.Replace(func(g *workspace.Graph) {
+		gone = g.Compact()
+		for _, n := range g.Nodes {
+			if n.Kind == workspace.KindWork && n.Status == workspace.StatusDone {
+				kept++
+			}
+		}
+	}); err != nil {
+		return 0, 0, err
+	}
+	if len(gone) == 0 {
+		return 0, kept, nil
+	}
+	m.sess.update(func(s *workspace.Session) { s.Summary = workspace.CompactSummary(s.Summary, gone) })
 	m.g = m.eng.Snapshot()
 	if m.g.Node(m.sel) == nil {
 		m.sel = ""
@@ -226,7 +239,7 @@ func (m workspaceModel) cmdCompact(string) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.saveSession()
-	return m, nil
+	return len(gone), kept, nil
 }
 
 func pluralize(n int, one, many string) string {

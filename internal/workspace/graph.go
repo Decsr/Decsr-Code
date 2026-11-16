@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/Decsr/Decsr-Code/internal/runner"
 )
 
 // Status is the lifecycle state of a node.
@@ -58,6 +60,18 @@ type Node struct {
 	CostKnown     bool       `json:"cost_known,omitempty"` // a price was found for the node's model
 	StartedAt     time.Time  `json:"started_at,omitempty"`
 	EndedAt       time.Time  `json:"ended_at,omitempty"`
+
+	// Activity is the journal of the current attempt: at most maxNodeActivity
+	// items, each Detail clipped to maxStoredDetail runes. ActivityDropped counts
+	// the older items that were cut off.
+	Activity        []runner.Activity `json:"activity,omitempty"`
+	ActivityDropped int               `json:"activity_dropped,omitempty"`
+	// LastActivityAt is the last activity or output of a running node (stall detection).
+	LastActivityAt time.Time `json:"last_activity_at,omitempty"`
+	// ContextTokens is the estimated size of the worker prompt; ContextLimit the
+	// role's context limit, 0 when unknown.
+	ContextTokens int `json:"context_tokens,omitempty"`
+	ContextLimit  int `json:"context_limit,omitempty"`
 }
 
 // SpecRef names the Spec Kit task a node was imported from.
@@ -321,6 +335,7 @@ func (g *Graph) Clone() *Graph {
 		nn.FileStats = append([]FileStat(nil), n.FileStats...)
 		nn.Warnings = append([]string(nil), n.Warnings...)
 		nn.Skills = append([]string(nil), n.Skills...)
+		nn.Activity = append([]runner.Activity(nil), n.Activity...)
 		if n.Spec != nil {
 			sr := *n.Spec
 			nn.Spec = &sr
@@ -367,9 +382,19 @@ func (g *Graph) addCheck(commands []string) *Node {
 // AddFix appends a work node "F<n>" that fixes a failed check, resets the
 // check to todo and makes it depend on the new node.
 func (g *Graph) AddFix(checkID, failure string) (*Node, error) {
+	return g.AddFixExcerpt(checkID, failure, "")
+}
+
+// AddFixExcerpt is AddFix with an excerpt of what failed (see FixExcerpt) added
+// to the description under "What failed:". An empty excerpt is built from the
+// check node itself.
+func (g *Graph) AddFixExcerpt(checkID, failure, excerpt string) (*Node, error) {
 	c := g.Node(checkID)
 	if c == nil || c.Kind != KindCheck {
 		return nil, fmt.Errorf("node %q is not a check node", checkID)
+	}
+	if excerpt == "" {
+		excerpt = FixExcerpt([]*Node{c}, FixExcerptChars)
 	}
 	if len(failure) > maxFailureBytes {
 		failure = failure[len(failure)-maxFailureBytes:]
@@ -388,10 +413,16 @@ func (g *Graph) AddFix(checkID, failure string) (*Node, error) {
 		}
 	}
 	g.FixSeq = seq
+	desc := "The check failed. Change the code so it passes."
+	if excerpt == "" {
+		desc += " Failure output:\n" + strings.TrimSpace(failure)
+	} else {
+		desc += whatFailed(excerpt) // the excerpt already holds the command tails
+	}
 	f := &Node{
 		ID:            id,
 		Title:         "Fix: " + c.Title,
-		Description:   "The check failed. Change the code so it passes. Failure output:\n" + strings.TrimSpace(failure),
+		Description:   desc,
 		Kind:          KindWork,
 		SuggestedRole: "coder_fixer",
 		DependsOn:     append([]string(nil), c.DependsOn...),
@@ -503,6 +534,7 @@ func (g *Graph) Append(add *Graph, nextID int) (newNext int, idMap map[string]st
 		c.FileStats = append([]FileStat(nil), n.FileStats...)
 		c.Warnings = append([]string(nil), n.Warnings...)
 		c.Skills = append([]string(nil), n.Skills...)
+		c.Activity = append([]runner.Activity(nil), n.Activity...)
 		g.Nodes = append(g.Nodes, &c)
 	}
 	if g.Task == "" {
@@ -656,4 +688,12 @@ func CompactSummary(prev string, folded []*Node) string {
 		}
 	}
 	return out
+}
+
+// whatFailed formats an excerpt as the "What failed:" block of a description.
+func whatFailed(excerpt string) string {
+	if excerpt == "" {
+		return ""
+	}
+	return "\n\nWhat failed:\n" + excerpt
 }

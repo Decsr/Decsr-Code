@@ -1,0 +1,17 @@
+{"type":"thread.started","thread_id":"t1"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"Plan the change"}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","aggregated_output":"a.go\n","exit_code":0,"status":"completed"}}
+not json at all
+{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"go test","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"go test","aggregated_output":"FAIL\n","exit_code":2,"status":"failed"}}
+{"type":"item.completed","item":{"id":"item_3","type":"file_change","changes":[{"path":"a.go","kind":"update"},{"path":"b.go","kind":"add"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"working on it"}}
+{"type":"item.started","item":{"id":"item_5","type":"todo_list","items":[{"text":"one","completed":false},{"text":"two","completed":false}]}}
+{"type":"item.completed","item":{"id":"item_5","type":"todo_list","items":[{"text":"one","completed":true},{"text":"two","completed":false}]}}
+{"type":"item.completed","item":{"id":"item_6","type":"web_search","id2":"x","query":"go slices package"}}
+{"type":"item.completed","item":{"id":"item_7","type":"future_item","x":1}}
+{"type":"error","message":"stream hiccup"}
+{"type":"item.completed","item":{"id":"item_8","type":"agent_message","text":"All done."}}
+{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":0,"output_tokens":50,"reasoning_output_tokens":10}}

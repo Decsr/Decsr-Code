@@ -28,9 +28,13 @@ type Token struct {
 	// Reasoning is display-only chain-of-thought from reasoning models. It is
 	// shown live in the UI but NOT included in the returned/parsed result.
 	Reasoning string
-	Done      bool
-	Error     error
-	Usage     *TokenUsage // non-nil only on the Done token
+	// Activity is a structured item of agent work (thinking, a command, a file
+	// edit, ...). A token carries Text or an Activity, never relied on for both.
+	// An Activity with the same ID as an earlier one replaces it.
+	Activity *Activity
+	Done     bool
+	Error    error
+	Usage    *TokenUsage // non-nil only on the Done token
 }
 
 // CompletionRequest describes what to send to the LLM.

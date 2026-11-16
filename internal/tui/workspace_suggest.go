@@ -16,7 +16,7 @@ const (
 
 	// wsSuggestCompactAt is the number of finished nodes from which /compact
 	// is suggested instead of a review.
-	wsSuggestCompactAt = 6
+	wsSuggestCompactAt = 10
 )
 
 // suggestion is the next prompt worth typing, from the graph and session

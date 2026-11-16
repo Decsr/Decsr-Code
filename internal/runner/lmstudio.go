@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Decsr/Decsr-Code/internal/executil"
 	"github.com/Decsr/Decsr-Code/internal/tokenutil"
@@ -136,6 +137,7 @@ func (r *LMStudioRunner) streamFromReader(reader io.Reader, inputText string, ch
 	contentLen := 0
 	reasoningLen := 0
 	sawChunk := false
+	var think thinkingTracker
 
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
@@ -151,6 +153,7 @@ func (r *LMStudioRunner) streamFromReader(reader io.Reader, inputText string, ch
 
 		var chunk lmStudioChatChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			emitActivity(ch, think.finish(time.Now()))
 			ch <- Token{Error: fmt.Errorf("lmstudio: decode stream chunk: %w", err)}
 			ch <- Token{Done: true}
 			return
@@ -158,6 +161,7 @@ func (r *LMStudioRunner) streamFromReader(reader io.Reader, inputText string, ch
 		sawChunk = true
 		for _, c := range chunk.Choices {
 			if c.Delta.Content != "" {
+				emitActivity(ch, think.finish(time.Now()))
 				ch <- Token{Text: c.Delta.Content}
 				contentLen += len(c.Delta.Content)
 			}
@@ -166,6 +170,7 @@ func (r *LMStudioRunner) streamFromReader(reader io.Reader, inputText string, ch
 			// so the model visibly works, without polluting the parsed result.
 			if c.Delta.Reasoning != "" {
 				ch <- Token{Reasoning: c.Delta.Reasoning}
+				emitActivity(ch, think.add(c.Delta.Reasoning, time.Now()))
 				reasoningLen += len(c.Delta.Reasoning)
 			}
 		}
@@ -178,6 +183,7 @@ func (r *LMStudioRunner) streamFromReader(reader io.Reader, inputText string, ch
 		}
 	}
 
+	emitActivity(ch, think.finish(time.Now()))
 	if err := scanner.Err(); err != nil {
 		ch <- Token{Error: fmt.Errorf("lmstudio: read stream: %w", err)}
 		ch <- Token{Done: true}

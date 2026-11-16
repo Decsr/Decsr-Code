@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Decsr/Decsr-Code/internal/runner"
 )
 
 const testWait = 5 * time.Second
@@ -585,5 +587,25 @@ func TestEngineCopiesFileStats(t *testing.T) {
 	waitEvent(t, e, EventDone, "T1")
 	if got := e.Snapshot().Node("T1").FileStats; !reflect.DeepEqual(got, want) {
 		t.Errorf("FileStats = %+v, want %+v", got, want)
+	}
+}
+
+type activityExec struct{}
+
+func (*activityExec) Run(_ context.Context, _ *Graph, _ *Node, emit func(Event)) (Result, error) {
+	a := runner.Activity{ID: "x1", Kind: runner.ActCommand, State: runner.ActRunning, Title: "go test"}
+	emit(Event{Type: EventActivity, Activity: &a})
+	return Result{Summary: "ok"}, nil
+}
+
+func TestEngineForwardsActivityEvents(t *testing.T) {
+	e := NewEngine(&Graph{Nodes: []*Node{work("T1")}}, &activityExec{}, 3, "")
+	defer e.StopAll()
+	if err := e.Run(context.Background(), "T1"); err != nil {
+		t.Fatal(err)
+	}
+	ev := waitEvent(t, e, EventActivity, "T1")
+	if ev.Activity == nil || ev.Activity.ID != "x1" || ev.Activity.Title != "go test" {
+		t.Errorf("activity event = %+v", ev)
 	}
 }

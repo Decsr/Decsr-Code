@@ -21,6 +21,10 @@ const (
 // defaultMaxAutoFixes is the number of automatic fix nodes per session.
 const defaultMaxAutoFixes = 2
 
+// autoCompactAt is the number of finished work nodes from which /compact runs
+// by itself at level 2 and up.
+const autoCompactAt = 10
+
 const autoUsage = "usage: /autonomy [1|2|3]  (1 manual, 2 assisted, 3 unattended)"
 
 func autonomyName(level int) string {
@@ -209,6 +213,7 @@ func (m workspaceModel) autoAfterEvent(ev workspace.Event) (workspaceModel, tea.
 		}
 		return m, nil
 	}
+	m = m.autoCompact(ev)
 	n := m.g.Node(ev.NodeID)
 	if n == nil || n.Kind != workspace.KindCheck || (ev.Type != workspace.EventDone && ev.Type != workspace.EventFailed) {
 		return m, nil
@@ -227,6 +232,43 @@ func (m workspaceModel) autoAfterEvent(ev workspace.Event) (workspaceModel, tea.
 		return m.autoPR()
 	}
 	return m, nil
+}
+
+// doneWork counts the finished work and fix nodes.
+func doneWork(g *workspace.Graph) int {
+	n := 0
+	for _, x := range g.Nodes {
+		if x.Kind == workspace.KindWork && x.Status == workspace.StatusDone {
+			n++
+		}
+	}
+	return n
+}
+
+// autoCompact folds the finished nodes once their number reaches
+// autoCompactAt, at level 2 and up, when nothing runs. It fires once per
+// crossing: it is armed again when the count drops below the threshold.
+func (m workspaceModel) autoCompact(ev workspace.Event) workspaceModel {
+	if ev.Type != workspace.EventDone && ev.Type != workspace.EventFailed {
+		return m
+	}
+	if doneWork(m.g) < autoCompactAt {
+		m.autoCompactFired = false
+		return m
+	}
+	if m.autoCompactFired || m.running() > 0 || m.splitting || m.autoActive() == autoManual || m.budgetReached() {
+		return m
+	}
+	m.autoCompactFired = true
+	folded, _, err := m.applyCompact()
+	if err != nil {
+		m.autoSay("could not compact: " + oneLine(err.Error()))
+		return m
+	}
+	if folded > 0 {
+		m.autoSay(fmt.Sprintf("compacted %d finished %s", folded, pluralize(folded, "node", "nodes")))
+	}
+	return m
 }
 
 // autoFix adds one fix node for the failed check and runs it, up to

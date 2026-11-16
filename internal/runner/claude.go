@@ -9,6 +9,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/Decsr/Decsr-Code/internal/executil"
 	"github.com/Decsr/Decsr-Code/internal/tokenutil"
@@ -115,6 +116,7 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 	var emitted strings.Builder
 	var finalUsage TokenUsage
 	gotUsage := false
+	acts := newClaudeActivities()
 
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
@@ -138,6 +140,13 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 			// the (otherwise silent) tool phase.
 			for _, note := range toolUseNotices(evt.Message.Content) {
 				ch <- Token{Reasoning: note}
+			}
+			for _, a := range acts.assistant(evt.Message, text, time.Now()) {
+				ch <- Token{Activity: a}
+			}
+		case "user":
+			for _, a := range acts.toolResults(evt.Message.Content, time.Now()) {
+				ch <- Token{Activity: a}
 			}
 		case "result":
 			// The result text is only the last message, so it duplicates
@@ -205,14 +214,26 @@ type claudeStreamEvent struct {
 }
 
 type claudeStreamMessage struct {
+	ID      string                `json:"id"`
 	Content []claudeStreamContent `json:"content"`
 }
 
+// claudeStreamContent is one content block. The block types and fields follow
+// the Anthropic Messages API as surfaced by Claude Code's stream-json output;
+// the types are documented in anthropics/claude-agent-sdk-python,
+// src/claude_agent_sdk/types.py (TextBlock, ThinkingBlock, ToolUseBlock,
+// ToolResultBlock) and _internal/message_parser.py (assistant and user
+// messages, is_error on tool_result).
 type claudeStreamContent struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text"`
-	Name  string          `json:"name"`  // tool name when Type == "tool_use"
-	Input json.RawMessage `json:"input"` // tool input when Type == "tool_use"
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	Thinking  string          `json:"thinking"`    // Type == "thinking"
+	ID        string          `json:"id"`          // tool call ID when Type == "tool_use"
+	Name      string          `json:"name"`        // tool name when Type == "tool_use"
+	Input     json.RawMessage `json:"input"`       // tool input when Type == "tool_use"
+	ToolUseID string          `json:"tool_use_id"` // Type == "tool_result"
+	IsError   bool            `json:"is_error"`    // Type == "tool_result"
+	Content   json.RawMessage `json:"content"`     // Type == "tool_result": string or [{type:text,text}]
 }
 
 type claudeStreamUsageFields struct {
@@ -351,4 +372,111 @@ func parseClaudeJSONResponse(raw []byte) (text string, usage TokenUsage, err err
 		Estimated:    false,
 	}
 	return text, usage, nil
+}
+
+// claudeActivities turns Claude content blocks into Activities and remembers
+// the tool calls that still wait for their result.
+type claudeActivities struct {
+	pending map[string]Activity // tool_use id -> the running Activity
+	msgIDs  map[string]string   // message id -> ID of its message Activity
+}
+
+func newClaudeActivities() *claudeActivities {
+	return &claudeActivities{pending: map[string]Activity{}, msgIDs: map[string]string{}}
+}
+
+// assistant returns the Activities of an assistant event: one per thinking
+// block, one for the prose (updated in place while the message grows) and one
+// running item per tool_use block.
+func (c *claudeActivities) assistant(msg claudeStreamMessage, text string, now time.Time) []*Activity {
+	var out []*Activity
+	for _, b := range msg.Content {
+		switch b.Type {
+		case "thinking":
+			if b.Thinking == "" {
+				continue
+			}
+			n := len([]rune(b.Thinking))
+			out = append(out, &Activity{
+				ID: newActivityID("think"), Kind: ActThinking, State: ActDone,
+				Title: fmt.Sprintf("Thinking (%d chars)", n), Detail: Clip(b.Thinking, thinkingExcerpt), At: now,
+			})
+		case "tool_use":
+			if b.Name == "" {
+				continue
+			}
+			ti := classifyTool(b.Name, b.Input)
+			a := Activity{ID: b.ID, Kind: ti.Kind, State: ActRunning, Title: ti.Title, Detail: ti.Detail,
+				Added: ti.Added, Removed: ti.Removed, At: now}
+			if a.ID == "" {
+				a.ID = newActivityID("tool")
+			}
+			if a.Title == "" {
+				a.Title = oneLine(b.Name)
+			}
+			c.pending[a.ID] = a
+			cp := a
+			out = append(out, &cp)
+		}
+	}
+	if strings.TrimSpace(text) != "" {
+		id := c.msgIDs[msg.ID]
+		if id == "" {
+			id = newActivityID("msg")
+			if msg.ID != "" {
+				c.msgIDs[msg.ID] = id
+			}
+		}
+		out = append([]*Activity{{
+			ID: id, Kind: ActMessage, State: ActDone, Title: oneLine(text), Detail: Clip(text, maxActivityDetail), At: now,
+		}}, out...)
+	}
+	return out
+}
+
+// toolResults completes the pending tool calls named by tool_result blocks of
+// a user event. Results of unknown calls are ignored.
+func (c *claudeActivities) toolResults(content []claudeStreamContent, now time.Time) []*Activity {
+	var out []*Activity
+	for _, b := range content {
+		if b.Type != "tool_result" {
+			continue
+		}
+		a, ok := c.pending[b.ToolUseID]
+		if !ok {
+			continue
+		}
+		delete(c.pending, b.ToolUseID)
+		a.State = ActDone
+		if b.IsError {
+			a.State = ActFailed
+		}
+		a.Detail = Clip(claudeResultText(b.Content), maxActivityDetail)
+		a.Duration = now.Sub(a.At)
+		a.At = now
+		out = append(out, &a)
+	}
+	return out
+}
+
+// claudeResultText flattens a tool_result content value, which is either a
+// string or a list of {type:"text", text} blocks.
+func claudeResultText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var blocks []struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &blocks) != nil {
+		return ""
+	}
+	var parts []string
+	for _, b := range blocks {
+		if b.Text != "" {
+			parts = append(parts, b.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }

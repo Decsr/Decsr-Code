@@ -9,6 +9,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/tokenutil"
 )
 
 type workerFake struct {
@@ -234,5 +235,44 @@ func TestRunWorkerPlaceholderInRoleNotSubstituted(t *testing.T) {
 	}
 	if strings.Count(p, "REALTASK") != 1 {
 		t.Errorf("task appears %d times", strings.Count(p, "REALTASK"))
+	}
+}
+
+func TestRunWorkerReportsContextOnce(t *testing.T) {
+	f := &workerFake{chunks: []string{"done\n===SUMMARY===\nok\n"}}
+	var calls []int
+	_, err := RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(),
+		WorkerRequest{Title: "T", Description: "do it", Context: "CTX", ReadOnly: true, OnContext: func(n int) { calls = append(calls, n) }}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := tokenutil.EstimateTokens(f.got.SystemPrompt) + tokenutil.EstimateTokens(f.got.Messages[0].Content)
+	if len(calls) != 1 || calls[0] != want || want == 0 {
+		t.Errorf("OnContext calls = %v, want one call with %d", calls, want)
+	}
+}
+
+// reasoningFake streams display-only reasoning (tool-use notices, heartbeats)
+// next to the real text.
+type reasoningFake struct{}
+
+func (reasoningFake) Complete(context.Context, runner.CompletionRequest) (<-chan runner.Token, error) {
+	ch := make(chan runner.Token, 4)
+	ch <- runner.Token{Reasoning: "⚙ Read main.go\n"}
+	ch <- runner.Token{Text: "done"}
+	ch <- runner.Token{Reasoning: "⏳ still working… (30s)\n"}
+	ch <- runner.Token{Done: true}
+	close(ch)
+	return ch, nil
+}
+
+func TestRunWorkerDoesNotStreamReasoningNotices(t *testing.T) {
+	var got strings.Builder
+	res, err := RunWorker(context.Background(), reasoningFake{}, t.TempDir(), config.DefaultConfig(), WorkerRequest{Title: "x", ReadOnly: true}, func(s string) { got.WriteString(s) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != "done" || res.Output != "done" {
+		t.Errorf("streamed %q, output %q: reasoning notices must stay out of the node output", got.String(), res.Output)
 	}
 }

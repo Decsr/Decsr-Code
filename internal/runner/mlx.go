@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Decsr/Decsr-Code/internal/tokenutil"
 )
@@ -173,6 +174,7 @@ func (r *MLXRunner) streamSSE(reader io.Reader, inputText string, ch chan<- Toke
 	var usage *TokenUsage
 	reasoningLen := 0
 	sawChunk := false
+	var think thinkingTracker
 
 	decided := false   // whether streaming-vs-buffer has been chosen
 	streaming := false // true once we know the reply is plain text (emit live)
@@ -191,6 +193,7 @@ func (r *MLXRunner) streamSSE(reader io.Reader, inputText string, ch chan<- Toke
 
 		var chunk mlxChatChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			emitActivity(ch, think.finish(time.Now()))
 			ch <- Token{Error: fmt.Errorf("omlx: decode stream chunk: %w", err)}
 			ch <- Token{Done: true}
 			return
@@ -198,6 +201,7 @@ func (r *MLXRunner) streamSSE(reader io.Reader, inputText string, ch chan<- Toke
 		sawChunk = true
 		for _, c := range chunk.Choices {
 			if c.Delta.Content != "" {
+				emitActivity(ch, think.finish(time.Now()))
 				buf.WriteString(c.Delta.Content)
 				if !decided {
 					// Wait for the first non-whitespace character before
@@ -216,6 +220,7 @@ func (r *MLXRunner) streamSSE(reader io.Reader, inputText string, ch chan<- Toke
 				}
 			}
 			reasoningLen += len(c.Delta.Reasoning)
+			emitActivity(ch, think.add(c.Delta.Reasoning, time.Now()))
 		}
 		if chunk.Usage != nil {
 			usage = &TokenUsage{
@@ -226,6 +231,7 @@ func (r *MLXRunner) streamSSE(reader io.Reader, inputText string, ch chan<- Toke
 		}
 	}
 
+	emitActivity(ch, think.finish(time.Now()))
 	// In buffer mode (or when nothing was decided), unwrap a possible JSON
 	// envelope; in streaming mode the text was already emitted verbatim.
 	output := buf.String()

@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/Decsr/Decsr-Code/internal/executil"
-	"github.com/Decsr/Decsr-Code/internal/tokenutil"
 )
 
 // OpenCodeRunner executes the OpenCode CLI in non-interactive mode as an LLM backend.
@@ -37,23 +37,38 @@ func (r OpenCodeRunner) Complete(ctx context.Context, req CompletionRequest) (<-
 		model = r.Model
 	}
 
-	rawBytes, err := r.runRaw(ctx, sb.String(), model, NormalizeEffort(req.Effort), req.Dir)
-	if err != nil {
-		return nil, err
-	}
-
-	text, usage := extractOpenCodeResponseWithUsage(rawBytes, sb.String())
-
-	ch := make(chan Token, 2)
+	ch := make(chan Token, 16)
 	go func() {
-		ch <- Token{Text: text}
+		defer close(ch)
+		prompt := sb.String()
+		parser := newOpenCodeParser()
+		raw, err := r.runStream(ctx, prompt, model, NormalizeEffort(req.Effort), req.Dir, func(line []byte) {
+			for _, tok := range parser.feed(line) {
+				ch <- tok
+			}
+		})
+		if err != nil {
+			ch <- Token{Error: err}
+			ch <- Token{Done: true}
+			return
+		}
+		text, usage := parser.finish(raw, prompt)
+		if !parser.sawText && text != "" {
+			ch <- Token{Text: text}
+		}
 		ch <- Token{Done: true, Usage: &usage}
-		close(ch)
 	}()
 	return ch, nil
 }
 
+// runRaw runs opencode to completion and returns its whole stdout.
 func (r OpenCodeRunner) runRaw(ctx context.Context, prompt, model, effort, dir string) ([]byte, error) {
+	return r.runStream(ctx, prompt, model, effort, dir, nil)
+}
+
+// runStream runs opencode and calls onLine for every stdout line as soon as it
+// is written. It returns the whole stdout once the process has exited.
+func (r OpenCodeRunner) runStream(ctx context.Context, prompt, model, effort, dir string, onLine func([]byte)) ([]byte, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "opencode"
@@ -85,11 +100,34 @@ func (r OpenCodeRunner) runRaw(ctx context.Context, prompt, model, effort, dir s
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(prompt)
 
-	var out, stderr bytes.Buffer
-	cmd.Stdout = &out
+	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("opencode: stdout pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("opencode: %w", err)
+	}
 
-	if err := cmd.Run(); err != nil {
+	var out bytes.Buffer
+	br := bufio.NewReader(stdout)
+	for {
+		line, readErr := br.ReadBytes('\n')
+		if len(line) > 0 {
+			out.Write(line)
+			if onLine != nil {
+				if t := bytes.TrimSpace(line); len(t) > 0 {
+					onLine(t)
+				}
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+
+	if err := cmd.Wait(); err != nil {
 		stderrStr := strings.TrimSpace(stderr.String())
 		if rl := ClassifyRateLimit("opencode", stderrStr, out.String()); rl != nil {
 			return nil, rl
@@ -133,61 +171,13 @@ func openCodeErrorFragments(data []byte) []string {
 // Otherwise estimates both input and output tokens from text length so local
 // models (run via opencode) still report usage in the monitor instead of zero.
 func extractOpenCodeResponseWithUsage(data []byte, inputText string) (string, TokenUsage) {
-	var sb strings.Builder
-	var foundUsage bool
-	var usage TokenUsage
-
+	p := newOpenCodeParser()
 	for _, line := range bytes.Split(data, []byte("\n")) {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-
-		var event struct {
-			Type string `json:"type"`
-			Part struct {
-				Text string `json:"text"`
-			} `json:"part"`
-			Usage *struct {
-				InputTokens  int `json:"input_tokens"`
-				OutputTokens int `json:"output_tokens"`
-			} `json:"usage"`
-		}
-		if err := json.Unmarshal(line, &event); err != nil {
-			continue
-		}
-
-		switch event.Type {
-		case "text":
-			if event.Part.Text != "" {
-				sb.WriteString(event.Part.Text)
-			}
-		case "usage":
-			if event.Usage != nil {
-				usage = TokenUsage{
-					InputTokens:  event.Usage.InputTokens,
-					OutputTokens: event.Usage.OutputTokens,
-					Estimated:    false,
-				}
-				foundUsage = true
-			}
+		if line = bytes.TrimSpace(line); len(line) > 0 {
+			p.feed(line)
 		}
 	}
-
-	text := sb.String()
-	if text == "" {
-		text = strings.TrimSpace(string(data))
-	}
-
-	if !foundUsage {
-		usage = TokenUsage{
-			InputTokens:  tokenutil.EstimateTokens(inputText),
-			OutputTokens: tokenutil.EstimateTokens(text),
-			Estimated:    true,
-		}
-	}
-
-	return text, usage
+	return p.finish(data, inputText)
 }
 
 // OpenCodeAvailableModels is a fallback list used when the CLI is unavailable.

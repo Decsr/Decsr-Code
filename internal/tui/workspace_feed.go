@@ -339,7 +339,8 @@ func cardBody(o cardOpts, iw int) []string {
 		}
 	}
 	check := n.Kind == workspace.KindCheck
-	hasOut := len(o.out) > 0
+	hasAct := len(n.Activity) > 0
+	hasOut := len(o.out) > 0 || hasAct
 	arrow := ""
 	if hasOut {
 		arrow = " ›"
@@ -354,12 +355,24 @@ func cardBody(o cardOpts, iw int) []string {
 		if sp == "" {
 			sp = "▖"
 		}
-		rows = append(rows, lipgloss.NewStyle().Foreground(colAccent).Render(sp)+" "+text.Render("Working for "+feedDuration(o.now.Sub(n.StartedAt)))+dim.Render(arrow))
-		if check {
+		work := text.Render("Working for "+feedDuration(o.now.Sub(n.StartedAt))) + dim.Render(cardMeta(n))
+		if s := stallText(n, o.now); s != "" {
+			work += dim.Render(" · ") + lipgloss.NewStyle().Foreground(colWarn).Render(s)
+		}
+		rows = append(rows, lipgloss.NewStyle().Foreground(colAccent).Render(sp)+" "+work+dim.Render(arrow))
+		if check && !hasAct {
 			cmds()
 		}
-		if last := lastNonEmpty(o.out); last != "" {
-			rows = append(rows, dim.Render(truncateOneLine(cleanOutputLine(last), iw)))
+		switch {
+		case hasAct && !o.expanded:
+			from := max(len(n.Activity)-cardActivityRows, 0)
+			for _, a := range n.Activity[from:] {
+				rows = append(rows, activityLine(a, o.now, iw))
+			}
+		case !hasAct:
+			if last := lastNonEmpty(o.out); last != "" {
+				rows = append(rows, dim.Render(truncateOneLine(cleanOutputLine(last), iw)))
+			}
 		}
 	case workspace.StatusDone:
 		word := "Worked for "
@@ -371,10 +384,10 @@ func cardBody(o cardOpts, iw int) []string {
 			line = word + feedDuration(d)
 		}
 		if check {
-			rows = append(rows, lipgloss.NewStyle().Foreground(colOK).Render(line)+dim.Render(arrow))
+			rows = append(rows, lipgloss.NewStyle().Foreground(colOK).Render(line)+dim.Render(cardMeta(n)+arrow))
 			cmds()
 		} else {
-			rows = append(rows, dim.Render(line+arrow))
+			rows = append(rows, dim.Render(line+cardMeta(n)+arrow))
 			rows = append(rows, summaryRows(n.Summary, iw)...)
 			rows = append(rows, cardFiles(n, iw)...)
 			if hasDiff(n) {
@@ -396,7 +409,7 @@ func cardBody(o cardOpts, iw int) []string {
 		if d := took(); d >= 0 {
 			line = word + feedDuration(d)
 		}
-		rows = append(rows, fail.Render(line)+dim.Render(arrow))
+		rows = append(rows, fail.Render(line)+dim.Render(cardMeta(n)+arrow))
 		if n.Error != "" && n.Error != "stopped" {
 			errLines := hardWrap(workspace.SanitizeText(n.Error), iw)
 			for i, l := range errLines {
@@ -420,7 +433,9 @@ func cardBody(o cardOpts, iw int) []string {
 	if len(n.Warnings) > 0 && n.Status != workspace.StatusRunning {
 		rows = append(rows, dim.Render("⚠ "+fmt.Sprintf("%d %s", len(n.Warnings), pluralize(len(n.Warnings), "warning", "warnings"))))
 	}
-	if o.expanded {
+	if o.expanded && hasAct {
+		rows = append(rows, activityTimelineRows(n, o.now, iw)...)
+	} else if o.expanded {
 		rows = append(rows, dim.Render(strings.Repeat("─", min(iw, 24))))
 		if !hasOut {
 			rows = append(rows, dim.Render("(no output kept)"))

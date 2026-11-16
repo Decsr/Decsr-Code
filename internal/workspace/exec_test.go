@@ -12,6 +12,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/tokenutil"
 )
 
 type execFake struct {
@@ -633,6 +634,145 @@ func TestRolesCarryUserSkills(t *testing.T) {
 		r, ok := FindRole(cfg, name)
 		if !ok || len(r.UserSkills) != 1 {
 			t.Errorf("%s: %+v", name, r)
+		}
+	}
+}
+
+func activitiesOf(evs []Event) []runner.Activity {
+	var out []runner.Activity
+	for _, e := range evs {
+		if e.Type == EventActivity && e.Activity != nil {
+			out = append(out, *e.Activity)
+		}
+	}
+	return out
+}
+
+func TestExecCheckCommandActivities(t *testing.T) {
+	ex := newTestExec(t, config.DefaultConfig(), nil, nil)
+	g, n := checkNode("true", "sh -c 'echo boom; exit 3'", "echo never")
+	var evs []Event
+	if _, err := ex.Run(context.Background(), g, n, collect(&evs)); err == nil {
+		t.Fatal("want error")
+	}
+	acts := activitiesOf(evs)
+	if len(acts) != 4 {
+		t.Fatalf("want 4 activities (running+done, running+failed), got %+v", acts)
+	}
+	for _, a := range acts {
+		if a.Kind != runner.ActCommand {
+			t.Errorf("kind = %q", a.Kind)
+		}
+	}
+	if acts[0].ID != acts[1].ID || acts[2].ID != acts[3].ID || acts[0].ID == acts[2].ID {
+		t.Errorf("IDs must pair running with its result: %q %q %q %q", acts[0].ID, acts[1].ID, acts[2].ID, acts[3].ID)
+	}
+	if acts[0].State != runner.ActRunning || acts[0].Title != "true" || acts[0].ExitCode != nil {
+		t.Errorf("first = %+v", acts[0])
+	}
+	if acts[1].State != runner.ActDone || acts[1].ExitCode == nil || *acts[1].ExitCode != 0 {
+		t.Errorf("second = %+v", acts[1])
+	}
+	if acts[3].State != runner.ActFailed || acts[3].ExitCode == nil || *acts[3].ExitCode != 3 || !strings.Contains(acts[3].Detail, "boom") {
+		t.Errorf("fourth = %+v", acts[3])
+	}
+	if acts[1].Duration <= 0 || acts[3].Duration <= 0 {
+		t.Errorf("durations = %v %v", acts[1].Duration, acts[3].Duration)
+	}
+	// The existing output events are unchanged and still come first.
+	if evs[0].Type != EventOutput || evs[0].Text != "$ true\n" {
+		t.Errorf("first event = %+v", evs[0])
+	}
+	for _, e := range evs {
+		if e.NodeID != "CHECK" {
+			t.Errorf("event without node ID: %+v", e)
+		}
+	}
+}
+
+type activityFake struct{}
+
+func (activityFake) Complete(_ context.Context, _ runner.CompletionRequest) (<-chan runner.Token, error) {
+	ch := make(chan runner.Token, 4)
+	ch <- runner.Token{Activity: &runner.Activity{ID: "t1", Kind: runner.ActThinking, State: runner.ActDone, Title: "Thinking"}}
+	ch <- runner.Token{Text: "**a.txt**\n```\nhello\n```\n===SUMMARY===\nok\n"}
+	ch <- runner.Token{Done: true}
+	close(ch)
+	return ch, nil
+}
+
+func TestExecWorkEmitsActivityEvents(t *testing.T) {
+	cfg := config.DefaultConfig()
+	ex := newTestExec(t, cfg, nil, nil)
+	ex.newRunner = func(config.AgentConfig) (runner.LLMRunner, error) { return activityFake{}, nil }
+	g := &Graph{Nodes: []*Node{{ID: "T1", Title: "Do", Kind: KindWork, Role: "coder"}}}
+	var evs []Event
+	if _, err := ex.Run(context.Background(), g, g.Nodes[0], collect(&evs)); err != nil {
+		t.Fatal(err)
+	}
+	acts := activitiesOf(evs)
+	var kinds []string
+	for _, a := range acts {
+		kinds = append(kinds, fmt.Sprintf("%s/%s", a.Kind, a.State))
+	}
+	want := "thinking/done write/running write/done"
+	if strings.Join(kinds, " ") != want {
+		t.Errorf("activities = %v, want %s", kinds, want)
+	}
+	if acts[2].Added != 1 || acts[2].Title != "a.txt" {
+		t.Errorf("write = %+v", acts[2])
+	}
+	for _, e := range evs {
+		if e.Type == EventActivity && e.NodeID != "T1" {
+			t.Errorf("activity event without node ID: %+v", e)
+		}
+	}
+}
+
+func TestExecWorkEmitsContext(t *testing.T) {
+	cfg := config.DefaultConfig()
+	ac := cfg.Agents["coder"]
+	ac.MaxContextTokens = 32000
+	cfg.Agents["coder"] = ac
+	f := &execFake{text: "done\n===SUMMARY===\nok"}
+	ex := newTestExec(t, cfg, f, nil)
+	g := &Graph{Nodes: []*Node{{ID: "T1", Title: "Do", Description: "thing", Kind: KindWork, Role: "coder"}}}
+	var evs []Event
+	if _, err := ex.Run(context.Background(), g, g.Nodes[0], collect(&evs)); err != nil {
+		t.Fatal(err)
+	}
+	var ctxEvs []Event
+	for _, e := range evs {
+		if e.Type == EventContext {
+			ctxEvs = append(ctxEvs, e)
+		}
+	}
+	if len(ctxEvs) != 1 {
+		t.Fatalf("context events = %d", len(ctxEvs))
+	}
+	req := f.reqs[0]
+	want := tokenutil.EstimateTokens(req.SystemPrompt)
+	for _, m := range req.Messages {
+		want += tokenutil.EstimateTokens(m.Content)
+	}
+	if ctxEvs[0].ContextTokens != want || want == 0 || ctxEvs[0].ContextLimit != 32000 || ctxEvs[0].NodeID != "T1" {
+		t.Errorf("event = %+v, want tokens %d limit 32000", ctxEvs[0], want)
+	}
+	if evs[0].Type != EventContext {
+		t.Errorf("first event = %s, want context before the run output", evs[0].Type)
+	}
+}
+
+func TestExecCheckEmitsNoContext(t *testing.T) {
+	ex := &executor{root: t.TempDir(), cfg: config.DefaultConfig()}
+	g := &Graph{Nodes: []*Node{{ID: "CHECK", Kind: KindCheck, Commands: []string{"true"}}}}
+	var evs []Event
+	if _, err := ex.Run(context.Background(), g, g.Nodes[0], collect(&evs)); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range evs {
+		if e.Type == EventContext {
+			t.Errorf("unexpected context event %+v", e)
 		}
 	}
 }

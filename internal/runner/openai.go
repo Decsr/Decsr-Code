@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Decsr/Decsr-Code/internal/credentials"
 	"github.com/Decsr/Decsr-Code/internal/tokenutil"
@@ -138,6 +139,7 @@ func (r *OpenAIRunner) streamFromReader(reader io.Reader, inputText string, ch c
 	var usage *TokenUsage
 	contentLen := 0
 	reasoningLen := 0
+	var think thinkingTracker
 
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
@@ -153,17 +155,20 @@ func (r *OpenAIRunner) streamFromReader(reader io.Reader, inputText string, ch c
 
 		var chunk openAIChatChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			emitActivity(ch, think.finish(time.Now()))
 			ch <- Token{Error: fmt.Errorf("%s: decode stream chunk: %w", r.Provider, err)}
 			ch <- Token{Done: true}
 			return
 		}
 		for _, c := range chunk.Choices {
 			if c.Delta.Content != "" {
+				emitActivity(ch, think.finish(time.Now()))
 				ch <- Token{Text: c.Delta.Content}
 				contentLen += len(c.Delta.Content)
 			}
 			if c.Delta.Reasoning != "" {
 				ch <- Token{Reasoning: c.Delta.Reasoning}
+				emitActivity(ch, think.add(c.Delta.Reasoning, time.Now()))
 				reasoningLen += len(c.Delta.Reasoning)
 			}
 		}
@@ -175,6 +180,7 @@ func (r *OpenAIRunner) streamFromReader(reader io.Reader, inputText string, ch c
 		}
 	}
 
+	emitActivity(ch, think.finish(time.Now()))
 	if err := scanner.Err(); err != nil {
 		ch <- Token{Error: fmt.Errorf("%s: read stream: %w", r.Provider, err)}
 		ch <- Token{Done: true}

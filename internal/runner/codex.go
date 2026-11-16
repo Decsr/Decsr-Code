@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tiktoken "github.com/pkoukk/tiktoken-go"
 
@@ -135,7 +137,7 @@ func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPr
 		fullPrompt = systemPrompt + "\n\n" + prompt
 	}
 
-	args := []string{"exec", "--full-auto"}
+	args := []string{"exec", "--full-auto", "--json"}
 	if model != "" {
 		args = append(args, "--model", model)
 	}
@@ -160,19 +162,21 @@ func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPr
 	return cmd, stdout, stderr, nil
 }
 
-// streamCodexOutput forwards stdout chunks as Token deltas while the CLI runs,
-// then emits a final Done token with token usage computed from the full output.
+// streamCodexOutput reads the JSONL event stream of `codex exec --json` while
+// the CLI runs, emits an Activity per item, and delivers the last agent message
+// (what plain `codex exec` prints) as Text when the stream ends. The final
+// Done token carries the usage reported by turn.completed.
 func streamCodexOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffer, model, fullInput string, ch chan<- Token) {
 	defer close(ch)
 
-	var collected strings.Builder
-	buf := make([]byte, 4096)
+	p := newCodexParser()
+	br := bufio.NewReader(stdout)
 	for {
-		n, readErr := stdout.Read(buf)
-		if n > 0 {
-			chunk := string(buf[:n])
-			collected.WriteString(chunk)
-			ch <- Token{Text: chunk}
+		line, readErr := br.ReadBytes('\n')
+		if t := bytes.TrimSpace(line); len(t) > 0 {
+			for _, a := range p.feed(t, time.Now()) {
+				ch <- Token{Activity: a}
+			}
 		}
 		if readErr != nil {
 			break
@@ -180,11 +184,14 @@ func streamCodexOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffer
 	}
 
 	waitErr := cmd.Wait()
-	output := collected.String()
+	output := p.text()
 	// A non-zero exit with a rate-limit stderr is a failure even if partial
 	// output was streamed first.
 	if waitErr != nil && (strings.TrimSpace(output) == "" || ClassifyRateLimit("codex", stderr.String()) != nil) {
 		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg == "" {
+			errMsg = strings.Join(p.errorMsgs, "; ")
+		}
 		if errMsg == "" {
 			errMsg = waitErr.Error()
 		}
@@ -196,7 +203,14 @@ func streamCodexOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffer
 		return
 	}
 
+	if output != "" {
+		ch <- Token{Text: output}
+	}
 	usage := countCodexTokens(model, fullInput, output)
+	if p.gotUsage {
+		usage = p.usage
+		usage.Estimated = false
+	}
 	ch <- Token{Done: true, Usage: &usage}
 }
 

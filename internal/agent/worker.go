@@ -10,6 +10,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/prompts"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/tokenutil"
 )
 
 // WorkerRequest is one workspace sub-task for a generic worker.
@@ -20,6 +21,13 @@ type WorkerRequest struct {
 	Title, Description string
 	Context            string // project context + dependency summaries + current files
 	ReadOnly           bool   // report only: file blocks are never written
+	// OnActivity, when set, receives the runner's activity (thinking, tools,
+	// commands) and the file blocks the worker writes. Nil-safe.
+	OnActivity func(runner.Activity)
+	// OnContext, when set, is called once before the runner starts with the
+	// estimated token count of the full prompt (system prompt and messages).
+	// Nil-safe.
+	OnContext func(tokens int)
 }
 
 // WorkerResult is what a worker produced.
@@ -65,20 +73,37 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		"{{CONTEXT}}", req.Context,
 	).Replace(prompts.MustLoad("ws-worker"))
 
+	msgs := []runner.ConvMessage{{Role: "user", Content: task}}
+	if req.OnContext != nil {
+		total := tokenutil.EstimateTokens(sys)
+		for _, m := range msgs {
+			total += tokenutil.EstimateTokens(m.Content)
+		}
+		req.OnContext(total)
+	}
 	ch, err := r.Complete(ctx, runner.CompletionRequest{
 		SystemPrompt: sys,
 		Skills:       req.Skills,
 		Model:        req.Model,
 		Dir:          root,
-		Messages:     []runner.ConvMessage{{Role: "user", Content: task}},
+		Messages:     msgs,
 	})
 	if err != nil {
 		return res, fmt.Errorf("worker: runner: %w", err)
 	}
 	var sb strings.Builder
+	writes := newWriteTracker(root, req.OnActivity)
+	watch := &blockWatcher{}
+	if !req.ReadOnly {
+		watch.onStart = writes.begin
+	}
 	for tok := range ch {
 		if tok.Error != nil {
+			writes.finish()
 			return res, fmt.Errorf("worker: stream: %w", tok.Error)
+		}
+		if tok.Activity != nil && req.OnActivity != nil {
+			req.OnActivity(*tok.Activity)
 		}
 		// Usage snapshots from streaming runners are cumulative: keep the latest.
 		if tok.Usage != nil {
@@ -86,6 +111,9 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		}
 		if tok.Text != "" {
 			sb.WriteString(tok.Text)
+			if req.OnActivity != nil && !req.ReadOnly {
+				watch.feed(tok.Text)
+			}
 			if onToken != nil {
 				onToken(tok.Text)
 			}
@@ -95,15 +123,18 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		}
 	}
 	if err := ctx.Err(); err != nil {
+		writes.finish()
 		return res, err
 	}
 	res.Output = sb.String()
 	if strings.TrimSpace(res.Output) == "" {
+		writes.finish()
 		return res, errors.New("worker: empty response")
 	}
 
 	res.Summary = workerSummary(res.Output)
 	if req.ReadOnly {
+		writes.finish()
 		return res, nil
 	}
 	// Only blocks with an explicit path are written: a path guessed from the
@@ -117,7 +148,9 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 	}
 	var firstErr error
 	for _, b := range blocks {
-		err := writeProjectFile(root, b.Path, b.Content, true, cfg.Project.Scope)
+		err := writes.write(b.Path, b.Content, func() error {
+			return writeProjectFile(root, b.Path, b.Content, true, cfg.Project.Scope)
+		})
 		if err != nil && !errors.Is(err, errNoOpRewrite) {
 			res.Skipped = append(res.Skipped, b.Path+": "+skipReason(err))
 			if firstErr == nil {
@@ -128,6 +161,7 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		// A no-op rewrite counts as written.
 		res.Files = append(res.Files, b.Path)
 	}
+	writes.finish()
 	res.Files = dedupePaths(res.Files)
 	res.Skipped = dedupePaths(res.Skipped)
 	if len(blocks) > 0 && len(res.Files) == 0 && firstErr != nil {
