@@ -10,6 +10,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/bus"
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // ControlModel renders the local control surface for tmux-backed runs.
@@ -238,7 +239,7 @@ func (m ControlModel) View() string {
 	}
 
 	convLabel := lipgloss.NewStyle().
-		Foreground(crt.dim).
+		Foreground(ui.Muted).
 		Render("  CONVERSATION")
 
 	parts := []string{
@@ -248,7 +249,7 @@ func (m ControlModel) View() string {
 		m.conv.View(),
 	}
 	if m.gateMsg != "" {
-		banner := styleGateBanner.Width(m.width - 2).
+		banner := classicGateBanner.Width(m.width - 2).
 			Render("⏸  " + m.gateMsg + "   ·   press Ctrl+A to approve")
 		parts = append(parts, banner)
 	}
@@ -257,12 +258,12 @@ func (m ControlModel) View() string {
 	mainView := strings.Join(parts, "\n")
 
 	if m.confirmQuit {
-		dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-		warnStyle := lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
-		brightStyle := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
+		dimStyle := lipgloss.NewStyle().Foreground(ui.Muted)
+		warnStyle := lipgloss.NewStyle().Foreground(ui.Fail).Bold(true)
+		brightStyle := lipgloss.NewStyle().Foreground(ui.Text).Bold(true)
 		confirmBox := lipgloss.NewStyle().
-			Border(pixelBorder).
-			BorderForeground(crt.warn).
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(ui.Fail).
 			Padding(1, 3).
 			Render(
 				warnStyle.Render("  QUIT DECSR?") + "\n\n" +
@@ -289,15 +290,12 @@ func (m *ControlModel) layout() {
 
 // renderPhaseBar renders a one-line pipeline progress indicator with planning sub-stages.
 func (m ControlModel) renderPhaseBar() string {
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	sepStyle := lipgloss.NewStyle().Foreground(crt.muted)
-	doneStyle := lipgloss.NewStyle().Foreground(crt.success).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(ui.Muted)
+	sepStyle := lipgloss.NewStyle().Foreground(ui.Border)
+	doneStyle := lipgloss.NewStyle().Foreground(ui.OK).Bold(true)
 
 	phaseActiveStyle := func(label string) lipgloss.Style {
-		if c, ok := pipelineColors[label]; ok {
-			return lipgloss.NewStyle().Foreground(c).Bold(true)
-		}
-		return lipgloss.NewStyle().Foreground(crt.primary).Bold(true)
+		return lipgloss.NewStyle().Foreground(classicPhaseColor(label)).Bold(true)
 	}
 
 	var parts []string
@@ -344,22 +342,22 @@ func (m ControlModel) renderAgentSummary() string {
 }
 
 func renderAgentPill(role bus.AgentRole, state AgentState) string {
-	color := roleColor(string(role))
+	color := classicRoleColor(string(role))
 	roleText := lipgloss.NewStyle().Foreground(color).Bold(true).Render(strings.ToUpper(string(role)))
 	var stateText string
 	switch state {
 	case AgentRunning:
-		stateText = styleRunning.Render("RUNNING")
+		stateText = classicRunning.Render("RUNNING")
 	case AgentFixing:
-		stateText = styleFixing.Render("FIXING")
+		stateText = classicFixing.Render("FIXING")
 	case AgentDone:
-		stateText = styleDone.Render("DONE")
+		stateText = classicDone.Render("DONE")
 	case AgentError:
-		stateText = styleError.Render("ERROR")
+		stateText = classicError.Render("ERROR")
 	case AgentGate:
-		stateText = styleGate.Render("GATE")
+		stateText = classicGate.Render("GATE")
 	default:
-		stateText = styleWaiting.Render("WAITING")
+		stateText = classicWaiting.Render("WAITING")
 	}
 	return roleText + " " + stateText
 }

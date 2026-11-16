@@ -17,9 +17,9 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/artifacts"
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/credentials"
-	"github.com/Decsr/Decsr-Code/internal/lang"
 	"github.com/Decsr/Decsr-Code/internal/prompts"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // ── provider ─────────────────────────────────────────────────────────────────
@@ -132,6 +132,8 @@ type agentSetupOverride struct {
 	baseURL  string // base_url override of a preset
 	model    string
 	effort   string
+	mode     string // workspace mode: "" = runner default, text or agent
+	modeSet  bool   // mode is authoritative; false keeps the saved mode as it is
 }
 
 // ── messages ──────────────────────────────────────────────────────────────────
@@ -312,7 +314,9 @@ type SetupModel struct {
 	agentOverrides map[string]agentSetupOverride
 	agentCursor    int
 	agentEditing   bool
-	agentEditStep  int          // 0 = runner, 1 = model, 2 = effort
+	agentField     int          // focused field of the agent editor: runner, model, effort, mode
+	agentEditMode  string       // mode being edited: "", text or agent
+	agentEditErr   string       // why the editor refused to save
 	agentEditProv  providerKind // provider being edited for current agent
 	agentEditIdx   int          // model index within the editing provider
 
@@ -338,7 +342,9 @@ type SetupModel struct {
 	spinner  spinner.Model
 	viewport viewport.Model
 	ready    bool
-	scrollX  int // horizontal scroll offset
+
+	// info is the read-only project data shown next to the editable fields.
+	info projectInfo
 
 	promptStatus string // status message after prompt export
 
@@ -361,7 +367,7 @@ var setupAgentRoles = []string{"pm", "coder", "coder_fixer", "qa", "ux_reviewer"
 func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs map[string]config.AgentConfig) SetupModel {
 	sp := spinner.New()
 	sp.Spinner = pixelSpinner
-	sp.Style = lipgloss.NewStyle().Foreground(homePalette.accent)
+	sp.Style = lipgloss.NewStyle().Foreground(ui.Accent)
 
 	nameInput := textinput.New()
 	nameInput.CharLimit = 80
@@ -449,7 +455,7 @@ func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs 
 	}
 
 	m.section = sectionProvider
-	return m
+	return m.WithProjectInfo(config.Config{})
 }
 
 // NewSetupModelWithOverrides creates a setup model pre-populated with explicit
@@ -493,7 +499,8 @@ func NewSetupModelWithOverrides(currentRunner, currentModel, currentEffort, curr
 			ov.provider, ov.baseURL = ac.Provider, ac.BaseURL
 			m.kindOf(ov.runner, ov.provider)
 		}
-		if ov.runner != "" || ov.model != "" || ov.effort != "" {
+		ov.mode, ov.modeSet = ac.Mode, true
+		if ov.runner != "" || ov.model != "" || ov.effort != "" || ov.mode != "" {
 			m.agentOverrides[role] = ov
 		}
 	}
@@ -712,7 +719,6 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.scrollX = 0
 		m.syncViewport()
 
 	case spinner.TickMsg:
@@ -1014,7 +1020,6 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 		var cmd tea.Cmd
 		prevSection := m.section
 		prevEditing := m.agentEditing
-		prevEditStep := m.agentEditStep
 		m, cmd = m.handleKey(msg)
 		cmds = append(cmds, cmd)
 		m.syncProjectNameFocus()
@@ -1026,7 +1031,7 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 			// If section, editing state, or edit step changed, the handler
 			// already called ensureSectionVisible which set the correct
 			// YOffset. Re-apply it since SetContent may have adjusted it.
-			if m.section != prevSection || m.agentEditing != prevEditing || m.agentEditStep != prevEditStep {
+			if m.section != prevSection || m.agentEditing != prevEditing {
 				m.ensureSectionVisible()
 			}
 		}
@@ -1061,28 +1066,11 @@ func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			return m, nil
 		}
 		if m.agentEditing {
-			if m.agentEditStep > 0 {
-				m.agentEditStep--
-				if m.agentEditStep == 1 {
-					m.agentEditEffortUnsupported = ""
-				}
-				return m, nil
-			}
 			m.agentEditing = false
+			m.agentEditErr = ""
 			return m, nil
 		}
 		return m, func() tea.Msg { return setupClosedMsg{} }
-	case "[":
-		if m.scrollX > 0 {
-			m.scrollX -= horizontalScrollStep
-			if m.scrollX < 0 {
-				m.scrollX = 0
-			}
-		}
-		return m, nil
-	case "]":
-		m.scrollX += horizontalScrollStep
-		return m, nil
 	}
 
 	switch m.section {
@@ -1402,31 +1390,9 @@ func (m SetupModel) handleAgentSetupKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			m.agentCursor++
 		}
 	case "enter":
-		m.agentEditing = true
-		m.agentEditStep = 0
-		role := m.agentRoles[m.agentCursor]
-		m.agentEditEffort = setupEffortDefault
-		m.agentEditEffortIdx = 0
-		m.agentEditEffortUnsupported = ""
-		m.agentEffortFor = ""
-		m.agentEffortOptions = nil
-		m.agentEffortLoading = false
-		m.agentBaseURL = ""
-		if ov, ok := m.agentOverrides[role]; ok {
-			m.agentEditProv = m.kindOf(ov.runner, ov.provider)
-			m.agentBaseURL = ov.baseURL
-			if ov.effort != "" {
-				m.agentEditEffort = normalizeSetupEffort(ov.effort)
-			}
-		} else {
-			m.agentEditProv = m.provider
-			m.agentBaseURL = m.baseURLOverride(m.entry(m.provider))
-		}
-		m.agentEditIdx = 0
-		m.ensureSectionVisible()
+		return m.openAgentEditor()
 	case "backspace", "delete":
-		role := m.agentRoles[m.agentCursor]
-		delete(m.agentOverrides, role)
+		m.resetAgentOverride(m.agentRoles[m.agentCursor])
 		return m.commitProjectSelection(sectionAgentSetup)
 	case "p":
 		m.exportAgentPrompts()
@@ -1443,148 +1409,244 @@ func (m SetupModel) handleAgentSetupKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m SetupModel) handleAgentEditKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
-	if m.agentEditStep == 0 {
-		// Step 0: pick runner.
-		switch msg.String() {
-		case "left", "h":
-			m.agentEditProv = m.nextAvailableProvider(m.agentEditProv, -1)
-			m.agentBaseURL = ""
-		case "right", "l":
-			m.agentEditProv = m.nextAvailableProvider(m.agentEditProv, +1)
-			m.agentBaseURL = ""
-		case "k":
-			return m.openConnect(true), nil
-		case "u":
-			return m.openURLEdit(m.agentEditProv, true), nil
-		case "enter":
-			if m.entry(m.agentEditProv).isNew {
-				return m.openConnect(true), nil
-			}
-			m.agentEditStep = 1
-			m.agentEditIdx = 0
-			m.typed.SetValue("")
-			m.claudeTyping = false
-			if m.agentEditProv == providerClaude {
-				m.agentEditIdx = findModelIndex(m.claudeRows(), runner.ClaudeDefaultModel)
-			}
-			// Pre-select current model if exists.
-			role := m.agentRoles[m.agentCursor]
-			if ov, ok := m.agentOverrides[role]; ok {
-				if m.agentEditProv == providerClaude {
-					m.noteClaudeCustom(ov.model)
-				}
-				for i, mdl := range m.modelsForProvider(m.agentEditProv) {
-					if mdl == ov.model {
-						m.agentEditIdx = i
-						break
-					}
-				}
-				if m.kindOf(ov.runner, ov.provider) == m.agentEditProv {
-					m.typed.SetValue(ov.model)
-				}
-			}
-			m.ensureSectionVisible()
+// resetAgentOverride drops the runner, model and effort override of a role. An
+// explicit mode is kept; it is changed in the editor.
+func (m *SetupModel) resetAgentOverride(role string) {
+	if ov, ok := m.agentOverrides[role]; ok && ov.mode != "" {
+		m.agentOverrides[role] = agentSetupOverride{mode: ov.mode, modeSet: true}
+		return
+	}
+	delete(m.agentOverrides, role)
+}
+
+// Fields of the agent editor card.
+const (
+	agentFieldRunner = iota
+	agentFieldModel
+	agentFieldEffort
+	agentFieldMode
+	agentFieldCount
+)
+
+// agentModes are the values the Mode field cycles through: "" is the runner's
+// default.
+var agentModes = []string{"", config.ModeText, config.ModeAgent}
+
+// openAgentEditor opens the editor card for the role under the cursor.
+func (m SetupModel) openAgentEditor() (SetupModel, tea.Cmd) {
+	role := m.agentRoles[m.agentCursor]
+	m.agentEditing = true
+	m.agentField = agentFieldRunner
+	m.agentEditErr = ""
+	m.agentEditMode = ""
+	m.agentEditEffort = setupEffortDefault
+	m.agentEditEffortIdx = 0
+	m.agentEditEffortUnsupported = ""
+	m.agentEffortFor = ""
+	m.agentEffortOptions = nil
+	m.agentEffortLoading = false
+	m.claudeTyping = false
+	m.claudeTypeErr = ""
+
+	ov, has := m.agentOverrides[role]
+	own := has && ov.runner != ""
+	if own {
+		m.agentEditProv = m.kindOf(ov.runner, ov.provider)
+		m.agentBaseURL = ov.baseURL
+	} else {
+		m.agentEditProv = m.provider
+		m.agentBaseURL = m.baseURLOverride(m.entry(m.provider))
+	}
+	if has {
+		if ov.effort != "" {
+			m.agentEditEffort = normalizeSetupEffort(ov.effort)
 		}
-		return m, nil
+		m.agentEditMode = ov.mode
 	}
 
-	if m.agentEditStep == 1 {
-		// Step 1: pick model.
-		models := m.modelsForProvider(m.agentEditProv)
-		if m.claudeTyping && m.agentEditProv == providerClaude {
-			accepted, cmd := m.claudeTypedKey(msg, &m.agentEditIdx)
-			if !accepted {
-				return m, cmd
-			}
-			models = m.modelsForProvider(m.agentEditProv)
-		}
-		if m.typedMode(m.agentEditProv) && msg.String() != "enter" {
-			var cmd tea.Cmd
-			m.typed, cmd = m.typed.Update(msg)
-			return m, cmd
-		}
-		switch msg.String() {
-		case "u":
-			return m.openURLEdit(m.agentEditProv, true), nil
-		case "up", "k":
-			if m.agentEditIdx > 0 {
-				m.agentEditIdx--
-			}
-		case "down", "j":
-			if m.agentEditIdx < len(models)-1 {
-				m.agentEditIdx++
-			}
-		case "enter":
-			if m.agentEditProv == providerClaude && m.agentEditIdx < len(models) && models[m.agentEditIdx] == claudeTypeRow {
-				m.startClaudeTyping()
-				return m, nil
-			}
-			// Move to effort. Keep the existing effort only when the model did
-			// not change; otherwise start from the global effort.
-			modelStr := m.agentModel()
-			role := m.agentRoles[m.agentCursor]
-			effort := normalizeSetupEffort(m.effort)
-			if ov, ok := m.agentOverrides[role]; ok {
-				if ov.model == modelStr && m.kindOf(ov.runner, ov.provider) == m.agentEditProv && ov.effort != "" {
-					effort = normalizeSetupEffort(ov.effort)
-				}
-			}
-			m.agentEditEffort = effort
-			m.agentEditEffortIdx = 0
-			m.agentEditEffortUnsupported = ""
-			m.agentEditStep = 2
-			cmd := m.startAgentEffortLoad()
-			m.ensureSectionVisible()
-			return m, cmd
-		case "backspace", "delete":
-			role := m.agentRoles[m.agentCursor]
-			delete(m.agentOverrides, role)
-			m.agentEditing = false
-			return m.commitProjectSelection(sectionAgentSetup)
-		}
-		return m, nil
+	// Pre-select the role's model, else the global one when the runner is the same.
+	m.agentEditIdx = 0
+	m.typed.SetValue("")
+	if m.agentEditProv == providerClaude {
+		m.agentEditIdx = findModelIndex(m.claudeRows(), runner.ClaudeDefaultModel)
 	}
+	switch {
+	case has && ov.model != "" && (!own || m.agentEditProv == m.kindOf(ov.runner, ov.provider)):
+		if m.agentEditProv == providerClaude {
+			m.noteClaudeCustom(ov.model)
+		}
+		for i, mdl := range m.modelsForProvider(m.agentEditProv) {
+			if mdl == ov.model {
+				m.agentEditIdx = i
+				break
+			}
+		}
+		m.typed.SetValue(ov.model)
+	case !own && m.agentEditProv == m.provider:
+		if !m.globalModelEmpty {
+			m.agentEditIdx = m.modelIdx
+		}
+	}
+	cmd := m.startAgentEffortLoad()
+	m.ensureSectionVisible()
+	return m, cmd
+}
 
-	// Step 2: pick effort.
+// agentEditTyping reports whether the model field is a text input.
+func (m SetupModel) agentEditTyping() bool {
+	if m.agentField != agentFieldModel {
+		return false
+	}
+	return m.typedMode(m.agentEditProv) || (m.claudeTyping && m.agentEditProv == providerClaude)
+}
+
+// agentEditModelReset points the model at the default row of the runner being
+// edited.
+func (m *SetupModel) agentEditModelReset() {
+	m.agentEditIdx = 0
+	m.typed.SetValue("")
+	m.claudeTyping = false
+	m.claudeTypeErr = ""
+	if m.agentEditProv == providerClaude {
+		m.agentEditIdx = findModelIndex(m.claudeRows(), runner.ClaudeDefaultModel)
+	}
+}
+
+// agentEffortValue is the effort the editor would save.
+func (m SetupModel) agentEffortValue() string {
 	choices := effortChoices(m.agentEffortOptions)
-	switch msg.String() {
-	case "up", "k":
-		if !m.agentEffortLoading && m.agentEditEffortIdx > 0 {
-			m.agentEditEffortIdx--
-			m.agentEditEffortUnsupported = ""
+	if !m.agentEffortLoading && m.agentEffortFor != "" && m.agentEditEffortIdx >= 0 && m.agentEditEffortIdx < len(choices) {
+		return choices[m.agentEditEffortIdx]
+	}
+	return normalizeSetupEffort(m.agentEditEffort)
+}
+
+// cycleIdx moves i by dir inside n rows and wraps around.
+func cycleIdx(i, dir, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return ((i+dir)%n + n) % n
+}
+
+func (m SetupModel) handleAgentEditKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
+	if m.claudeTyping && m.agentField == agentFieldModel && m.agentEditProv == providerClaude {
+		idx := m.agentEditIdx
+		accepted, cmd := m.claudeTypedKey(msg, &idx)
+		m.agentEditIdx = idx
+		if !accepted {
+			return m, cmd
 		}
-	case "down", "j":
-		if !m.agentEffortLoading && m.agentEditEffortIdx < len(choices)-1 {
-			m.agentEditEffortIdx++
-			m.agentEditEffortUnsupported = ""
-		}
+		m.agentEditEffortUnsupported = ""
+		return m, m.startAgentEffortLoad()
+	}
+	key := msg.String()
+	switch key {
+	case "up":
+		m.agentField = max(m.agentField-1, 0)
+		m.agentEditErr = ""
+		return m, m.startAgentEffortLoad()
+	case "down":
+		m.agentField = min(m.agentField+1, agentFieldCount-1)
+		m.agentEditErr = ""
+		return m, m.startAgentEffortLoad()
 	case "enter":
+		return m.saveAgentEditor()
+	}
+	if m.agentEditTyping() {
+		var cmd tea.Cmd
+		m.typed, cmd = m.typed.Update(msg)
+		m.agentEditErr = ""
+		return m, tea.Batch(cmd, m.startAgentEffortLoad())
+	}
+	switch key {
+	case "backspace", "delete":
+		role := m.agentRoles[m.agentCursor]
+		m.resetAgentOverride(role)
+		m.agentEditing = false
+		return m.commitProjectSelection(sectionAgentSetup)
+	case "k":
+		return m.openConnect(true), nil
+	case "u":
+		return m.openURLEdit(m.agentEditProv, true), nil
+	case "left", "h":
+		return m.changeAgentField(-1)
+	case "right", "l":
+		return m.changeAgentField(+1)
+	}
+	return m, nil
+}
+
+// changeAgentField changes the value of the focused field by dir.
+func (m SetupModel) changeAgentField(dir int) (SetupModel, tea.Cmd) {
+	m.agentEditErr = ""
+	switch m.agentField {
+	case agentFieldRunner:
+		m.agentEditProv = m.nextAvailableProvider(m.agentEditProv, dir)
+		m.agentBaseURL = ""
+		m.agentEditModelReset()
+		m.agentEditEffortUnsupported = ""
+		return m, m.startAgentEffortLoad()
+	case agentFieldModel:
+		models := m.modelsForProvider(m.agentEditProv)
+		if len(models) == 0 {
+			return m, nil
+		}
+		m.agentEditIdx = cycleIdx(m.agentEditIdx, dir, len(models))
+		m.agentEditEffortUnsupported = ""
+		return m, m.startAgentEffortLoad()
+	case agentFieldEffort:
 		if m.agentEffortLoading {
 			return m, nil
 		}
-		role := m.agentRoles[m.agentCursor]
-		ent := m.entry(m.agentEditProv)
-		runnerStr := ent.runner
-		modelStr := m.agentModel()
-		effortStr := setupEffortDefault
-		if m.agentEditEffortIdx >= 0 && m.agentEditEffortIdx < len(choices) {
-			effortStr = choices[m.agentEditEffortIdx]
+		choices := effortChoices(m.agentEffortOptions)
+		m.agentEditEffortIdx = cycleIdx(m.agentEditEffortIdx, dir, len(choices))
+		m.agentEditEffort = choices[m.agentEditEffortIdx]
+		m.agentEditEffortUnsupported = ""
+	case agentFieldMode:
+		cur := 0
+		for i, v := range agentModes {
+			if v == m.agentEditMode {
+				cur = i
+			}
 		}
-		baseURL := ""
-		if ent.isAPI() && !ent.custom() {
-			baseURL = m.agentBaseURL
-		}
-		m.agentOverrides[role] = agentSetupOverride{runner: runnerStr, provider: ent.provider, baseURL: baseURL, model: modelStr, effort: effortStr}
-		m.agentEditing = false
-		return m.commitProjectSelection(sectionAgentSetup)
-	case "backspace", "delete":
-		role := m.agentRoles[m.agentCursor]
-		delete(m.agentOverrides, role)
-		m.agentEditing = false
-		return m.commitProjectSelection(sectionAgentSetup)
+		m.agentEditMode = agentModes[cycleIdx(cur, dir, len(agentModes))]
 	}
 	return m, nil
+}
+
+// saveAgentEditor stores the editor values as the role's override and saves
+// the project, unless the mode cannot run with the runner.
+func (m SetupModel) saveAgentEditor() (SetupModel, tea.Cmd) {
+	models := m.modelsForProvider(m.agentEditProv)
+	if m.agentField == agentFieldModel && m.agentEditProv == providerClaude && m.agentEditIdx < len(models) && models[m.agentEditIdx] == claudeTypeRow {
+		m.startClaudeTyping()
+		return m, nil
+	}
+	if m.agentEffortLoading {
+		return m, nil
+	}
+	ent := m.entry(m.agentEditProv)
+	if ent.isNew {
+		return m.openConnect(true), nil
+	}
+	if err := (config.AgentConfig{Runner: ent.runner, Mode: m.agentEditMode}).ModeError(); err != nil {
+		m.agentEditErr = err.Error()
+		return m, nil
+	}
+	role := m.agentRoles[m.agentCursor]
+	baseURL := ""
+	if ent.isAPI() && !ent.custom() {
+		baseURL = m.agentBaseURL
+	}
+	m.agentOverrides[role] = agentSetupOverride{
+		runner: ent.runner, provider: ent.provider, baseURL: baseURL,
+		model: m.agentModel(), effort: m.agentEffortValue(),
+		mode: m.agentEditMode, modeSet: true,
+	}
+	m.agentEditing = false
+	m.agentEditErr = ""
+	return m.commitProjectSelection(sectionAgentSetup)
 }
 
 // currentPayload snapshots the setup values for a save.
@@ -1749,814 +1811,6 @@ func pingSelection(p setupDoneMsg) error {
 	return runner.Ping(p.provider, p.model)
 }
 
-// ── Viewport ──────────────────────────────────────────────────────────────────
-
-func (m *SetupModel) syncViewport() {
-	vpHeight := m.height - 2 // header + footer
-	if vpHeight < 4 {
-		vpHeight = 4
-	}
-	if !m.ready {
-		m.viewport = viewport.New(m.width, vpHeight)
-		m.viewport.Style = lipgloss.NewStyle()
-		m.ready = true
-	} else {
-		m.viewport.Width = m.width
-		m.viewport.Height = vpHeight
-	}
-	m.viewport.SetContent(m.renderContent())
-}
-
-// ── View ──────────────────────────────────────────────────────────────────────
-
-func (m SetupModel) View() string {
-	header := screenHeader(m.width, "Global Settings", "")
-	if !m.globalOnly {
-		header = screenHeader(m.width, "Project Setup", "")
-	}
-	footer := m.renderFooter()
-
-	if !m.ready {
-		return lipgloss.JoinVertical(lipgloss.Left, header, "", footer)
-	}
-	if m.connect != nil {
-		body := lipgloss.Place(m.width, max(m.height-2, 4), lipgloss.Center, lipgloss.Center, m.connect.box(m.width))
-		return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
-	}
-	if m.urlEdit != nil {
-		body := lipgloss.Place(m.width, max(m.height-2, 4), lipgloss.Center, lipgloss.Center, m.urlEditBox())
-		return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
-	}
-
-	return lipgloss.JoinVertical(lipgloss.Left,
-		header,
-		m.viewport.View(),
-		footer,
-	)
-}
-
-// ── Content ───────────────────────────────────────────────────────────────────
-
-func (m SetupModel) renderContent() string {
-	p := homePalette
-	dimStyle := lipgloss.NewStyle().Foreground(p.dim)
-	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(p.bright)
-	focusLabelStyle := lipgloss.NewStyle().Bold(true).Foreground(p.accent)
-	activeItemStyle := lipgloss.NewStyle().Bold(true).Foreground(p.green)
-	inactiveItemStyle := lipgloss.NewStyle().Foreground(p.bright)
-	sectionHeaderStyle := lipgloss.NewStyle().Bold(true).Foreground(p.gold)
-
-	contentWidth := m.width - 4
-	if contentWidth < 60 {
-		contentWidth = 60
-	}
-
-	sep := dimStyle.Render(strings.Repeat("─", contentWidth))
-
-	providerCard := m.renderProviderCard(contentWidth, labelStyle, focusLabelStyle, activeItemStyle, inactiveItemStyle)
-	modelCard := m.renderModelCard(contentWidth, labelStyle, focusLabelStyle, activeItemStyle, inactiveItemStyle, dimStyle)
-	effortCard := m.renderEffortCard(contentWidth, activeItemStyle, inactiveItemStyle, dimStyle)
-
-	globalHeader := sectionHeaderStyle.Render("  ◆ Global Defaults") + dimStyle.Render("  — saved to ~/.decsr/config.yaml")
-
-	var parts []string
-	if !m.globalOnly {
-		projectNameCard := m.renderProjectNameCard(contentWidth, labelStyle, focusLabelStyle, dimStyle)
-		progLangCard := m.renderProgLangCard(contentWidth, labelStyle, focusLabelStyle, activeItemStyle, inactiveItemStyle, dimStyle)
-		agentCard := m.renderAgentCard(contentWidth, labelStyle, focusLabelStyle, activeItemStyle, inactiveItemStyle, dimStyle)
-		projectHeader := sectionHeaderStyle.Render("  ◆ Project Overrides") + dimStyle.Render("  — saved to .decsr/project.yaml")
-		parts = []string{
-			"",
-			projectHeader,
-			projectNameCard,
-			sep,
-			agentCard,
-			sep,
-			progLangCard,
-			"",
-			dimStyle.Render("  Global provider, model & effort are configured in Global Settings (g)."),
-		}
-	} else {
-		parts = []string{
-			"",
-			globalHeader,
-			providerCard,
-			sep,
-			modelCard,
-			sep,
-			effortCard,
-		}
-	}
-
-	parts = append(parts, "")
-
-	content := strings.Join(parts, "\n")
-
-	vpH := m.height - 2
-	if vpH < 4 {
-		vpH = 4
-	}
-
-	natW := maxLineWidth(content)
-	if natW <= m.width {
-		return lipgloss.Place(m.width, vpH, lipgloss.Center, lipgloss.Top, content)
-	}
-
-	scrollX := m.scrollX
-	maxScrollX := natW - m.width
-	if maxScrollX < 0 {
-		maxScrollX = 0
-	}
-	if scrollX > maxScrollX {
-		scrollX = maxScrollX
-	}
-	return horizontalSlice(content, scrollX, m.width)
-}
-
-func (m SetupModel) renderProviderCard(contentWidth int, label, focusLabel, active, inactive lipgloss.Style) string {
-	p := homePalette
-	offline := lipgloss.NewStyle().Foreground(p.dim).Strikethrough(true)
-
-	var providerTabs []string
-	for i, ent := range m.entries {
-		lbl := ent.label
-		kind := providerKind(i)
-		unavailable := m.providerUnavailable(kind)
-		displayLbl := lbl
-		if unavailable {
-			displayLbl = lbl + " (offline)"
-		}
-		switch {
-		case kind == m.provider && unavailable:
-			// Selected but unreachable — keep cursor visible but mark it.
-			tab := offline.Render("▶ " + displayLbl)
-			if m.section == sectionProvider {
-				tab = focusLabel.Render("[ "+lbl+" ]") + " " + offline.Render("(offline)")
-			}
-			providerTabs = append(providerTabs, tab)
-		case kind == m.provider:
-			tab := active.Render("▶ " + lbl)
-			if m.section == sectionProvider {
-				tab = focusLabel.Render("[ " + lbl + " ]")
-			}
-			providerTabs = append(providerTabs, tab)
-		case unavailable:
-			providerTabs = append(providerTabs, offline.Render("  "+displayLbl))
-		default:
-			providerTabs = append(providerTabs, inactive.Render("  "+lbl))
-		}
-	}
-	lines := packTabs(providerTabs, contentWidth-8)
-	sel := m.entry(m.provider)
-	if kl := m.apiKeyLine(); kl != "" {
-		style := lipgloss.NewStyle().Foreground(p.dim)
-		if strings.Contains(kl, "not set") {
-			style = lipgloss.NewStyle().Foreground(crt.warn)
-		}
-		lines = append(lines, "", "  "+style.Render(kl))
-	}
-	if bl := m.baseURLLine(sel, m.baseURLOverride(sel)); bl != "" {
-		lines = append(lines, "  "+lipgloss.NewStyle().Foreground(p.dim).Render(bl))
-	}
-	if sel.missing {
-		lines = append(lines, "", "  "+lipgloss.NewStyle().Foreground(crt.warn).Render(missingHint(sel)))
-	}
-	return setupCard("Default Provider", m.section == sectionProvider, contentWidth, lines)
-}
-
-func (m SetupModel) renderModelCard(contentWidth int, label, focusLabel, active, inactive, dim lipgloss.Style) string {
-
-	var modelLines []string
-
-	switch m.provider {
-	case providerOpenCode:
-		modelLines = append(modelLines, m.viewOpenCodeModels(active, inactive, dim, focusLabel)...)
-		if m.modelsStatus != "" {
-			warnStyle := lipgloss.NewStyle().Foreground(crt.warn)
-			modelLines = append(modelLines, "", warnStyle.Render("  "+m.modelsStatus))
-		}
-	case providerClaude:
-		modelLines = append(modelLines, dim.Render("  Claude CLI (--model flag)"))
-		modelLines = append(modelLines, m.viewClaudeModels(active, inactive, dim)...)
-	case providerOllama:
-		modelLines = append(modelLines, dim.Render("  Ollama local models (REST API)"))
-		modelLines = append(modelLines, m.viewOllamaModels(active, inactive, dim)...)
-	case providerMLX:
-		modelLines = append(modelLines, dim.Render("  oMLX local models (OpenAI-compatible API on :8000)"))
-		modelLines = append(modelLines, m.viewMLXModels(active, inactive, dim)...)
-	case providerCodex:
-		modelLines = append(modelLines, dim.Render("  Codex CLI (OpenAI)"))
-		modelLines = append(modelLines, m.viewCodexModels(active, inactive, dim)...)
-	case providerCopilot:
-		modelLines = append(modelLines, dim.Render("  GitHub Copilot CLI"))
-		modelLines = append(modelLines, m.viewCopilotModels(active, inactive, dim)...)
-	case providerLMStudio:
-		modelLines = append(modelLines, dim.Render("  LM Studio local models (OpenAI-compatible API on :1234)"))
-		modelLines = append(modelLines, m.viewLMStudioModels(active, inactive, dim)...)
-	case providerDeepSeek:
-		modelLines = append(modelLines, dim.Render("  DeepSeek API ("+m.apiKeyLine()+")"))
-		modelLines = append(modelLines, m.viewDeepSeekModels(active, inactive, dim)...)
-	case providerOpenAI, providerOpenRouter, providerGroq:
-		modelLines = append(modelLines, dim.Render("  "+m.entry(m.provider).label+" API ("+m.apiKeyLine()+")"))
-		modelLines = append(modelLines, m.viewAPIModels(m.provider, active, inactive, dim)...)
-	default:
-		if e := m.entry(m.provider); e.custom() {
-			modelLines = append(modelLines, dim.Render("  "+e.label+" API ("+m.apiKeyLine()+")"))
-			if e.missing {
-				modelLines = append(modelLines, dim.Render("  "+missingHint(e)))
-			}
-			modelLines = append(modelLines, m.viewAPIModels(m.provider, active, inactive, dim)...)
-		}
-	}
-
-	// Model validation status.
-	if m.pingTesting {
-		modelLines = append(modelLines, "")
-		modelLines = append(modelLines, dim.Render("  "+m.spinner.View()+" Testing connection…"))
-	} else if m.pingErr != nil {
-		warnStyle := lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
-		modelLines = append(modelLines, "")
-		modelLines = append(modelLines, warnStyle.Render("  ✗ "+m.pingErr.Error()))
-		modelLines = append(modelLines, dim.Render("  Change selection or press Enter to retry"))
-	}
-
-	return setupCard("Default Model", m.section == sectionModel, contentWidth, modelLines)
-}
-
-func (m SetupModel) renderEffortCard(contentWidth int, active, inactive, dim lipgloss.Style) string {
-	provider, model := m.selectedProviderModel()
-
-	var lines []string
-	lines = append(lines, dim.Render(fmt.Sprintf("  Reasoning effort for %s / %s:", provider, model)))
-	lines = append(lines, "")
-
-	loaded := m.effortFor != "" && !m.effortLoading
-	switch {
-	case m.effortLoading:
-		lines = append(lines, dim.Render("  "+m.spinner.View()+" loading effort levels…"))
-	case m.effortFor == "":
-		lines = append(lines, dim.Render("  Press Tab or Enter here to load this model's effort levels."))
-		if m.effort != "" && m.effort != setupEffortDefault {
-			lines = append(lines, dim.Render("  Current: "+m.effort))
-		}
-	case len(m.effortOptions) == 0:
-		lines = append(lines, dim.Render("  This model exposes no effort control — provider default is used."))
-	}
-
-	if loaded {
-		choices := effortChoices(m.effortOptions)
-		cursor := m.effortIdx
-		if cursor < 0 {
-			cursor = 0
-		}
-		if cursor >= len(choices) {
-			cursor = len(choices) - 1
-		}
-		lines = append(lines, renderWindowedList(effortLabels(choices, m.provider == providerClaude), cursor, m.section == sectionEffort, active, inactive, dim)...)
-	}
-
-	if m.effortUnsupported != "" {
-		warnStyle := lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
-		lines = append(lines, "")
-		lines = append(lines, warnStyle.Render(fmt.Sprintf("  ⚠ %q is not offered by this model — choose a level or keep the default", m.effortUnsupported)))
-	}
-
-	lines = append(lines, "")
-	lines = append(lines, dim.Render("  ↑↓ navigate  Enter save  Tab next"))
-
-	return setupCard("Effort", m.section == sectionEffort, contentWidth, lines)
-}
-
-func (m SetupModel) renderProjectNameCard(contentWidth int, label, focusLabel, dim lipgloss.Style) string {
-	isFocused := m.section == sectionProjectName
-
-	var lines []string
-	lines = append(lines, dim.Render("  Display name for this project:"))
-	lines = append(lines, "")
-	lines = append(lines, "  "+m.projectNameInput.View())
-
-	return setupCard("Project Name", isFocused, contentWidth, lines)
-}
-
-// progLangAuto is the setup-list entry that saves an empty language so the
-// language is detected from the project files.
-const progLangAuto = "auto"
-
-// progLangLabels returns the list rows; the auto row shows what is detected.
-func (m SetupModel) progLangLabels() []string {
-	labels := append([]string(nil), m.progLanguages...)
-	for i, l := range labels {
-		if l != progLangAuto {
-			continue
-		}
-		detected := ""
-		if m.root != "" {
-			detected = lang.Detect(m.root)
-		}
-		if detected == "" {
-			labels[i] = "auto (not detected)"
-		} else {
-			labels[i] = "auto (" + detected + ")"
-		}
-	}
-	return labels
-}
-
-func (m SetupModel) renderProgLangCard(contentWidth int, label, focusLabel, active, inactive, dim lipgloss.Style) string {
-	isFocused := m.section == sectionProgLang
-
-	var lines []string
-	lines = append(lines, dim.Render("  Primary language for generated code (overrides auto-detection):"))
-	lines = append(lines, "")
-
-	lines = append(lines, renderWindowedList(m.progLangLabels(), m.progLangIdx, isFocused, active, inactive, dim)...)
-
-	return setupCard("Programming Language", isFocused, contentWidth, lines)
-}
-
-func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active, inactive, dim lipgloss.Style) string {
-	p := homePalette
-	goldStyle := lipgloss.NewStyle().Foreground(p.gold).Bold(true)
-	cyanStyle := lipgloss.NewStyle().Foreground(p.cyan)
-
-	var agentLines []string
-	agentLines = append(agentLines, dim.Render("  Override runner, model & effort per agent (this project only):"))
-	agentLines = append(agentLines, "")
-
-	for i, role := range m.agentRoles {
-		c := roleColor(role)
-		rs := lipgloss.NewStyle().Foreground(c).Bold(true)
-
-		display := dim.Render("(default)")
-		if ov, ok := m.agentOverrides[role]; ok {
-			runnerPart := cyanStyle.Render(ov.runner)
-			if ov.runner == "" {
-				runnerPart = dim.Render("(global)")
-			}
-			modelPart := inactive.Render(ov.model)
-			if ov.model == "" {
-				modelPart = dim.Render("(auto)")
-				if ov.runner == "claude" {
-					modelPart = dim.Render("default → " + runner.ClaudeDefaultModel + " · " + runner.ClaudeDefaultEffort)
-				}
-			}
-			display = runnerPart + dim.Render(" / ") + modelPart
-			if ov.effort != "" && ov.effort != setupEffortDefault {
-				display += dim.Render(" · ") + goldStyle.Render(ov.effort)
-			}
-		}
-
-		// Show indicator if custom prompt exists.
-		promptTag := ""
-		if m.hasCustomPrompt(role) {
-			promptTag = goldStyle.Render(" ✦")
-		}
-
-		isActive := m.section == sectionAgentSetup && i == m.agentCursor && !m.agentEditing
-		if isActive {
-			agentLines = append(agentLines,
-				active.Render("  ▶ ")+rs.Render(fmt.Sprintf("%-14s", role))+display+promptTag)
-		} else {
-			agentLines = append(agentLines,
-				"    "+rs.Render(fmt.Sprintf("%-14s", role))+display+promptTag)
-		}
-	}
-
-	// Prompt status message.
-	if m.promptStatus != "" {
-		agentLines = append(agentLines, "")
-		agentLines = append(agentLines, goldStyle.Render("  "+m.promptStatus))
-	}
-
-	// Editing panel.
-	if m.agentEditing {
-		agentLines = append(agentLines, "")
-		role := m.agentRoles[m.agentCursor]
-
-		switch m.agentEditStep {
-		case 0:
-			agentLines = append(agentLines, goldStyle.Render("  Select runner for "+role+":"))
-			agentLines = append(agentLines, "")
-
-			var tabs []string
-			for i, ent := range m.entries {
-				lbl := ent.label
-				kind := providerKind(i)
-				unavailable := m.providerUnavailable(kind)
-				offline := lipgloss.NewStyle().Foreground(homePalette.dim).Strikethrough(true)
-				displayLbl := lbl
-				if unavailable {
-					displayLbl = lbl + " (offline)"
-				}
-				switch {
-				case kind == m.agentEditProv && unavailable:
-					tabs = append(tabs, focusLabel.Render("[ "+lbl+" ]")+" "+offline.Render("(offline)"))
-				case kind == m.agentEditProv:
-					tabs = append(tabs, focusLabel.Render("[ "+lbl+" ]"))
-				case unavailable:
-					tabs = append(tabs, offline.Render("  "+displayLbl))
-				default:
-					tabs = append(tabs, inactive.Render("  "+lbl))
-				}
-			}
-			agentLines = append(agentLines, packTabs(tabs, contentWidth-8)...)
-			agentLines = append(agentLines, m.agentEndpointLines(dim)...)
-			agentLines = append(agentLines, "")
-			agentLines = append(agentLines, dim.Render("  ←→ runner  Enter confirm  Esc cancel"))
-		case 1:
-			provLabel := m.entry(m.agentEditProv).label
-			agentLines = append(agentLines, goldStyle.Render(fmt.Sprintf("  Select model for %s (%s):", role, provLabel)))
-			agentLines = append(agentLines, m.agentEndpointLines(dim)...)
-
-			models := m.modelsForProvider(m.agentEditProv)
-			switch {
-			case m.typedMode(m.agentEditProv):
-				agentLines = append(agentLines, dim.Render("  no model list — type a model id:"), "  "+m.typed.View())
-			case m.claudeTyping && m.agentEditProv == providerClaude:
-				agentLines = append(agentLines, m.claudeTypingLines(dim)...)
-			case len(models) == 0:
-				agentLines = append(agentLines, dim.Render("  no models available"))
-			case m.agentEditProv == providerClaude:
-				if line := m.claudeDefaultLine(m.agentClaudeModelEmpty()); line != "" {
-					agentLines = append(agentLines, dim.Render("  "+line))
-				}
-				labels, hints := m.claudeLabels()
-				agentLines = append(agentLines, renderWindowedListHints(labels, hints, m.agentEditIdx, true, active, inactive, dim)...)
-			default:
-				agentLines = append(agentLines, renderWindowedList(models, m.agentEditIdx, true, active, inactive, dim)...)
-			}
-			agentLines = append(agentLines, "")
-			agentLines = append(agentLines, dim.Render("  ↑↓ navigate  Enter select  Bksp reset  Esc back"))
-		case 2:
-			provLabel := m.entry(m.agentEditProv).label
-			agentLines = append(agentLines, goldStyle.Render(fmt.Sprintf("  Select effort for %s (%s):", role, provLabel)))
-			if m.agentEffortLoading {
-				agentLines = append(agentLines, dim.Render("  "+m.spinner.View()+" loading effort levels…"))
-			} else {
-				choices := effortChoices(m.agentEffortOptions)
-				cursor := m.agentEditEffortIdx
-				if cursor < 0 {
-					cursor = 0
-				}
-				if cursor >= len(choices) {
-					cursor = len(choices) - 1
-				}
-				agentLines = append(agentLines, renderWindowedList(effortLabels(choices, m.agentEditProv == providerClaude), cursor, true, active, inactive, dim)...)
-				if m.agentEditEffortUnsupported != "" {
-					warnStyle := lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
-					agentLines = append(agentLines, "")
-					agentLines = append(agentLines, warnStyle.Render(fmt.Sprintf("  ⚠ %q is not offered by this model — choose a level or keep the default", m.agentEditEffortUnsupported)))
-				}
-			}
-			agentLines = append(agentLines, "")
-			agentLines = append(agentLines, dim.Render("  ↑↓ navigate  Enter save  Bksp reset  Esc back"))
-		}
-	}
-
-	return setupCard("Agent Overrides", m.section == sectionAgentSetup, contentWidth, agentLines)
-}
-
-// agentEndpointLines are the dim key and base URL lines of the runner being
-// edited for an agent.
-func (m SetupModel) agentEndpointLines(dim lipgloss.Style) []string {
-	e := m.entry(m.agentEditProv)
-	var out []string
-	if kl := m.keyLineFor(e); kl != "" {
-		out = append(out, dim.Render("  "+kl))
-	}
-	if bl := m.baseURLLine(e, m.agentBaseURL); bl != "" {
-		out = append(out, dim.Render("  "+bl))
-	}
-	if e.missing {
-		out = append(out, dim.Render("  "+missingHint(e)))
-	}
-	return out
-}
-
-// setupCard wraps card lines in a pixel panel titled in its top border. The
-// focused card gets the azure focus border.
-func setupCard(title string, focused bool, contentWidth int, lines []string) string {
-	tc := crt.primary
-	if focused {
-		tc = galaxyAzure
-	}
-	return pixelPanel("◆ "+strings.ToUpper(title), tc, focused,
-		lipgloss.NewStyle().Padding(0, 1).Width(contentWidth-2), strings.Join(lines, "\n"))
-}
-
-// ── Model list renderers ─────────────────────────────────────────────────────
-
-func (m SetupModel) viewOpenCodeModels(active, inactive, dim, _ lipgloss.Style) []string {
-	isModelSection := m.section == sectionModel
-	var lines []string
-
-	if m.modelsLoading {
-		lines = append(lines, dim.Render("  loading models…"))
-		return lines
-	}
-
-	// Build labels with cloud/local suffix before windowing.
-	labels := make([]string, len(m.models))
-	for i, mdl := range m.models {
-		suffix := dim.Render("  (local)")
-		if strings.Contains(mdl, "/") {
-			suffix = dim.Render("  (cloud)")
-		}
-		labels[i] = mdl + suffix
-	}
-	lines = append(lines, renderWindowedList(labels, m.modelIdx, isModelSection, active, inactive, dim)...)
-	return lines
-}
-
-func (m SetupModel) viewClaudeModels(active, inactive, dim lipgloss.Style) []string {
-	isModelSection := m.section == sectionModel
-
-	var lines []string
-
-	if m.claudeModelsLoading {
-		lines = append(lines, dim.Render("  loading models…"))
-		return lines
-	}
-
-	if len(m.claudeModels) == 0 {
-		lines = append(lines, dim.Render("  no models found — is claude CLI installed?"))
-		return lines
-	}
-
-	if m.claudeTyping {
-		return append(lines, m.claudeTypingLines(dim)...)
-	}
-	if line := m.claudeDefaultLine(m.globalClaudeModelEmpty()); line != "" {
-		lines = append(lines, dim.Render("  "+line))
-	}
-	labels, hints := m.claudeLabels()
-	lines = append(lines, renderWindowedListHints(labels, hints, m.modelIdx, isModelSection, active, inactive, dim)...)
-	return lines
-}
-
-func (m SetupModel) viewOllamaModels(active, inactive, dim lipgloss.Style) []string {
-	isModelSection := m.section == sectionModel
-	var lines []string
-
-	if m.ollamaModelsLoading {
-		lines = append(lines, dim.Render("  loading models…"))
-		return lines
-	}
-
-	if len(m.ollamaModels) == 0 {
-		lines = append(lines, dim.Render("  no models found — run: ollama pull <model>"))
-		return lines
-	}
-
-	lines = append(lines, renderWindowedList(m.ollamaModels, m.modelIdx, isModelSection, active, inactive, dim)...)
-	return lines
-}
-
-func (m SetupModel) viewMLXModels(active, inactive, dim lipgloss.Style) []string {
-	isModelSection := m.section == sectionModel
-	var lines []string
-
-	if m.mlxModelsLoading {
-		lines = append(lines, dim.Render("  loading models…"))
-		return lines
-	}
-
-	if len(m.mlxModels) == 0 {
-		lines = append(lines, dim.Render("  no models found — install via LM Studio or `mlx_lm.convert`"))
-		return lines
-	}
-
-	lines = append(lines, renderWindowedList(m.mlxModels, m.modelIdx, isModelSection, active, inactive, dim)...)
-	return lines
-}
-
-func (m SetupModel) viewCodexModels(active, inactive, dim lipgloss.Style) []string {
-	isModelSection := m.section == sectionModel
-
-	var lines []string
-
-	if m.codexModelsLoading {
-		lines = append(lines, dim.Render("  loading models…"))
-		return lines
-	}
-
-	if len(m.codexModels) == 0 {
-		lines = append(lines, dim.Render("  no models found — check OPENAI_API_KEY"))
-		return lines
-	}
-
-	lines = append(lines, renderWindowedList(m.codexModels, m.modelIdx, isModelSection, active, inactive, dim)...)
-	return lines
-}
-
-func (m SetupModel) viewCopilotModels(active, inactive, dim lipgloss.Style) []string {
-	isModelSection := m.section == sectionModel
-
-	var lines []string
-
-	if m.copilotModelsLoading {
-		lines = append(lines, dim.Render("  loading models…"))
-		return lines
-	}
-
-	if len(m.copilotModels) == 0 {
-		lines = append(lines, dim.Render("  copilot CLI did not return any models — pass --model manually"))
-		return lines
-	}
-
-	lines = append(lines, renderWindowedList(m.copilotModels, m.modelIdx, isModelSection, active, inactive, dim)...)
-	return lines
-}
-
-func (m SetupModel) viewLMStudioModels(active, inactive, dim lipgloss.Style) []string {
-	isModelSection := m.section == sectionModel
-
-	var lines []string
-
-	if m.lmstudioModelsLoading {
-		lines = append(lines, dim.Render("  loading models…"))
-		return lines
-	}
-
-	if len(m.lmstudioModels) == 0 {
-		lines = append(lines, dim.Render("  no models found — start the LM Studio server and load a model"))
-		return lines
-	}
-
-	lines = append(lines, renderWindowedList(m.lmstudioModels, m.modelIdx, isModelSection, active, inactive, dim)...)
-	return lines
-}
-
-func (m SetupModel) viewDeepSeekModels(active, inactive, dim lipgloss.Style) []string {
-	if m.deepseekModelsLoading {
-		return []string{dim.Render("  loading models…")}
-	}
-	return renderWindowedList(m.deepseekModels, m.modelIdx, m.section == sectionModel, active, inactive, dim)
-}
-
-func (m SetupModel) viewAPIModels(kind providerKind, active, inactive, dim lipgloss.Style) []string {
-	key := m.entry(kind).key()
-	if m.apiModelsLoading[key] {
-		return []string{dim.Render("  loading models…")}
-	}
-	if len(m.apiModels[key]) == 0 {
-		hint := "  no model list — the provider did not return models; type a model id:"
-		if runner.KeySource(m.entry(kind).credName(), "") == "" {
-			hint = "  no model list — add an API key with k in the provider row, or type a model id:"
-		}
-		return []string{dim.Render(hint), "  " + m.typed.View()}
-	}
-	return renderWindowedList(m.apiModels[key], m.modelIdx, m.section == sectionModel, active, inactive, dim)
-}
-
-// ── Footer ───────────────────────────────────────────────────────────────────
-
-func (m SetupModel) renderFooter() string {
-	hint := func(k, desc string) keyHint { return keyHint{k, desc} }
-
-	var hints []keyHint
-	switch {
-	case m.agentEditing && m.agentEditStep == 0:
-		hints = []keyHint{hint("←→", "runner")}
-		if m.entry(m.agentEditProv).isAPI() {
-			hints = append(hints, hint("k", "API key"))
-		}
-		if m.entry(m.agentEditProv).canEditURL() {
-			hints = append(hints, hint("u", "base URL"))
-		}
-		hints = append(hints, hint("Enter", "confirm"), hint("Esc", "cancel"))
-	case m.agentEditing && m.agentEditStep == 1 && m.claudeTyping && m.agentEditProv == providerClaude:
-		hints = []keyHint{
-			hint("type", "model id"),
-			hint("Enter", "select"),
-			hint("Esc", "back"),
-		}
-	case m.agentEditing && m.agentEditStep == 1 && m.typedMode(m.agentEditProv):
-		hints = []keyHint{
-			hint("type", "model id"),
-			hint("Enter", "select"),
-			hint("Esc", "back"),
-		}
-	case m.agentEditing && m.agentEditStep == 1:
-		hints = []keyHint{
-			hint("↑↓", "navigate"),
-			hint("Enter", "select"),
-		}
-		if m.entry(m.agentEditProv).canEditURL() {
-			hints = append(hints, hint("u", "base URL"))
-		}
-		hints = append(hints, hint("Bksp", "reset"), hint("Esc", "back"))
-	case m.agentEditing && m.agentEditStep == 2:
-		hints = []keyHint{
-			hint("↑↓", "effort"),
-			hint("Enter", "save"),
-			hint("Bksp", "reset"),
-			hint("Esc", "back"),
-		}
-	case m.connect != nil:
-		hints = []keyHint{
-			hint("Enter", "test & save"),
-			hint("Esc", "cancel"),
-		}
-	case m.urlEdit != nil:
-		hints = []keyHint{
-			hint("Enter", "save"),
-			hint("empty", "reset"),
-			hint("Esc", "cancel"),
-		}
-	case m.section == sectionProvider:
-		hints = []keyHint{hint("←→", "provider"), hint("k", "API key")}
-		if m.entry(m.provider).canEditURL() {
-			hints = append(hints, hint("u", "base URL"))
-		}
-		hints = append(hints,
-			hint("Tab/↓", "models"),
-			hint("[]", "scroll"),
-			hint("Ctrl+S", "save & close"),
-			hint("Esc", "done"),
-		)
-	case m.section == sectionModel && m.claudeTyping && m.provider == providerClaude:
-		hints = []keyHint{
-			hint("type", "model id"),
-			hint("Enter", "effort"),
-			hint("Esc", "back"),
-		}
-	case m.section == sectionModel && m.typedMode(m.provider):
-		hints = []keyHint{
-			hint("type", "model id"),
-			hint("Enter", "effort"),
-			hint("↑", "provider"),
-			hint("Ctrl+S", "save & close"),
-			hint("Esc", "done"),
-		}
-	case m.section == sectionModel:
-		hints = []keyHint{hint("↑↓", "navigate"), hint("Enter", "effort")}
-		if m.entry(m.provider).canEditURL() {
-			hints = append(hints, hint("u", "base URL"))
-		}
-		hints = append(hints,
-			hint("Tab", "next"),
-			hint("Ctrl+S", "save & close"),
-			hint("Esc", "done"),
-		)
-	case m.section == sectionEffort:
-		hints = []keyHint{
-			hint("↑↓", "effort"),
-			hint("Enter", "save"),
-			hint("Tab", "next"),
-			hint("Ctrl+S", "save & close"),
-			hint("Esc", "done"),
-		}
-	case m.section == sectionProgLang:
-		hints = []keyHint{
-			hint("↑↓", "language"),
-			hint("Enter", "save"),
-			hint("Tab", "project"),
-			hint("Ctrl+S", "save & close"),
-			hint("Esc", "done"),
-		}
-	case m.section == sectionAgentSetup:
-		hints = []keyHint{
-			hint("↑↓", "navigate"),
-			hint("Enter", "configure"),
-			hint("p", "export prompt"),
-			hint("d", "delete prompt"),
-			hint("Bksp", "reset"),
-			hint("Tab", "language"),
-			hint("Ctrl+S", "save & close"),
-			hint("Esc", "done"),
-		}
-	case m.section == sectionProjectName:
-		hints = []keyHint{
-			hint("type", "edit name"),
-			hint("Enter", "save"),
-			hint("Tab", "agents"),
-			hint("Ctrl+S", "save & close"),
-			hint("Esc", "done"),
-		}
-	}
-
-	right := ""
-	if m.saveStatus != "" {
-		style := lipgloss.NewStyle().Background(crt.panelBg).Foreground(galaxyMint).Bold(true)
-		if !m.saveStatusOK {
-			style = style.Foreground(galaxyRed)
-		} else if strings.HasPrefix(m.saveStatus, "Saving") {
-			style = style.Foreground(galaxyGold)
-		}
-		right = style.Render(m.saveStatus) + "  "
-	}
-	if m.ready && m.viewport.TotalLineCount() > m.viewport.Height {
-		pct := m.viewport.ScrollPercent() * 100
-		right += lipgloss.NewStyle().
-			Background(crt.panelBg).
-			Foreground(crt.dim).
-			Render(fmt.Sprintf("%.0f%%", pct))
-	}
-
-	return hintBar(m.width, hints, right)
-}
-
 func fetchOpenCodeModels() tea.Cmd {
 	return func() tea.Msg {
 		models, err := runner.OpenCodeListModels()
@@ -2653,161 +1907,6 @@ func (m SetupModel) apiLoading() bool {
 // isLoadingModels returns true if any model list is still being fetched.
 func (m SetupModel) isLoadingModels() bool {
 	return m.modelsLoading || m.claudeModelsLoading || m.ollamaModelsLoading || m.mlxModelsLoading || m.codexModelsLoading || m.copilotModelsLoading || m.lmstudioModelsLoading || m.deepseekModelsLoading || m.apiLoading()
-}
-
-// ensureSectionVisible scrolls the viewport so the focused section is visible.
-func (m *SetupModel) ensureSectionVisible() {
-	if !m.ready {
-		return
-	}
-
-	// Re-render content with current state to get accurate line positions.
-	content := m.renderContent()
-	m.viewport.SetContent(content)
-	lines := strings.Split(content, "\n")
-	totalLines := len(lines)
-
-	var targetLine int
-	switch m.section {
-	case sectionAgentSetup:
-		if m.globalOnly {
-			targetLine = findLineContaining(lines, "Agent Overrides")
-			break
-		}
-		if m.agentEditing {
-			// Anchor on the editing panel marker so the runner/model/effort
-			// picker stays in view instead of scrolling past the card.
-			marker := "Select runner for"
-			switch m.agentEditStep {
-			case 1:
-				marker = "Select model for"
-			case 2:
-				marker = "Select effort for"
-			}
-			targetLine = findLineContaining(lines, marker)
-			if targetLine < 0 {
-				targetLine = totalLines - m.viewport.Height
-			}
-		} else {
-			// Agent overrides is the first section in project setup — scroll to top.
-			m.viewport.SetYOffset(0)
-			return
-		}
-	case sectionProgLang:
-		targetLine = findLineContaining(lines, "Programming Language")
-	case sectionEffort:
-		targetLine = findLineContaining(lines, "Reasoning effort")
-		if targetLine < 0 {
-			targetLine = findLineContaining(lines, "EFFORT")
-		}
-		if targetLine < 0 {
-			targetLine = findLineContaining(lines, "Default Model")
-		}
-	case sectionProjectName:
-		targetLine = findLineContaining(lines, "Project Name")
-		if targetLine < 0 {
-			m.viewport.SetYOffset(0)
-			return
-		}
-	case sectionProvider:
-		targetLine = findLineContaining(lines, "Default Provider")
-		if targetLine < 0 {
-			// Fallback: global-only mode, provider is at top.
-			m.viewport.SetYOffset(0)
-			return
-		}
-	case sectionModel:
-		targetLine = findLineContaining(lines, "Default Model")
-	}
-
-	if targetLine < 0 {
-		return
-	}
-
-	margin := 2
-	target := targetLine - margin
-	if target < 0 {
-		target = 0
-	}
-
-	maxOffset := totalLines - m.viewport.Height
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-	if target > maxOffset {
-		target = maxOffset
-	}
-
-	m.viewport.SetYOffset(target)
-}
-
-// renderWindowedList renders a windowed view of items around cursor.
-// When there are more items than listWindowSize, only a window is shown with
-// "↑ N more" / "↓ N more" indicators. items are raw label strings.
-const listWindowSize = 7
-
-func renderWindowedList(items []string, cursor int, isFocused bool, active, inactive, dim lipgloss.Style) []string {
-	return renderWindowedListHints(items, nil, cursor, isFocused, active, inactive, dim)
-}
-
-// renderWindowedListHints is renderWindowedList with an optional dim hint after
-// each item; hints is empty or as long as items.
-func renderWindowedListHints(items, hints []string, cursor int, isFocused bool, active, inactive, dim lipgloss.Style) []string {
-	if len(items) == 0 {
-		return nil
-	}
-
-	start, end := 0, len(items)
-	if len(items) > listWindowSize {
-		half := listWindowSize / 2
-		start = cursor - half
-		if start < 0 {
-			start = 0
-		}
-		end = start + listWindowSize
-		if end > len(items) {
-			end = len(items)
-			start = end - listWindowSize
-			if start < 0 {
-				start = 0
-			}
-		}
-	}
-
-	var lines []string
-	if start > 0 {
-		lines = append(lines, dim.Render(fmt.Sprintf("    ↑ %d more", start)))
-	}
-	for i := start; i < end; i++ {
-		sel := isFocused && i == cursor
-		marker := "    "
-		if i == cursor {
-			marker = "  ▶ "
-		}
-		hint := ""
-		if i < len(hints) && hints[i] != "" {
-			hint = dim.Render("  " + hints[i])
-		}
-		if sel {
-			lines = append(lines, active.Render(marker+items[i])+hint)
-		} else {
-			lines = append(lines, inactive.Render(marker+items[i])+hint)
-		}
-	}
-	if end < len(items) {
-		lines = append(lines, dim.Render(fmt.Sprintf("    ↓ %d more", len(items)-end)))
-	}
-	return lines
-}
-
-// findLineContaining returns the 0-based line index containing substr, or -1.
-func findLineContaining(lines []string, substr string) int {
-	for i, l := range lines {
-		if strings.Contains(l, substr) {
-			return i
-		}
-	}
-	return -1
 }
 
 // promptsDir returns the project-level prompts override directory.

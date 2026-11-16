@@ -11,6 +11,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/notify"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -168,9 +169,9 @@ func actText(a runner.Activity, w int, compact bool) string {
 // actMeta is the right-aligned meta of an item and its colours: plain text
 // and the rendered form.
 func actMeta(a runner.Activity, now time.Time) (plain, styled string) {
-	dim := lipgloss.NewStyle().Foreground(colMuted)
-	ok := lipgloss.NewStyle().Foreground(colOK)
-	fail := lipgloss.NewStyle().Foreground(colFail)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
+	ok := lipgloss.NewStyle().Foreground(ui.OK)
+	fail := lipgloss.NewStyle().Foreground(ui.Fail)
 	switch a.Kind {
 	case runner.ActEdit, runner.ActWrite:
 		var pp, ps []string
@@ -220,16 +221,16 @@ func actMeta(a runner.Activity, now time.Time) (plain, styled string) {
 }
 
 // actColor is the colour of the glyph and text of an item.
-func actColor(a runner.Activity) lipgloss.Color {
+func actColor(a runner.Activity) lipgloss.TerminalColor {
 	switch {
 	case a.Kind == runner.ActError || a.State == runner.ActFailed:
-		return colFail
+		return ui.Fail
 	case a.Kind == runner.ActThinking || a.Kind == runner.ActMessage:
-		return colMuted
+		return ui.Muted
 	case a.State == runner.ActRunning:
-		return colAccent
+		return ui.Accent
 	}
-	return colText
+	return ui.Text
 }
 
 // activityLine renders one item as glyph, text and right-aligned dim meta in
@@ -251,7 +252,7 @@ func activityLine(a runner.Activity, now time.Time, w int) string {
 	col := actColor(a)
 	st := lipgloss.NewStyle().Foreground(col)
 	if a.Kind == runner.ActThinking || a.Kind == runner.ActMessage {
-		st = lipgloss.NewStyle().Foreground(colMuted)
+		st = lipgloss.NewStyle().Foreground(ui.Muted)
 	}
 	left := st.Render(actGlyph(a.Kind)) + " " + st.Render(text)
 	if mw == 0 {
@@ -267,7 +268,7 @@ func activityDetailLines(detail string, w, limit int) []string {
 	if detail == "" || w < 8 {
 		return nil
 	}
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	var out []string
 	for _, l := range hardWrap(detail, w-4) {
 		if limit > 0 && len(out) == limit {
@@ -371,7 +372,7 @@ func (m *workspaceModel) checkStalls() {
 // divider, "… N earlier steps" and every item; the detail of thinking items is
 // shown wrapped under them.
 func activityTimelineRows(n *workspace.Node, now time.Time, iw int) []string {
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	rows := []string{dim.Render(strings.Repeat("─", min(iw, 24)))}
 	if n.ActivityDropped > 0 {
 		rows = append(rows, dim.Render(fmt.Sprintf("… %d earlier %s", n.ActivityDropped, pluralize(n.ActivityDropped, "step", "steps"))))

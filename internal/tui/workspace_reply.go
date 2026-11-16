@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -156,7 +157,7 @@ func (m workspaceModel) mentionLines(maxRows int) []string {
 	matches := m.mentionMatches()
 	var pal []string
 	if len(matches) == 0 {
-		pal = []string{lipgloss.NewStyle().Foreground(colFail).Render("! no such node")}
+		pal = []string{lipgloss.NewStyle().Foreground(ui.Fail).Render("! no such node")}
 	} else {
 		pal = renderCmdList(matches, m.cmdIdx, m.width-2, maxRows)
 	}
@@ -180,7 +181,7 @@ func replySnippet(s string) string {
 // replyLines are the dim lines of a card about a reply that is queued or
 // waits for its node to start.
 func replyLines(n *workspace.Node, iw int) []string {
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	var rows []string
 	if n.PendingReply != "" {
 		rows = append(rows, dim.Render(truncateOneLine("reply queued: "+replySnippet(n.PendingReply), iw)))
@@ -204,8 +205,8 @@ func attemptLine(a workspace.Attempt) string {
 // line each, then what started it, its summary or error and the tail of its
 // activity when that was kept.
 func attemptRows(n *workspace.Node, now time.Time, iw int) []string {
-	dim := lipgloss.NewStyle().Foreground(colMuted)
-	fail := lipgloss.NewStyle().Foreground(colFail)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
+	fail := lipgloss.NewStyle().Foreground(ui.Fail)
 	var rows []string
 	for _, a := range n.Attempts {
 		head := dim
@@ -300,9 +301,9 @@ func (m workspaceModel) outAttemptStep(dir int) workspaceModel {
 
 // archivedHeader is the lines that open the output view of an earlier attempt.
 func archivedHeader(a *workspace.Attempt, w int) []string {
-	dim := lipgloss.NewStyle().Foreground(colMuted)
-	text := lipgloss.NewStyle().Foreground(colText)
-	fail := lipgloss.NewStyle().Foreground(colFail)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
+	text := lipgloss.NewStyle().Foreground(ui.Text)
+	fail := lipgloss.NewStyle().Foreground(ui.Fail)
 	lines := []string{dim.Render(truncateOneLine("  "+strings.TrimSuffix(attemptLine(*a), " ›"), w))}
 	if a.Reply != "" {
 		for _, l := range hardWrap("reply: "+workspace.SanitizeText(a.Reply), w-4) {

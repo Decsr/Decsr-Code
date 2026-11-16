@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Decsr/Decsr-Code/internal/safefile"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // maxPreviewBytes caps the size of a previewed file to keep highlighting and
@@ -62,7 +63,7 @@ func (m *FilePreviewModel) Show(relPath string, isDir bool) {
 	if isDir {
 		m.path = relPath
 		m.errMsg = ""
-		m.vp.SetContent(lipgloss.NewStyle().Foreground(crt.dim).
+		m.vp.SetContent(lipgloss.NewStyle().Foreground(ui.Muted).
 			Render("  " + relPath + "/  — select a file to preview"))
 		m.vp.GotoTop()
 		return
@@ -77,7 +78,7 @@ func (m *FilePreviewModel) load(relPath string) {
 	data, err := safefile.ReadFile(m.root, relPath)
 	if err != nil {
 		m.errMsg = err.Error()
-		m.vp.SetContent(lipgloss.NewStyle().Foreground(crt.warn).
+		m.vp.SetContent(lipgloss.NewStyle().Foreground(ui.Warn).
 			Render("  cannot read file: " + err.Error()))
 		m.vp.GotoTop()
 		return
@@ -86,7 +87,7 @@ func (m *FilePreviewModel) load(relPath string) {
 		data = data[:maxPreviewBytes]
 	}
 	if isBinaryPreviewContent(data) {
-		m.vp.SetContent(lipgloss.NewStyle().Foreground(crt.dim).
+		m.vp.SetContent(lipgloss.NewStyle().Foreground(ui.Muted).
 			Render("  (binary file — no preview)"))
 		m.vp.GotoTop()
 		return
@@ -94,6 +95,7 @@ func (m *FilePreviewModel) load(relPath string) {
 
 	lang := languageForPath(relPath)
 	h := newHighlighter(lang)
+	h.style = codeStyle()
 	lines := strings.Split(strings.ReplaceAll(string(data), "\t", "    "), "\n")
 	// Wrap each source line in a fence so the highlighter colours the whole
 	// file, then strip the synthetic fence lines from the result.
@@ -105,7 +107,7 @@ func (m *FilePreviewModel) load(relPath string) {
 	}
 
 	numbered := make([]string, len(highlighted))
-	gutter := lipgloss.NewStyle().Foreground(crt.dim)
+	gutter := lipgloss.NewStyle().Foreground(ui.Muted)
 	for i, line := range highlighted {
 		numbered[i] = gutter.Render(fmt.Sprintf("%4d ", i+1)) + line
 	}
@@ -131,25 +133,20 @@ func (m *FilePreviewModel) GotoBottom() { m.vp.GotoBottom() }
 func (m *FilePreviewModel) SetFocused(b bool) { m.focused = b }
 
 func (m FilePreviewModel) View() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.primary)
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-
-	title := "File Preview"
+	title := "  " + lipgloss.NewStyle().Bold(true).Foreground(ui.Text).Render("File preview")
 	if m.path != "" {
-		title += "  " + m.path
+		title += "  " + lipgloss.NewStyle().Foreground(ui.Muted).Render(ui.TruncateMiddle(m.path, max(m.width-18, 4)))
 	}
 
-	var hint string
+	hints := []ui.Hint{{Key: "↑↓", Label: "select file"}, {Key: "Enter", Label: "open & scroll"}, {Key: "Esc", Label: "back to agent output"}}
 	if m.focused {
-		hint = dimStyle.Render("↑↓/jk scroll · PgUp/PgDn page · g/G top/bottom · Esc back to file list")
-	} else {
-		hint = dimStyle.Render("↑↓ select file · Enter open & scroll · Esc back to agent output")
+		hints = []ui.Hint{{Key: "↑↓/jk", Label: "scroll"}, {Key: "PgUp/PgDn", Label: "page"}, {Key: "g/G", Label: "top/bottom"}, {Key: "Esc", Label: "back to file list"}}
 	}
 
 	return strings.Join([]string{
-		titleStyle.Render(title),
+		ui.Truncate(title, m.width),
 		m.vp.View(),
-		hint,
+		ui.HintBar(hints, m.width),
 	}, "\n")
 }
 

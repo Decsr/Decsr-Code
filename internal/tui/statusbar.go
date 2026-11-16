@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Decsr/Decsr-Code/internal/executil"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -96,20 +97,27 @@ func formatElapsed(d time.Duration) string {
 	}
 }
 
+// Text styles of the status bar: no background, Muted for the frame of the
+// line and Text for the live values.
+var (
+	statusBarText = lipgloss.NewStyle().Foreground(ui.Muted).Padding(0, 1)
+	statusBarKey  = lipgloss.NewStyle().Foreground(ui.Text).Bold(true).Padding(0, 1)
+)
+
 // statusBarShortcut defines a keyboard shortcut displayed in the status bar.
 type statusBarShortcut struct {
 	key   string
 	desc  string
-	color lipgloss.Color
+	color lipgloss.TerminalColor
 }
 
 // statusBarShortcuts defines the shortcut hints with per-action accent colors.
 var statusBarShortcuts = []statusBarShortcut{
-	{"Ctrl+A", "approve", galaxyMint},   // aurora mint — approve
-	{"Ctrl+C", "chat", galaxyCyan},      // comet cyan — chat
-	{"Ctrl+G", "git", galaxyCyan},       // comet cyan — git
-	{"Ctrl+T", "inspect", galaxyOrange}, // solar orange — inspector
-	{"Ctrl+X", "cancel", galaxyRed},     // pulsar red — cancel
+	{"Ctrl+A", "approve", ui.OK},
+	{"Ctrl+C", "chat", ui.Accent},
+	{"Ctrl+G", "git", ui.Accent},
+	{"Ctrl+T", "inspect", ui.Warn},
+	{"Ctrl+X", "cancel", ui.Fail},
 }
 
 func (m StatusBarModel) View() string {
@@ -126,22 +134,18 @@ func (m StatusBarModel) Height() int {
 // lines when the left status segment plus the hints do not fit on one line —
 // instead of letting the hints overflow past the right edge.
 func (m StatusBarModel) viewLines() []string {
-	descStyle := lipgloss.NewStyle().
-		Background(crt.panelBg).
-		Foreground(crt.dim)
+	descStyle := lipgloss.NewStyle().Foreground(ui.Muted)
 
 	var hints []string
 	for _, sc := range statusBarShortcuts {
 		keyStyle := lipgloss.NewStyle().
-			Background(surfaceRaised).
 			Foreground(sc.color).
 			Bold(true)
 		hints = append(hints, keyStyle.Render(" "+sc.key+" ")+descStyle.Render(sc.desc))
 	}
 
 	versionTag := lipgloss.NewStyle().
-		Background(crt.panelBg).
-		Foreground(galaxyGold).
+		Foreground(ui.Muted).
 		Bold(true).
 		Render("v" + Version)
 
@@ -151,9 +155,9 @@ func (m StatusBarModel) viewLines() []string {
 	// ── Left side: fixed prefix + scrollable stageInfo + fixed suffix ──
 	prefix := ""
 	if m.branch != "" {
-		prefix = chip(m.branch, galaxyAzure) + styleStatusBar.Render(" ")
+		prefix = classicChip(m.branch, ui.Accent) + statusBarText.Render(" ")
 	}
-	prefix += styleStatusBar.Render("● " + m.state)
+	prefix += statusBarText.Render("● " + m.state)
 
 	suffix := ""
 	if m.runner != "" || m.model != "" {
@@ -164,11 +168,11 @@ func (m StatusBarModel) viewLines() []string {
 		if m.effort != "" && m.effort != "default" {
 			info += " · " + m.effort
 		}
-		suffix += "  " + styleStatusKey.Render(info)
+		suffix += "  " + statusBarKey.Render(info)
 	}
 	if !m.codingStarted.IsZero() {
 		elapsed := time.Since(m.codingStarted).Round(time.Second)
-		suffix += "  " + styleStatusKey.Render("◷ "+formatElapsed(elapsed))
+		suffix += "  " + statusBarKey.Render("◷ "+formatElapsed(elapsed))
 	}
 
 	prefixWidth := lipglossLen(prefix)
@@ -236,7 +240,7 @@ func (m StatusBarModel) renderScrollingStage(availableWidth int) string {
 	runes := []rune(label)
 
 	if len(runes) <= availableWidth {
-		return styleStatusKey.Render(label)
+		return statusBarKey.Render(label)
 	}
 
 	separator := []rune("   ···   ")
@@ -248,7 +252,7 @@ func (m StatusBarModel) renderScrollingStage(availableWidth int) string {
 		visible[i] = cycle[(m.scrollOffset+i)%cycleLen]
 	}
 
-	return styleStatusKey.Render(string(visible))
+	return statusBarKey.Render(string(visible))
 }
 
 // lipglossLen returns the visible cell width of a rendered string (ANSI-aware,

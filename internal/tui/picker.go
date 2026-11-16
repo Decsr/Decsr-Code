@@ -1,13 +1,14 @@
 package tui
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 type pickerMode int
@@ -125,105 +126,36 @@ func (m PickerModel) View() string {
 	if m.mode == pickerModeFileTree {
 		return m.tree.View()
 	}
+	w, h := max(m.width, 20), max(m.height, 6)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 
-	p := homePalette
-
-	dimStyle := lipgloss.NewStyle().Foreground(p.dim)
-	brightStyle := lipgloss.NewStyle().Foreground(p.bright)
-	cyanStyle := lipgloss.NewStyle().Foreground(p.cyan)
-	dateStyle := lipgloss.NewStyle().Foreground(p.dim).Italic(true)
-
-	header := screenHeader(m.width, "Requirements", filepath.Base(m.root))
-
-	// Build menu card content.
-	cardW := m.width - 8
-	if cardW < 40 {
-		cardW = 40
-	}
-	if cardW > 80 {
-		cardW = 80
-	}
-	innerW := cardW - 6
-	if innerW < 20 {
-		innerW = 20
-	}
-
-	var lines []string
+	lines := []string{ui.PaneLabel("Requirements source", true, w), ""}
 	for i, item := range m.items {
-		var icon, label string
+		var label, hint string
 		switch {
 		case item.isNew:
-			icon = "+"
-			label = "New — open editor"
+			label, hint = "+ New — open editor", "Create requirements from scratch"
 		case item.isPicker:
-			icon = "▸"
-			label = "Pick file from repo…"
+			label, hint = "▸ Pick file from repo…", "Browse repository files"
 		default:
-			icon = "◇"
-			label = m.shortenRecentPath(item.path)
+			label, hint = "◇ "+m.shortenRecentPath(item.path), "Re-use previous requirements"
 		}
-
-		suffix := ""
-		if item.date != "" {
-			suffix = "  " + dateStyle.Render(item.date)
-		}
-
+		lines = append(lines, "  "+ui.ListRow(ui.RowOpts{Left: label, Right: item.date, Width: max(w-4, 10), Selected: i == m.cursor, Indent: 1}))
 		if i == m.cursor {
-			activeLine := lipgloss.NewStyle().
-				Background(p.activeBg).
-				Foreground(p.green).
-				Bold(true).
-				Width(innerW).
-				Render(fmt.Sprintf(" %s %s", icon, label))
-			lines = append(lines, lipgloss.NewStyle().Foreground(focusBorder).Bold(true).Render("▌")+activeLine+suffix)
-			if item.isNew {
-				lines = append(lines, "  "+dimStyle.Render("  Create requirements from scratch"))
-			} else if item.isPicker {
-				lines = append(lines, "  "+dimStyle.Render("  Browse repository files"))
-			} else {
-				lines = append(lines, "  "+dimStyle.Render("  Re-use previous requirements"))
-			}
-		} else {
-			var styledLabel string
-			if item.isNew {
-				styledLabel = cyanStyle.Render(fmt.Sprintf("  %s %s", icon, label))
-			} else if item.isPicker {
-				styledLabel = brightStyle.Render(fmt.Sprintf("  %s %s", icon, label))
-			} else {
-				styledLabel = dimStyle.Render(fmt.Sprintf("  %s %s", icon, label))
-			}
-			lines = append(lines, styledLabel+suffix)
-		}
-		if i < len(m.items)-1 {
-			lines = append(lines, "")
+			lines = append(lines, "     "+dim.Render(ui.Truncate(hint, max(w-8, 1))))
 		}
 	}
-
-	card := pixelPanel("◆ REQUIREMENTS SOURCE", p.accent, true,
-		lipgloss.NewStyle().Padding(1, 2).Width(cardW), strings.Join(lines, "\n"))
-
 	if m.treeErr != "" {
-		errBox := lipgloss.NewStyle().
-			Border(pixelBorder).
-			BorderForeground(galaxyRed).
-			Foreground(galaxyRed).
-			Padding(0, 2).
-			Width(cardW).
-			Render("⚠  " + m.treeErr)
-		card = lipgloss.JoinVertical(lipgloss.Left, card, "", errBox)
+		lines = append(lines, "", "  "+lipgloss.NewStyle().Foreground(ui.Fail).Render(ui.Truncate("! "+m.treeErr, max(w-4, 1))))
 	}
 
-	// Center card in available space.
-	vpH := m.height - 2
-	if vpH < 4 {
-		vpH = 4
+	out := append([]string{ui.Header("decsr · Requirements · "+filepath.Base(m.root), "", w), ""}, lines...)
+	for len(out) < h-1 {
+		out = append(out, "")
 	}
-	body := lipgloss.Place(m.width, vpH, lipgloss.Center, lipgloss.Center, card)
-
-	// Footer with key hints.
-	footer := hintBar(m.width, []keyHint{{"↑↓", "navigate"}, {"Enter", "select"}, {"Esc/q", "back"}}, "")
-
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	out = out[:h-1]
+	hints := []ui.Hint{{Key: "↑↓", Label: "navigate"}, {Key: "Enter", Label: "select"}, {Key: "Esc/q", Label: "back"}}
+	return strings.Join(append(out, ui.HintBar(hints, w)), "\n")
 }
 
 func (m PickerModel) shortenRecentPath(path string) string {

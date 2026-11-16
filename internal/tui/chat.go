@@ -7,8 +7,10 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // chatLine is one entry in the chat history view.
@@ -265,9 +267,9 @@ func (m ChatModel) Update(msg tea.Msg) (ChatModel, tea.Cmd) {
 }
 
 func (m *ChatModel) refreshViewport() {
-	userStyle := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
-	assistantStyle := lipgloss.NewStyle().Foreground(crt.primary)
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
+	userStyle := lipgloss.NewStyle().Foreground(ui.Text).Bold(true)
+	assistantStyle := lipgloss.NewStyle().Foreground(ui.Text)
+	dimStyle := lipgloss.NewStyle().Foreground(ui.Muted)
 
 	var sb strings.Builder
 	for _, line := range m.lines {
@@ -296,15 +298,9 @@ func (m *ChatModel) SetSize(w, h int) {
 }
 
 func (m ChatModel) View() string {
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	inputStyle := lipgloss.NewStyle().Foreground(crt.bright)
-
-	sep := lipgloss.NewStyle().Foreground(crt.border).Render(strings.Repeat("─", m.width))
-
 	if m.picking {
 		return strings.Join([]string{
-			screenHeader(m.width, "Chat", "attach context"),
-			sep,
+			ui.Header("Chat", "attach context", m.width),
 			m.picker.View(),
 		}, "\n")
 	}
@@ -314,34 +310,72 @@ func (m ChatModel) View() string {
 		title = "Chat"
 	}
 
-	hints := []keyHint{{"Esc", "close"}, {"Enter", "send"}}
+	hints := []ui.Hint{{Key: "Enter", Label: "send"}, {Key: "Esc", Label: "close"}}
 	if m.root != "" {
-		hints = append(hints, keyHint{"Ctrl+F", "attach .md"})
+		hints = append(hints, ui.Hint{Key: "Ctrl+F", Label: "attach .md"})
 	}
 
-	var statusLine string
-	if m.revising {
-		statusLine = dimStyle.Render("  revising artifact…")
-	} else if m.waiting {
-		statusLine = dimStyle.Render("  waiting… (Esc cancel)")
+	status := ""
+	switch {
+	case m.revising:
+		status = "revising artifact…"
+	case m.waiting:
+		status = "waiting… (Esc cancel)"
+	}
+
+	names := make([]string, len(m.attached))
+	for i, a := range m.attached {
+		names[i] = a.rel
+	}
+	return chatScreen(chatScreenOpts{
+		Width: m.width, Title: title, Attached: names, Body: m.vp.View(), Hints: hints,
+		Input: m.input, Cursor: m.cursor, Status: status,
+	})
+}
+
+// chatScreenOpts describes the shared layout of the chat and negotiate screens.
+type chatScreenOpts struct {
+	Width    int
+	Title    string
+	Attached []string // names of attached files, listed under the header
+	Body     string   // the transcript viewport
+	Hints    []ui.Hint
+	Input    string
+	Cursor   int
+	Status   string // when set, shown in the input box instead of the input
+}
+
+// chatScreen lays out header, optional attachment line, transcript, input box
+// and hint bar. Every line is at most Width cells wide.
+func chatScreen(o chatScreenOpts) string {
+	w := o.Width
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
+
+	lines := []string{ui.Header(o.Title, "", w)}
+	if len(o.Attached) > 0 {
+		lines = append(lines, "  "+dim.Render(ui.Truncate("▪ "+strings.Join(o.Attached, ", "), max(w-2, 1))))
+	}
+	for _, l := range strings.Split(o.Body, "\n") {
+		lines = append(lines, ui.Truncate("  "+l, w))
+	}
+
+	inner := max(w-6, 1)
+	var view string
+	if o.Status != "" {
+		view = dim.Render(o.Status)
 	} else {
-		statusLine = inputStyle.Render("› ") + renderInputWithCursor(m.input, m.cursor)
-	}
-
-	header := screenHeader(m.width, title, "")
-	if len(m.attached) > 0 {
-		names := make([]string, len(m.attached))
-		for i, a := range m.attached {
-			names[i] = a.rel
+		view = lipgloss.NewStyle().Foreground(ui.Text).Render(renderInputWithCursor(o.Input, o.Cursor))
+		if sw := ansi.StringWidth(view); sw > inner {
+			view = ansi.TruncateLeft(view, sw-inner, "")
 		}
-		header += "\n" + dimStyle.Render("  ▪ "+strings.Join(names, ", "))
 	}
-
-	return strings.Join([]string{
-		header,
-		sep,
-		m.vp.View(),
-		hintBar(m.width, hints, ""),
-		statusLine,
-	}, "\n")
+	box := ui.InputBox(view, "", max(w-2, 5), o.Status == "", "")
+	for _, l := range strings.Split(box, "\n") {
+		lines = append(lines, " "+l)
+	}
+	lines = append(lines, ui.HintBar(o.Hints, w))
+	for i, l := range lines {
+		lines[i] = ui.Truncate(l, w)
+	}
+	return strings.Join(lines, "\n")
 }

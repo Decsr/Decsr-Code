@@ -16,6 +16,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/artifacts"
 	"github.com/Decsr/Decsr-Code/internal/safefile"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 var artifactFileRe = regexp.MustCompile(`\S+\.(md|json)`)
@@ -82,6 +83,9 @@ func newArtifactViewer(wsDir, hint string, w, h int, revise func(string, string)
 	ti := textinput.New()
 	ti.Placeholder = "Describe changes you'd like…"
 	ti.CharLimit = 0
+	ti.Prompt = ""
+	ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.Muted)
+	ti.TextStyle = lipgloss.NewStyle().Foreground(ui.Text)
 
 	m := ArtifactViewerModel{
 		filename:     filename,
@@ -227,12 +231,13 @@ func (m ArtifactViewerModel) Update(msg tea.Msg) (ArtifactViewerModel, tea.Cmd) 
 					return m, nil
 				}
 				ta := textarea.New()
+				styleTextarea(&ta)
 				ta.MaxHeight = 0 // unlimited; the default (99) blocks new lines in long files
 				ta.ShowLineNumbers = false
 				ta.SetValue(string(data))
 				ta.Focus()
 				ta.CharLimit = 0
-				ta.SetWidth(m.width - 6)
+				ta.SetWidth(m.width - 4)
 				ta.SetHeight(m.vpHeight(false) - 1)
 				m.editTA = ta
 				m.editOrig = ta.Value()
@@ -270,12 +275,11 @@ func (m ArtifactViewerModel) Update(msg tea.Msg) (ArtifactViewerModel, tea.Cmd) 
 }
 
 // vpHeight returns the viewport height given whether chat mode is active.
-// Overhead: top border(1) + title row(1) + hints row(1) + bottom border(1) = 4,
-// plus chat row(1) when active.
+// Overhead: header row(1) + hint row(1), plus the feedback row(1) in chat mode.
 func (m ArtifactViewerModel) vpHeight(chatActive bool) int {
-	overhead := 4
+	overhead := 2
 	if chatActive {
-		overhead = 5
+		overhead = 3
 	}
 	h := m.height - overhead
 	if h < 2 {
@@ -377,108 +381,85 @@ func discoverArtifacts(wsDir, current string) ([]string, int) {
 }
 
 func (m ArtifactViewerModel) View() string {
-	borderColor := crt.border
-	bSt := lipgloss.NewStyle().Foreground(borderColor)
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.primary)
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	errStyle := lipgloss.NewStyle().Foreground(crt.warn)
-
-	contentW := m.width - 2 // left border + right border
-	if contentW < 2 {
-		contentW = 2
+	w := m.width
+	if w < 10 {
+		w = 10
 	}
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
+	warn := lipgloss.NewStyle().Foreground(ui.Warn)
+	fail := lipgloss.NewStyle().Foreground(ui.Fail)
 
-	// Title line inside the frame.
-	pct := int(m.vp.ScrollPercent() * 100)
-	scrollInfo := dimStyle.Render(fmt.Sprintf(" %d%%", pct))
-	navInfo := ""
-	if len(m.artifacts) > 1 {
-		navInfo = dimStyle.Render(fmt.Sprintf("  [%d/%d]", m.artifactIdx+1, len(m.artifacts)))
-	}
-	gateMarker := ""
+	// Header: file name (and the gate marker) left, position and scroll right.
+	title := m.filename
 	if m.filename == m.gateFilename {
-		gateMarker = titleStyle.Render(" ⏸")
+		title += " ⏸"
 	}
-	titleLine := titleStyle.Render(m.filename) + gateMarker + navInfo + scrollInfo
+	right := fmt.Sprintf("%d%%", int(m.vp.ScrollPercent()*100))
+	if len(m.artifacts) > 1 {
+		right = fmt.Sprintf("[%d/%d]  %s", m.artifactIdx+1, len(m.artifacts), right)
+	}
+	header := ui.Header(title, right, w)
 
-	// Viewport or editor lines.
-	var vpLines []string
+	// Body: the viewport or the inline editor, indented by two cells.
+	var body []string
 	if m.editMode {
-		vpLines = strings.Split(m.editTA.View(), "\n")
+		body = strings.Split(m.editTA.View(), "\n")
 	} else {
-		vpRaw := m.vp.View()
-		vpLines = strings.Split(vpRaw, "\n")
+		body = strings.Split(m.vp.View(), "\n")
 	}
 	targetH := m.vpHeight(m.chatMode)
-	if len(vpLines) > targetH {
-		vpLines = vpLines[:targetH]
+	if len(body) > targetH {
+		body = body[:targetH]
 	}
-	for len(vpLines) < targetH {
-		vpLines = append(vpLines, "")
+	for len(body) < targetH {
+		body = append(body, "")
 	}
-	innerW := contentW - 2 // 1 char padding each side
-	_ = innerW
+	for i, l := range body {
+		body[i] = ui.Truncate("  "+l, w)
+	}
 
-	// Hint line inside the frame.
-	var hintLine string
-	if m.editMode {
-		if m.editWarn {
-			hintLine = errStyle.Render("unsaved changes — Esc again to discard, Ctrl+S to save")
-		} else {
-			hintLine = dimStyle.Render("Ctrl+S save   Esc cancel editing")
-		}
-	} else if m.chatMode {
-		if m.chatBusy {
-			hintLine = dimStyle.Render("Revising… please wait")
-		} else if m.chatErr != "" {
-			hintLine = errStyle.Render("Error: "+m.chatErr) + "  " + dimStyle.Render("Esc cancel")
-		} else {
-			hintLine = dimStyle.Render("Feedback: ") + m.chatInput.View() + dimStyle.Render("  Enter submit   Esc cancel")
-		}
-	} else {
-		var parts []string
-		parts = append(parts, "↑↓/jk scroll")
-		if m.filename == artifacts.ContextPackFile {
-			parts = append(parts, "section 7 = your context")
-		}
+	// Footer: the feedback row (chat mode) and the hint row.
+	var footer []string
+	var hints string
+	switch {
+	case m.editMode && m.editWarn:
+		hints = "  " + warn.Render("unsaved changes: Esc again to discard, Ctrl+S to save")
+	case m.editMode:
+		hints = ui.HintBar([]ui.Hint{{Key: "Ctrl+S", Label: "save"}, {Key: "Esc", Label: "cancel editing"}}, w)
+	case m.chatMode && m.chatBusy:
+		hints = "  " + dim.Render("Revising… please wait")
+	case m.chatMode && m.chatErr != "":
+		footer = append(footer, "  "+fail.Render("Error: "+m.chatErr))
+		hints = ui.HintBar([]ui.Hint{{Key: "Enter", Label: "submit"}, {Key: "Esc", Label: "cancel"}}, w)
+	case m.chatMode:
+		footer = append(footer, "  "+dim.Render("Feedback › ")+m.chatInput.View())
+		hints = ui.HintBar([]ui.Hint{{Key: "Enter", Label: "submit"}, {Key: "Esc", Label: "cancel"}}, w)
+	default:
+		hs := []ui.Hint{{Key: "↑↓/jk", Label: "scroll"}}
 		if len(m.artifacts) > 1 {
-			parts = append(parts, "[/] prev/next")
+			hs = append(hs, ui.Hint{Key: "[/]", Label: "prev/next"})
 		}
+		hs = append(hs, ui.Hint{Key: "Ctrl+A", Label: "approve"}, ui.Hint{Key: "Esc", Label: "close"})
 		if m.wsDir != "" && m.filename != "review" {
-			parts = append(parts, "e edit")
+			hs = append(hs, ui.Hint{Key: "e", Label: "edit"})
 		}
 		if m.revise != nil {
-			parts = append(parts, "c revise")
+			hs = append(hs, ui.Hint{Key: "c", Label: "revise"})
 		}
-		parts = append(parts, "r regenerate", "Ctrl+A approve", "Esc close")
-		hintLine = dimStyle.Render(strings.Join(parts, "  "))
-	}
-
-	// Collect all interior rows: title, viewport lines, (optional chat), hints.
-	interiorRows := make([]string, 0, targetH+3)
-	interiorRows = append(interiorRows, titleLine)
-	interiorRows = append(interiorRows, vpLines...)
-	if m.chatMode {
-		interiorRows = append(interiorRows, hintLine)
-	} else {
-		interiorRows = append(interiorRows, hintLine)
-	}
-
-	// Build bordered output.
-	hRule := strings.Repeat("─", contentW)
-	var sb strings.Builder
-	sb.WriteString(bSt.Render("╭"+hRule+"╮") + "\n")
-	for _, row := range interiorRows {
-		vis := lipgloss.Width(row)
-		pad := contentW - vis
-		if pad < 0 {
-			pad = 0
+		hs = append(hs, ui.Hint{Key: "r", Label: "regenerate"})
+		if m.filename == artifacts.ContextPackFile {
+			hs = append(hs, ui.Hint{Key: "section 7", Label: "your context"})
 		}
-		sb.WriteString(bSt.Render("│") + " " + row + strings.Repeat(" ", max(pad-1, 0)) + bSt.Render("│") + "\n")
+		hints = ui.HintBar(hs, w)
 	}
-	sb.WriteString(bSt.Render("╰" + hRule + "╯"))
+	footer = append(footer, hints)
+	for i, l := range footer {
+		footer[i] = ui.Truncate(l, w)
+	}
 
-	return sb.String()
+	out := append([]string{header}, body...)
+	out = append(out, footer...)
+	return strings.Join(out, "\n")
 }
 
 // truncateToWidth cuts a string to fit within maxW visible characters,

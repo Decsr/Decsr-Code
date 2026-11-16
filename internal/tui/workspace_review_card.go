@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -46,7 +47,7 @@ func proposalRow(a workspace.AppliedProposal) (text string, colour lipgloss.Term
 		if len(a.DependsOn) > 0 {
 			t += " after " + strings.Join(a.DependsOn, ", ")
 		}
-		return t, colOK
+		return t, ui.OK
 	case workspace.ActionChange:
 		t := "~ change " + a.NodeID
 		if a.Title != "" {
@@ -55,13 +56,13 @@ func proposalRow(a workspace.AppliedProposal) (text string, colour lipgloss.Term
 		if i := strings.Index(a.Text, "("); i >= 0 {
 			t += " " + a.Text[i:]
 		}
-		return t, colAccent
+		return t, ui.Accent
 	}
 	t := "× cancel " + a.NodeID
 	if a.Reason != "" {
 		t += " — " + a.Reason
 	}
-	return t, colFail
+	return t, ui.Fail
 }
 
 // skippedRow is the dim row of a proposal that was not valid.
@@ -91,17 +92,17 @@ func clipRows(text string, w, max int) []string {
 // is resolved and not expanded is one dim line; a pending or expanded one is a
 // rounded card with the note, the proposals and the skipped ones.
 func renderReviewCard(r workspace.Review, width int, selected, expanded bool) []string {
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	if r.State != workspace.ReviewPending && !expanded {
 		st := dim
 		if selected {
-			st = lipgloss.NewStyle().Foreground(colAccent)
+			st = lipgloss.NewStyle().Foreground(ui.Accent)
 		}
 		return []string{st.Render(truncateOneLine(reviewHeadline(r)+" ›", width))}
 	}
 	iw := max(width-4, 4)
-	text := lipgloss.NewStyle().Foreground(colText)
-	head := lipgloss.NewStyle().Foreground(colAccent).Bold(true).Render("Lead review") + dim.Render(fmt.Sprintf(" %d · ", r.Round)) +
+	text := lipgloss.NewStyle().Foreground(ui.Text)
+	head := lipgloss.NewStyle().Foreground(ui.Accent).Bold(true).Render("Lead review") + dim.Render(fmt.Sprintf(" %d · ", r.Round)) +
 		dim.Render(strings.TrimPrefix(reviewHeadline(r), fmt.Sprintf("Lead review %d · ", r.Round)))
 	clock := dim.Render(feedClock(r.At))
 	gap := max(iw-ansi.StringWidth(head)-ansi.StringWidth(clock), 1)
@@ -140,12 +141,12 @@ func renderReviewCard(r workspace.Review, width int, selected, expanded bool) []
 	if r.State == workspace.ReviewPending {
 		rows = append(rows, text.Render("y apply · n reject")+dim.Render("  (/review y, /review n)"))
 	}
-	bc := colBorder
+	bc := ui.Border
 	switch {
 	case selected:
-		bc = colAccent
+		bc = ui.Accent
 	case r.State == workspace.ReviewPending:
-		bc = colWarn
+		bc = ui.Warn
 	}
 	b := lipgloss.NewStyle().Foreground(bc)
 	out := make([]string, 0, len(rows)+2)

@@ -340,7 +340,7 @@ prompt and lands there.
 | `/review [y\|n]` | Run one lead review now; `y` applies the waiting proposals, `n` rejects them (see [Coordinator mode](#coordinator-mode)) |
 | `/budget [amount\|off]` | Spending per runner and the models without a price; `/budget 10` sets this session's budget, `/budget off` removes that override (see [Cost and budget](#cost-and-budget)) |
 | `/export` | Write the session to `.decsr/exports/<session id>.md` (title, transcript, summary, each node with role, status, files and summary) |
-| `/config` (`/menu`) | Leave for the classic menu: settings, project setup, classic pipeline |
+| `/config` (`/menu`) | Leave for the Home launcher: settings, project setup, classic pipeline |
 | `/quit` (`/exit`) | Leave the Workspace (asks first while nodes run) |
 | `/<name> [args]` | A [custom command](#custom-commands-and-skills) |
 | `/<plugin>:<name> [args]` | A command of a [plugin](#plugins) |
@@ -645,7 +645,7 @@ agents:
 A custom role without a runner or model uses the `pm` agent's. Role names are
 2-32 characters: lowercase letters, digits and `_`, starting with a letter.
 Create roles from the assignment picker or `/roles`, or edit the file by hand.
-Project Setup (`s` on the Home menu) lists custom roles after the built-ins, lets
+Project Setup (`s` on the Home launcher) lists custom roles after the built-ins, lets
 you change their runner, model and effort, and keeps every custom role, plus the
 description and `read_only` flag of all roles, when it saves.
 
@@ -1482,8 +1482,9 @@ with other flags, e.g. `decsr --tmux --issue 42`.
 
 ## Reaching the classic pipeline
 
-- Type `/config` (or `/menu`) in the Workspace to open the Home menu. Its `CLASSIC PIPELINE`
-  item (`1`) starts the old New Task flow; `WORKSPACE` (`w`) returns here.
+- Type `/config` (or `/menu`) in the Workspace to open the Home launcher. Its
+  Classic pipeline action (`1`) starts the old New Task flow; Workspace (`w`)
+  returns here, and `Enter` on a saved session opens the Workspace on it.
 - Changes made in the menu (settings, a different project) apply when you come
   back to the Workspace, which then opens in the selected project.
 - `decsr task ...` and `decsr run --requirements ...` behave as before, and

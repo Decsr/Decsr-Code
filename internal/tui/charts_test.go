@@ -6,7 +6,16 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
+
+// forceTrueColor makes lipgloss emit colour codes for the test.
+func forceTrueColor(t *testing.T) {
+	t.Helper()
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+}
 
 func TestStackedBarWidthAndMinimum(t *testing.T) {
 	a, b, c := lipgloss.Color("#4a86ff"), lipgloss.Color("#5ce1e6"), lipgloss.Color("#ffd166")
@@ -44,13 +53,13 @@ func TestStackedBarEmpty(t *testing.T) {
 	if got := ansi.Strip(stackedBar(nil, 10)); got != strings.Repeat("░", 10) {
 		t.Fatalf("got %q", got)
 	}
-	if got := ansi.Strip(stackedBar([]chartSegment{{0, "#fff"}}, 10)); got != strings.Repeat("░", 10) {
+	if got := ansi.Strip(stackedBar([]chartSegment{{0, lipgloss.Color("#fff")}}, 10)); got != strings.Repeat("░", 10) {
 		t.Fatalf("zero: got %q", got)
 	}
 }
 
 func TestSparklineScales(t *testing.T) {
-	if got := ansi.Strip(sparkline([]int{0, 1, 8}, 5, "#fff")); got != "   ▁█" {
+	if got := ansi.Strip(sparkline([]int{0, 1, 8}, 5, lipgloss.Color("#fff"))); got != "   ▁█" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -60,7 +69,7 @@ func TestSparklineTrimsToWidth(t *testing.T) {
 	for i := range vals {
 		vals[i] = i + 1
 	}
-	if n := len([]rune(ansi.Strip(sparkline(vals, 10, "#fff")))); n != 10 {
+	if n := len([]rune(ansi.Strip(sparkline(vals, 10, lipgloss.Color("#fff"))))); n != 10 {
 		t.Fatalf("got %d runes", n)
 	}
 }
@@ -68,7 +77,7 @@ func TestSparklineTrimsToWidth(t *testing.T) {
 func TestColumnChartHiddenAndMinimum(t *testing.T) {
 	cols := make([]chartColumn, 30)
 	for i := range cols {
-		cols[i] = chartColumn{value: 300, color: "#fff"}
+		cols[i] = chartColumn{value: 300, color: lipgloss.Color("#fff")}
 	}
 	cols[0].value = 120000
 	lines, hidden := columnChart(cols, 20, 4)
@@ -105,7 +114,7 @@ func TestColumnChartEmpty(t *testing.T) {
 }
 
 func TestColumnChartOddWidth(t *testing.T) {
-	lines, _ := columnChart([]chartColumn{{5, "#fff", ""}}, 7, 3)
+	lines, _ := columnChart([]chartColumn{{5, lipgloss.Color("#fff"), ""}}, 7, 3)
 	for _, l := range lines {
 		if w := ansi.StringWidth(l); w != 7 {
 			t.Fatalf("width %d", w)

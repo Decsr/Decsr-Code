@@ -10,6 +10,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // maxAttachBytes caps how much of a single .md file is injected as context,
@@ -242,66 +244,50 @@ func sliceIndexOf(ss []string, s string) int {
 }
 
 func (m mdPicker) View() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.primary)
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	brightStyle := lipgloss.NewStyle().Foreground(crt.bright)
+	title := lipgloss.NewStyle().Bold(true).Foreground(ui.Text)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
+	text := lipgloss.NewStyle().Foreground(ui.Text)
 
-	var sb strings.Builder
-	sb.WriteString(titleStyle.Render("◆ Attach .md context"))
-	sb.WriteString("  " + dimStyle.Render("Space toggle  Enter confirm  Ctrl+O type path  Esc cancel"))
-	sb.WriteString("\n")
-	sb.WriteString(lipgloss.NewStyle().Foreground(crt.border).Render(strings.Repeat("─", m.width)))
-	sb.WriteString("\n")
+	var lines []string
+	lines = append(lines, "  "+title.Render("Attach markdown context"))
 
 	// Manual path entry line.
 	if m.entering {
-		sb.WriteString(brightStyle.Render("path › ") + renderInputWithCursor(m.entry, m.entryCursor))
-		sb.WriteString("\n")
+		lines = append(lines, "  "+dim.Render("path › ")+text.Render(renderInputWithCursor(m.entry, m.entryCursor)))
 		if m.entryErr != "" {
-			sb.WriteString(dimStyle.Render("  " + m.entryErr))
-			sb.WriteString("\n")
+			lines = append(lines, "  "+lipgloss.NewStyle().Foreground(ui.Fail).Render(m.entryErr))
 		} else {
-			sb.WriteString(dimStyle.Render("  type any .md path (relative or absolute), Enter to add, Esc to cancel"))
-			sb.WriteString("\n")
+			lines = append(lines, "  "+dim.Render("type any .md path (relative or absolute), Enter to add, Esc to cancel"))
 		}
 	}
 
 	if len(m.files) == 0 {
 		if !m.entering {
-			sb.WriteString(dimStyle.Render("  no markdown files found — press Ctrl+O to type a path"))
+			lines = append(lines, "  "+dim.Render("no markdown files found. Press Ctrl+O to type a path"))
 		}
-		return sb.String()
-	}
-
-	rows := m.height - 4
-	if m.entering {
-		rows -= 2
-	}
-	if rows < 3 {
-		rows = 3
-	}
-	start := 0
-	if m.cursor >= rows {
-		start = m.cursor - rows + 1
-	}
-	for i := start; i < len(m.files) && i < start+rows; i++ {
-		rel := m.files[i]
-		check := "[ ]"
-		if m.selected[rel] {
-			check = brightStyle.Render("[x]")
+	} else {
+		rows := m.height - len(lines) - 2 // hint row and count row
+		if rows < 3 {
+			rows = 3
 		}
-		label := rel
-		if i == m.cursor {
-			sb.WriteString(brightStyle.Render("▸ ") + check + " " + brightStyle.Render(label))
-		} else {
-			sb.WriteString("  " + check + " " + dimStyle.Render(label))
+		start := 0
+		if m.cursor >= rows {
+			start = m.cursor - rows + 1
 		}
-		sb.WriteString("\n")
+		for i := start; i < len(m.files) && i < start+rows; i++ {
+			rel := m.files[i]
+			check := "[ ]"
+			if m.selected[rel] {
+				check = "[x]"
+			}
+			lines = append(lines, ui.ListRow(ui.RowOpts{Left: check + " " + rel, Width: m.width, Selected: i == m.cursor}))
+		}
+		if len(m.files) > rows {
+			lines = append(lines, "  "+dim.Render(fmt.Sprintf("%d/%d", m.cursor+1, len(m.files))))
+		}
 	}
-	if len(m.files) > rows {
-		sb.WriteString(dimStyle.Render(fmt.Sprintf("  %d/%d", m.cursor+1, len(m.files))))
-	}
-	return sb.String()
+	lines = append(lines, ui.HintBar([]ui.Hint{{Key: "Space", Label: "toggle"}, {Key: "Enter", Label: "confirm"}, {Key: "Ctrl+O", Label: "type path"}, {Key: "Esc", Label: "cancel"}}, m.width))
+	return strings.Join(lines, "\n")
 }
 
 // loadAttachments reads selected paths into chatAttachment values, truncating

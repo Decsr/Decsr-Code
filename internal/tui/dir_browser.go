@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -8,7 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // DirSelectedMsg is emitted when a directory is chosen as a project.
@@ -217,94 +219,60 @@ func (m DirBrowserModel) Update(msg tea.Msg) (DirBrowserModel, tea.Cmd) {
 }
 
 func (m DirBrowserModel) View() string {
-	projectStyle := lipgloss.NewStyle().Foreground(crt.success).Bold(true)
-	dirStyle := lipgloss.NewStyle().Foreground(crt.primary)
-	cursorBg := lipgloss.NewStyle().
-		Background(crt.muted).
-		Foreground(crt.bright).
-		Bold(true)
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	sep := lipgloss.NewStyle().Foreground(crt.border).Render(strings.Repeat("─", max(m.width, 0)))
-
-	header := screenHeader(m.width, "Open Project", m.cwd)
-
-	var lines []string
-	lines = append(lines, header, sep)
+	w := max(m.width, 1)
+	lines := []string{
+		ui.Header("decsr · open project", ui.TruncateMiddle(tildePath(m.cwd), max(w/2, 8)), w),
+		"",
+		ui.PaneLabel("Directories", false, w),
+	}
 
 	rows := m.visibleRows()
 	start := 0
 	if m.cursor >= rows {
 		start = m.cursor - rows + 1
 	}
-
 	for i := start; i < len(m.entries) && i < start+rows; i++ {
 		e := m.entries[i]
-		maxW := m.width - 6
-		if maxW < 1 {
-			maxW = 1
-		}
-
-		label := e.name + "/"
-		if e.name == ".." {
-			label = ".."
-		}
-		if ansi.StringWidth(label) > maxW {
-			label = ansi.Truncate(label, maxW, "…")
-		}
-
-		var rendered string
+		var left, meta string
 		switch {
-		case e.isProject:
-			rendered = projectStyle.Render("  ◆ " + label)
 		case e.name == "..":
-			rendered = dirStyle.Render("  ↑ " + label)
+			left = "↑ .."
+		case e.isProject:
+			left, meta = "◆ "+e.name+"/", "project"
 		default:
-			rendered = dirStyle.Render("  ▪ " + label)
+			left = "▪ " + e.name + "/"
 		}
-
-		if i == m.cursor {
-			pad := m.width - 2 - lipglossLen(rendered)
-			if pad < 0 {
-				pad = 0
-			}
-			rendered = cursorBg.Render("▶ " + strings.TrimPrefix(rendered, "  ") + strings.Repeat(" ", pad))
-		}
-		lines = append(lines, rendered)
+		lines = append(lines, ui.ListRow(ui.RowOpts{Left: left, Right: meta, Width: w, Selected: i == m.cursor, Indent: 1}))
 	}
-
 	if len(m.entries) > rows {
-		pct := 0
-		if len(m.entries) > 1 {
-			pct = m.cursor * 100 / (len(m.entries) - 1)
-		}
-		lines = append(lines, dimStyle.Render(
-			strings.Repeat("─", max(m.width-8, 0))+"  "+
-				strings.Repeat("░", pct/10)+strings.Repeat("·", 10-pct/10)))
+		lines = append(lines, dim(fmt.Sprintf("   %d/%d", m.cursor+1, len(m.entries))))
 	}
-
 	if m.err != "" {
-		lines = append(lines, styleError.Render("  "+m.err))
+		reason := m.err // "open /path: permission denied" shows its reason
+		if i := strings.LastIndex(reason, ": "); i >= 0 {
+			reason = reason[i+2:]
+		}
+		lines = append(lines, lipgloss.NewStyle().Foreground(ui.Fail).Render(ui.Truncate("  cannot open: "+reason, w)))
 	}
-	lines = append(lines, sep)
 
 	enterLabel := "open"
 	if len(m.entries) > 0 && m.cursor < len(m.entries) && m.entries[m.cursor].isProject {
 		enterLabel = "select"
 	}
-	lines = append(lines, hintBar(m.width, []keyHint{
-		{"↑↓", "navigate"}, {"Enter", enterLabel}, {"o", "force-select"},
-		{".", "hidden"}, {"~", "home"}, {"←", "back"}, {"Esc", "cancel"},
-	}, ""))
+	// The hint bar sits on the last row of the screen.
+	for len(lines) < max(m.height, 4)-1 {
+		lines = append(lines, "")
+	}
+	lines = append(lines, ui.HintBar([]ui.Hint{
+		{Key: "↑↓", Label: "move"}, {Key: "Enter", Label: enterLabel}, {Key: "o", Label: "force-select"},
+		{Key: ".", Label: "hidden"}, {Key: "~", Label: "home"}, {Key: "←", Label: "back"}, {Key: "Esc", Label: "cancel"},
+	}, w))
 
 	return strings.Join(lines, "\n")
 }
 
 func (m DirBrowserModel) visibleRows() int {
-	rows := m.height - 5
-	if rows < 4 {
-		rows = 4
-	}
-	return rows
+	return max(m.height-7, 4)
 }
 
 // SetSize updates the browser dimensions.

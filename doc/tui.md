@@ -6,14 +6,14 @@ what needs me now?*
 
 > **Default screen:** `decsr` with no arguments opens the [Workspace](workspace.md)
 > (prompt, node graph, assign agents; saved sessions per project, `decsr resume`).
-> This reference covers the classic pipeline cockpit, reached from the Home menu
-> with `/config` (or `/menu`) in the Workspace.
+> This reference covers the classic pipeline cockpit, reached from the Home
+> launcher with `/config` (or `/menu`) in the Workspace.
 
 The run header is two lines. Line 1 is the task title, an optional pipeline
 tag, a 7-segment phase strip, an optional state label (`FAILED`, `GATE`,
 `DONE`), the elapsed time, and total tokens. In the strip, `▰` is a finished
-or active phase and `▱` is pending: done is cyan, active is azure, a gate turns
-the segment gold, and a failure turns it red. Line 2 is the agent strip, one
+or active phase and `▱` is pending: done is green, active is the accent colour, a gate turns
+the segment amber, and a failure turns it red. Line 2 is the agent strip, one
 chip per agent: a glyph (a spinner for the running agent, `✓` done, `○`
 waiting, `!` error), the short label, its tokens (`—` if none), and `×calls`.
 Below 110 columns the strip uses a compact form.
@@ -173,6 +173,18 @@ From 100 columns the Workspace has a sidebar with the nodes and saved sessions
 beside the main pane, which shows an activity feed by default (`g` switches to
 the node graph, `b` toggles the sidebar); see [workspace.md](workspace.md#layout).
 
+## Themes
+
+`ui.theme` picks the colours: `auto` (default), `dark` or `light`. `auto` asks
+the terminal for its background once at startup, before the TUI starts, and
+finishes the query before the first key is read. It does not ask, and uses dark,
+when stdin or stdout is not a terminal, `$TERM` is `dumb`, or decsr runs inside
+tmux or screen (they cannot answer for the outer terminal); set `ui.theme:
+light` there to get the light theme. A terminal that does not answer also gives
+dark. An invalid value counts as `auto`, and `decsr doctor` warns about it. All
+screens share the colour tokens and components in `internal/ui` (header, pane
+label, card, list row, hint bar, input box, overlay and status glyphs).
+
 ## Keyboard
 
 | Key | Action |
@@ -190,7 +202,7 @@ the node graph, `b` toggles the sidebar); see [workspace.md](workspace.md#layout
 | `Ctrl+X` | Cancel the run. |
 | `Ctrl+P` | Pause to change the model. |
 | `Ctrl+E` | Resume the build-fix loop after a failure. |
-| `?` | Open or close the help overlay (also on the home screen). |
+| `?` | Open or close the help overlay (also on the Home launcher). |
 | `q` | Quit. |
 | `Esc` | Cancel / return; when the run is done, return to the menu. |
 
@@ -241,10 +253,33 @@ In Project Setup the language list starts with `auto`, which shows what is
 detected (for example `auto (cpp)`). Choosing `auto` saves no language, so
 detection stays in effect.
 
+## Home launcher
+
+`/config` (or `/menu`) in the Workspace opens Home, a two-column launcher.
+The left column lists recent projects and the saved sessions of the current
+project, with the language, lead and autonomy of the project under them. The
+right column lists the actions in groups (Start, Settings, More): Workspace
+(`w`), open a project (`o`), Global settings (`g`), Project setup (`s`),
+connect a provider (`k`), Model memory (`m`), the classic pipeline (`1`),
+reset artifacts (`c`) and quit (`q`).
+
+Use the arrow keys to move and `Tab` to switch column. `Enter` on a project
+switches to it, and `Enter` on a session opens the Workspace on that session.
+`r` resumes the interrupted task, `?` opens help. Below 100 columns the two
+columns stack.
+
 ## Setup screens
 
-**Global Settings** and **Project Setup** choose each agent's runner, model, and
-reasoning effort. The effort list follows the selected model.
+**Global Settings** chooses the provider, model and reasoning effort for all
+agents. The provider is a row of tabs (`←→`); providers that cannot be reached
+are listed on a dim `offline:` line instead. Model and Effort sit side by side
+from 110 columns and stacked below. A model list is shown in full when it fits
+the screen; otherwise it scrolls with `… N more` markers. The effort list
+follows the selected model. `Tab` moves between the sections.
+
+**Project Setup** has the Agents list on the left and the project values on
+the right. `Enter` on an agent opens an editor with Runner, Model, Effort and
+Mode (text or agent) for that agent.
 
 **Enter saves the current choice**, shows a green **`✓ Saved`** indicator in the
 footer, and advances to the next section. The screen stays open. **Esc** closes

@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -470,8 +471,8 @@ func sanitizeCode(s string) string {
 // ── View ─────────────────────────────────────────────────────────────────────
 
 func diffCounts(added, removed int) string {
-	ok := lipgloss.NewStyle().Foreground(colOK)
-	bad := lipgloss.NewStyle().Foreground(colFail)
+	ok := lipgloss.NewStyle().Foreground(ui.OK)
+	bad := lipgloss.NewStyle().Foreground(ui.Fail)
 	return ok.Render(fmt.Sprintf("+%d", added)) + " " + bad.Render(fmt.Sprintf("−%d", removed))
 }
 
@@ -479,7 +480,7 @@ func diffCountsPlain(added, removed int) string { return fmt.Sprintf("+%d −%d"
 
 func (m workspaceModel) diffTitleLine(w int) string {
 	v := m.diff
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	a, r := v.diff.Totals()
 	nf := len(v.diff.Files)
 	meta := fmt.Sprintf(" · %d %s ", nf, pluralize(nf, "file", "files"))
@@ -491,7 +492,7 @@ func (m workspaceModel) diffTitleLine(w int) string {
 		noteTxt = fmt.Sprintf(" · %d %s", notes, pluralize(notes, "note", "notes"))
 	}
 	room := max(w-4-ansi.StringWidth(meta)-rightW-ansi.StringWidth(noteTxt), 6)
-	title := lipgloss.NewStyle().Foreground(colText).Bold(true).Render(truncateOneLine(v.title, room))
+	title := lipgloss.NewStyle().Foreground(ui.Text).Bold(true).Render(truncateOneLine(v.title, room))
 	return "  " + title + dim.Render(meta) + right + dim.Render(noteTxt)
 }
 
@@ -514,7 +515,7 @@ func (m workspaceModel) diffView() string {
 	if v == nil {
 		return ""
 	}
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	var head []string
 	head = append(head, m.diffTitleLine(w))
 	hints := []keyHint{{"Esc", "back"}, {"j/k", "scroll"}, {"n/p", "hunk"}, {"[ ]", "file"}, {"c", "note"}, {"S", "send notes"}}
@@ -529,14 +530,14 @@ func (m workspaceModel) diffView() string {
 	if !wide && len(v.diff.Files) > 0 {
 		f := v.diff.Files[v.file]
 		sel := fmt.Sprintf("[ file %d/%d: %s ]", v.file+1, len(v.diff.Files), f.Path)
-		head = append(head, "  "+lipgloss.NewStyle().Foreground(colAccent).Render(truncateOneLine(sel, w-4)))
+		head = append(head, "  "+lipgloss.NewStyle().Foreground(ui.Accent).Render(truncateOneLine(sel, w-4)))
 	}
 	bodyH := max(h-len(head)-1, 1)
 	v.body = bodyH
 	var body []string
 	switch {
 	case v.err != "":
-		body = []string{"  " + lipgloss.NewStyle().Foreground(colFail).Render(truncateOneLine("! "+v.err, w-4))}
+		body = []string{"  " + lipgloss.NewStyle().Foreground(ui.Fail).Render(truncateOneLine("! "+v.err, w-4))}
 	case len(v.diff.Files) == 0:
 		body = []string{"  " + dim.Render("No changes in this node.")}
 		if v.nodeID == "" {
@@ -546,7 +547,7 @@ func (m workspaceModel) diffView() string {
 		lw := min(wsDiffListMax, w/4)
 		list := m.diffFileList(lw, bodyH)
 		pane := m.diffPane(w-lw-1, bodyH)
-		sep := lipgloss.NewStyle().Foreground(colBorder).Render("│")
+		sep := lipgloss.NewStyle().Foreground(ui.Border).Render("│")
 		for i := 0; i < bodyH; i++ {
 			l, p := "", ""
 			if i < len(list) {
@@ -570,7 +571,7 @@ func (m workspaceModel) diffView() string {
 
 func (m workspaceModel) diffStatusLine(w int) string {
 	v := m.diff
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	if v.editing {
 		l := v.curLine()
 		label := "Note"
@@ -579,10 +580,10 @@ func (m workspaceModel) diffStatusLine(w int) string {
 			label = fmt.Sprintf("Note · line %d", no)
 		}
 		v.input.Width = max(w-ansi.StringWidth(label)-8, 8)
-		return "  " + lipgloss.NewStyle().Foreground(colAccent).Render(label+" › ") + v.input.View() + dim.Render("  Enter save · Esc cancel")
+		return "  " + lipgloss.NewStyle().Foreground(ui.Accent).Render(label+" › ") + v.input.View() + dim.Render("  Enter save · Esc cancel")
 	}
 	if v.msg != "" {
-		return "  " + lipgloss.NewStyle().Foreground(colWarn).Render(truncateOneLine(v.msg, w-4))
+		return "  " + lipgloss.NewStyle().Foreground(ui.Warn).Render(truncateOneLine(v.msg, w-4))
 	}
 	if f := v.curFile(); f != nil && len(v.rowsOf()) > 0 {
 		pos := fmt.Sprintf("%s · row %d/%d", f.Path, v.cur+1, len(v.rowsOf()))
@@ -616,21 +617,21 @@ func (m workspaceModel) diffFileList(w, h int) []string {
 		sel := i == v.file
 		bg := lipgloss.NewStyle()
 		if sel {
-			bg = bg.Background(colSel)
+			bg = bg.Background(ui.Sel)
 		}
-		fg := colText
+		fg := ui.Text
 		if !sel {
-			fg = colMuted
+			fg = ui.Muted
 		}
 		lead := "  "
 		if sel {
 			lead = "▌ "
 		}
-		row := bg.Foreground(colAccent).Render(lead) + bg.Foreground(fg).Render(name+strings.Repeat(" ", gap))
+		row := bg.Foreground(ui.Accent).Render(lead) + bg.Foreground(fg).Render(name+strings.Repeat(" ", gap))
 		if f.Binary {
-			row += bg.Foreground(colMuted).Render(counts + " ")
+			row += bg.Foreground(ui.Muted).Render(counts + " ")
 		} else {
-			row += bg.Foreground(colOK).Render(fmt.Sprintf("+%d", f.Added)) + bg.Render(" ") + bg.Foreground(colFail).Render(fmt.Sprintf("−%d", f.Removed)) + bg.Render(" ")
+			row += bg.Foreground(ui.OK).Render(fmt.Sprintf("+%d", f.Added)) + bg.Render(" ") + bg.Foreground(ui.Fail).Render(fmt.Sprintf("−%d", f.Removed)) + bg.Render(" ")
 		}
 		out = append(out, row)
 	}
@@ -655,7 +656,7 @@ func (m workspaceModel) diffPane(w, h int) []string {
 		case f.OldPath != "":
 			msg = "Renamed from " + f.OldPath + "."
 		}
-		return []string{"  " + lipgloss.NewStyle().Foreground(colMuted).Render(truncateOneLine(msg, w-2))}
+		return []string{"  " + lipgloss.NewStyle().Foreground(ui.Muted).Render(truncateOneLine(msg, w-2))}
 	}
 	maxNo := 0
 	for _, hk := range f.Hunks {
@@ -705,42 +706,37 @@ func (m workspaceModel) diffPane(w, h int) []string {
 	return out[:min(len(out), h)]
 }
 
-var (
-	diffTintAdd = lerpColor(crt.bg, colOK, 0.16)
-	diffTintDel = lerpColor(crt.bg, colFail, 0.18)
-)
-
 // renderRow renders one row to exactly w cells. Added and removed rows are
 // tinted over the whole width in one background so no stripes show.
 func (v *wsDiffView) renderRow(f *workspace.DiffFile, r diffRow, cursor bool, w, nw int) string {
 	gutter := 2*nw + 3
 	mark := " "
 	if cursor {
-		mark = lipgloss.NewStyle().Foreground(colAccent).Render("▌")
+		mark = lipgloss.NewStyle().Foreground(ui.Accent).Render("▌")
 	}
 	avail := max(w-gutter, 1)
 	if r.line < 0 {
 		hdr := f.Hunks[r.hunk].Header
-		st := lipgloss.NewStyle().Foreground(colAccent).Faint(true)
+		st := lipgloss.NewStyle().Foreground(ui.Accent).Faint(true)
 		if cursor {
-			st = st.Background(colSel)
+			st = st.Background(ui.Sel)
 		}
 		return mark + st.Render(padRight(truncPlain(" "+strings.Repeat(" ", gutter-1)+sanitizeCode(hdr), w-1), w-1))
 	}
 	l := f.Hunks[r.hunk].Lines[r.line]
 	bg := lipgloss.NewStyle()
-	fg := colText
+	fg := ui.Text
 	sign := string(l.Kind)
 	switch l.Kind {
 	case '+':
-		bg, fg = bg.Background(diffTintAdd), colOK
+		bg, fg = bg.Background(ui.DiffAdd), ui.OK
 	case '-':
-		bg, fg = bg.Background(diffTintDel), colFail
+		bg, fg = bg.Background(ui.DiffDel), ui.Fail
 	case '\\':
-		fg, sign = colMuted, " "
+		fg, sign = ui.Muted, " "
 	}
 	if cursor {
-		bg = lipgloss.NewStyle().Background(colSel)
+		bg = lipgloss.NewStyle().Background(ui.Sel)
 	}
 	num := func(n int) string {
 		if n <= 0 {
@@ -748,7 +744,7 @@ func (v *wsDiffView) renderRow(f *workspace.DiffFile, r diffRow, cursor bool, w,
 		}
 		return fmt.Sprintf("%*d", nw, n)
 	}
-	nums := bg.Foreground(colMuted).Render(num(l.OldNo) + " " + num(l.NewNo) + " ")
+	nums := bg.Foreground(ui.Muted).Render(num(l.OldNo) + " " + num(l.NewNo) + " ")
 	text := ansi.TruncateLeft(sanitizeCode(l.Text), v.hx, "")
 	body := sign + " " + text
 	body = padRight(ansi.Truncate(body, avail, "…"), avail)
@@ -757,9 +753,9 @@ func (v *wsDiffView) renderRow(f *workspace.DiffFile, r diffRow, cursor bool, w,
 
 // renderNoteBox is the rounded box of a note under its line, indented by pad.
 func renderNoteBox(n workspace.DiffNote, w int, pad string) []string {
-	border := lipgloss.NewStyle().Foreground(colAccent)
-	dim := lipgloss.NewStyle().Foreground(colMuted)
-	text := lipgloss.NewStyle().Foreground(colText)
+	border := lipgloss.NewStyle().Foreground(ui.Accent)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
+	text := lipgloss.NewStyle().Foreground(ui.Text)
 	inner := max(w-4, 4)
 	title := fmt.Sprintf("Note · line %d", n.Line)
 	lines := hardWrap(oneLine(workspace.SanitizeText(n.Text)), inner)

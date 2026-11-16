@@ -158,7 +158,7 @@ func TestWorkspaceHelpOnlyWhenEmpty(t *testing.T) {
 	if !h.m.showHelp {
 		t.Fatal("? on an empty prompt opens help")
 	}
-	h.want("COMMANDS")
+	h.want("Commands")
 	h.want("/compact")
 	h.key("esc")
 	h.key("a", "?")
@@ -669,4 +669,21 @@ func TestWorkspaceMergeWithoutMergedNodesSaysSo(t *testing.T) {
 	h.key("tab")
 	h.typeCmd("/merge")
 	h.want("no node of this session has been merged yet")
+}
+
+func TestWorkspaceOptionsSessionOpensThatSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	s := workspace.NewSession()
+	s.Title = "Chosen on Home"
+	s.AddLine("you", "x")
+	if err := s.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	m := newWorkspaceModel(root, config.DefaultConfig(), wsDeps{}, WorkspaceOptions{Session: s.ID})
+	t.Cleanup(m.runCancel)
+	if m.sess.snapshot().ID != s.ID {
+		t.Fatalf("session = %q, want %q", m.sess.snapshot().ID, s.ID)
+	}
+	_ = m.Init()
 }

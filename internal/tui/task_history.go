@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Decsr/Decsr-Code/internal/decsr"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // TaskHistoryClosedMsg is emitted when the task history view is dismissed.
@@ -51,28 +52,28 @@ func (m TaskHistoryModel) Update(msg tea.Msg) (TaskHistoryModel, tea.Cmd) {
 }
 
 func (m TaskHistoryModel) View() string {
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	doneStyle := lipgloss.NewStyle().Foreground(galaxyCyan).Bold(true)
-	selStyle := lipgloss.NewStyle().Background(surfaceRaised).Foreground(crt.bright).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(ui.Muted)
+	doneStyle := lipgloss.NewStyle().Foreground(ui.OK).Bold(true)
+	selStyle := lipgloss.NewStyle().Background(ui.Sel).Foreground(ui.Text).Bold(true)
 
 	var b strings.Builder
-	b.WriteString(screenHeader(m.width, "Done Tasks", ""))
+	b.WriteString(ui.Header("Done tasks", "", m.width))
 	b.WriteString("\n\n")
 
 	if len(m.tasks) == 0 {
 		b.WriteString(dimStyle.Render("  No completed tasks yet."))
-		b.WriteString("\n\n" + hintBar(m.width, []keyHint{{"Esc", "back"}}, ""))
+		b.WriteString("\n\n" + ui.HintBar([]ui.Hint{{Key: "Esc", Label: "back"}}, m.width))
 		return b.String()
 	}
 
 	for i, t := range m.tasks {
 		if i == m.cursor {
-			b.WriteString(lipgloss.NewStyle().Foreground(focusBorder).Bold(true).Render("▌") +
+			b.WriteString(lipgloss.NewStyle().Foreground(ui.Accent).Bold(true).Render("▌") +
 				selStyle.Render(" "+t.Title+"  ("+t.ID+")") + "\n")
 		} else {
 			b.WriteString("  " + doneStyle.Render("✓ ") + t.Title + " " + dimStyle.Render("("+t.ID+")") + "\n")
 		}
 	}
-	b.WriteString("\n" + hintBar(m.width, []keyHint{{"↑↓", "scroll"}, {"Esc", "back"}}, ""))
+	b.WriteString("\n" + ui.HintBar([]ui.Hint{{Key: "↑↓", Label: "scroll"}, {Key: "Esc", Label: "back"}}, m.width))
 	return b.String()
 }

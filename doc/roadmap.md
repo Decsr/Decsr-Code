@@ -5,6 +5,9 @@ ideas from the desktop app Orca (stablyai/orca) without its desktop or mobile
 surface. Phases are built one at a time, in order. Each one is tested and
 committed before the next starts.
 
+Phases 5–8 improve the UI/UX, borrowing Orca's interaction ideas. Each UI
+phase starts with text mockups that you approve before anything is built.
+
 ## Principles
 
 - Terminal first. Every feature works in the TUI and over SSH.
@@ -182,6 +185,118 @@ limits usage.
 **Builds on.** `--tmux`, autonomy levels, budgets, notifications, `/pr` and
 `/pr watch`, starting from an issue, runners.
 
+## Phase 5 — Consistency and theme
+
+**Goal.** Every screen looks and behaves like the Workspace, and light and dark
+terminals both work.
+
+**Features**
+
+- One shared set of UI components in an internal package: header, pane label,
+  card, list row, hint bar, input box, overlay and status glyphs. All screens
+  use it. The old galaxy styles are deleted once unused.
+- Restyled screens: Home, Global Settings, Project Setup, Model Memory, the
+  project picker, help, the artifact viewer, file preview, the editor, and
+  chat/negotiate.
+- Home becomes an Orca-style launcher: recent projects and sessions on the
+  left, actions on the right. Plain `decsr` still opens the Workspace.
+- The classic pipeline is frozen: it gets only the shared header, hint bar and
+  colours. There is no new UI work for it, and its removal is decided later.
+- Light and dark palettes, chosen with `ui.theme: auto | dark | light`. `auto`
+  asks the terminal for its background once at startup with a short timeout
+  and falls back to dark when it does not answer (common inside tmux).
+
+**Done when**
+
+- [x] No screen uses the old galaxy styles.
+- [x] Home is the launcher, and plain `decsr` still opens the Workspace.
+- [x] Every listed screen uses the shared components.
+- [x] `ui.theme` works, and `auto` falls back to dark.
+- [x] The classic pipeline shows the shared header, hint bar and colours.
+
+**Builds on.** The Workspace look (Phase 1 and earlier), setup screens, `ui`
+settings.
+
+## Phase 6 — Inbox, palette and first run
+
+**Goal.** Never miss something that needs you, find anything fast, and make the
+first start easy.
+
+**Features**
+
+- Inbox: a count at the top of the sidebar (`● 3 need you`) and a list opened
+  with `N`. Enter jumps to the item.
+- The inbox lists:
+  - nodes waiting on a question, a block or a usage limit
+  - L1 review cards
+  - failed nodes without a fix
+  - nodes stalled for 5 minutes or more
+  - pending plugin prompts
+  - budget warnings
+  - the last automation results that failed or need you
+- Actionable items clear themselves when resolved. Informational items
+  (automation results, budget warnings) are cleared with `x`.
+- Ctrl+K palette: one search box across inbox items, commands, nodes, sessions
+  and projects, in that order, with fuzzy matching. It sits next to the
+  existing `/` and `@` palettes.
+- First-run setup: opens when no runner is usable at startup (the same rule as
+  `decsr doctor`'s required backend check). Pick a runner, connect a key if
+  needed, see a short doctor result, and land in the Workspace. `Esc` skips
+  it, and `decsr setup` opens it any time.
+
+**Done when**
+
+- [ ] The sidebar count and the `N` list show all listed item types and clear
+      as specified.
+- [ ] Ctrl+K finds items of every kind.
+- [ ] The first-run setup opens only when no runner is usable.
+- [ ] `decsr setup` opens the first-run setup.
+
+**Builds on.** Waiting nodes, reviews, limits, automations, notifications,
+`decsr connect`, `decsr doctor`.
+
+## Phase 7 — Split view and mouse
+
+**Goal.** Watch the feed and a node's live work side by side, and use the mouse
+when you want to.
+
+**Features**
+
+- Split view: `v` toggles it at 140 or more columns. The feed is on the left
+  and the selected node's live timeline on the right, following the selection.
+  On narrower terminals `v` shows a hint.
+- Mouse: click to select a node or card, scroll the feed, click a fold to
+  expand. Hit areas use the `bubblezone` library. `ui.mouse: false` turns the
+  mouse off so the terminal can select text. Keyboard use stays complete
+  without the mouse.
+
+**Done when**
+
+- [ ] `v` splits at 140 or more columns and shows a hint below that.
+- [ ] Clicks and scrolling work.
+- [ ] `ui.mouse: false` disables them.
+
+**Builds on.** The feed, output timeline, sidebar.
+
+## Phase 8 — Rendering
+
+**Goal.** Make long text and code changes easy to read.
+
+**Features**
+
+- Markdown with Charm's `glamour` in feed messages (yours and the lead's),
+  node summaries, report questions and message items in the output view. It
+  renders at full width, falls back to plain text below 60 columns, and is
+  never used inside the sidebar or graph cards.
+- Syntax-highlighted diffs with `chroma` (already a dependency).
+
+**Done when**
+
+- [ ] Those places render Markdown, with the plain fallback.
+- [ ] The diff view highlights code by language.
+
+**Builds on.** The feed, output view, diff view.
+
 ## Out of scope
 
 - Remote execution over SSH or cloud VMs.
@@ -193,6 +308,8 @@ ntfy notifications and `--tmux` over SSH cover most remote needs.
 
 ## How phases are delivered
 
+- Each UI phase (5–8) starts with text mockups. You approve them before the
+  phase is built.
 - Each phase ends with a report of what changed and how to try it.
 - You test it and ask for the commit.
 - The next phase starts only with your OK.

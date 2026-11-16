@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -105,7 +106,7 @@ func TestInspectorSkillsSection(t *testing.T) {
 	n := &workspace.Node{ID: "T1", Title: "Do", Kind: workspace.KindWork, Status: workspace.StatusTodo, Role: "coder",
 		Skills: []string{"sp:debug", "sp:tdd", "sp:ghost"}}
 	g := &workspace.Graph{Nodes: []*workspace.Node{n}}
-	out := ansi.Strip(renderInspector(g, n, cfg, set, 46, 30, nil))
+	out := ansi.Strip(renderInspector(g, n, cfg, set, time.Now(), 46, 30, nil))
 	for _, want := range []string{"Skills", "sp:tdd (role)", "notes (role)", "sp:debug (lead)", "sp:ghost (lead) (not installed)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("inspector lacks %q:\n%s", want, out)
@@ -116,7 +117,7 @@ func TestInspectorSkillsSection(t *testing.T) {
 	}
 	// No skills, no section.
 	n2 := &workspace.Node{ID: "T2", Title: "Do", Kind: workspace.KindWork, Status: workspace.StatusTodo}
-	if out := ansi.Strip(renderInspector(&workspace.Graph{Nodes: []*workspace.Node{n2}}, n2, cfg, set, 46, 30, nil)); strings.Contains(out, "Skills") {
+	if out := ansi.Strip(renderInspector(&workspace.Graph{Nodes: []*workspace.Node{n2}}, n2, cfg, set, time.Now(), 46, 30, nil)); strings.Contains(out, "Skills") {
 		t.Errorf("empty Skills section:\n%s", out)
 	}
 }
@@ -127,7 +128,7 @@ func TestInspectorSkillsSanitizedAndBounded(t *testing.T) {
 		n.Skills = append(n.Skills, fmt.Sprintf("p:s%02d", i))
 	}
 	g := &workspace.Graph{Nodes: []*workspace.Node{n}}
-	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, 40, 40, nil))
+	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, time.Now(), 40, 40, nil))
 	if !strings.Contains(out, "+") || strings.Count(out, "(lead)") > 6 {
 		t.Errorf("skills not bounded:\n%s", out)
 	}

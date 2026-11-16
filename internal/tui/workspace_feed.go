@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -165,7 +166,7 @@ func (c *feedCache) put(key string, l []string) {
 // lines are dim, errors red.
 func renderFeedMsg(who, text string, at time.Time, w int) []string {
 	text = workspace.SanitizeText(text)
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	clock := ""
 	if !at.IsZero() {
 		clock = dim.Render("  " + feedClock(at))
@@ -173,13 +174,13 @@ func renderFeedMsg(who, text string, at time.Time, w int) []string {
 	var out []string
 	switch who {
 	case "you", "lead":
-		label, col := "You", colText
+		label, col := "You", ui.Text
 		if who == "lead" {
-			label, col = "Lead", colAccent
+			label, col = "Lead", ui.Accent
 		}
 		out = append(out, lipgloss.NewStyle().Foreground(col).Bold(true).Render(label)+clock)
 		for _, l := range hardWrap(text, w-2) {
-			out = append(out, "  "+lipgloss.NewStyle().Foreground(colText).Render(l))
+			out = append(out, "  "+lipgloss.NewStyle().Foreground(ui.Text).Render(l))
 		}
 	case "system":
 		for i, l := range hardWrap(text, w-2) {
@@ -195,7 +196,7 @@ func renderFeedMsg(who, text string, at time.Time, w int) []string {
 			if i == 0 {
 				p = "! "
 			}
-			out = append(out, lipgloss.NewStyle().Foreground(colFail).Render(p+l))
+			out = append(out, lipgloss.NewStyle().Foreground(ui.Fail).Render(p+l))
 		}
 	}
 	return out
@@ -253,7 +254,7 @@ func tailPath(p string, w int) string {
 
 // fileRow is one "Edited path   +18 −2" row of w cells.
 func fileRow(st workspace.FileStat, hasCounts bool, w int) string {
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	verb := "Edited"
 	if st.New {
 		verb = "Added"
@@ -267,11 +268,11 @@ func fileRow(st workspace.FileStat, hasCounts bool, w int) string {
 		var parts []string
 		var plain []string
 		if st.Added > 0 || st.Removed == 0 {
-			parts = append(parts, lipgloss.NewStyle().Foreground(colOK).Render(fmt.Sprintf("+%d", st.Added)))
+			parts = append(parts, lipgloss.NewStyle().Foreground(ui.OK).Render(fmt.Sprintf("+%d", st.Added)))
 			plain = append(plain, fmt.Sprintf("+%d", st.Added))
 		}
 		if st.Removed > 0 {
-			parts = append(parts, lipgloss.NewStyle().Foreground(colFail).Render(fmt.Sprintf("−%d", st.Removed)))
+			parts = append(parts, lipgloss.NewStyle().Foreground(ui.Fail).Render(fmt.Sprintf("−%d", st.Removed)))
 			plain = append(plain, fmt.Sprintf("−%d", st.Removed))
 		}
 		counts, cw = strings.Join(parts, " "), ansi.StringWidth(strings.Join(plain, " "))
@@ -281,7 +282,7 @@ func fileRow(st workspace.FileStat, hasCounts bool, w int) string {
 		room -= cw + 2
 	}
 	path := tailPath(st.Path, room)
-	left := dim.Render(verb) + " " + lipgloss.NewStyle().Foreground(colText).Render(path)
+	left := dim.Render(verb) + " " + lipgloss.NewStyle().Foreground(ui.Text).Render(path)
 	if cw == 0 {
 		return left
 	}
@@ -303,7 +304,7 @@ func cardFiles(n *workspace.Node, w int) []string {
 	for i, st := range stats {
 		if i == cardFileRows {
 			more := len(stats) - cardFileRows
-			rows = append(rows, lipgloss.NewStyle().Foreground(colMuted).Render(fmt.Sprintf("+%d more %s", more, pluralize(more, "file", "files"))))
+			rows = append(rows, lipgloss.NewStyle().Foreground(ui.Muted).Render(fmt.Sprintf("+%d more %s", more, pluralize(more, "file", "files"))))
 			break
 		}
 		rows = append(rows, fileRow(st, hasCounts, w))
@@ -315,7 +316,7 @@ func cardFiles(n *workspace.Node, w int) []string {
 // left; runner glyph, model, start time and ↗ dim on the right.
 func cardHeader(o cardOpts, iw int) string {
 	n := o.n
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	glyph, _ := nodeStatusGlyph(o.g, n)
 	if n.Status == workspace.StatusRunning && o.spin != "" {
 		glyph = o.spin
@@ -339,7 +340,7 @@ func cardHeader(o cardOpts, iw int) string {
 		}
 	}
 	room := max(iw-ansi.StringWidth(left)-ansi.StringWidth(right)-1, 1)
-	title := lipgloss.NewStyle().Foreground(colText).Bold(true).Render(truncateOneLine(n.Title, room))
+	title := lipgloss.NewStyle().Foreground(ui.Text).Bold(true).Render(truncateOneLine(n.Title, room))
 	line := left + title
 	gap := max(iw-ansi.StringWidth(line)-ansi.StringWidth(right), 1)
 	return line + strings.Repeat(" ", gap) + right
@@ -348,9 +349,9 @@ func cardHeader(o cardOpts, iw int) string {
 // cardBody is the rows under the header.
 func cardBody(o cardOpts, iw int) []string {
 	n := o.n
-	dim := lipgloss.NewStyle().Foreground(colMuted)
-	text := lipgloss.NewStyle().Foreground(colText)
-	fail := lipgloss.NewStyle().Foreground(colFail)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
+	text := lipgloss.NewStyle().Foreground(ui.Text)
+	fail := lipgloss.NewStyle().Foreground(ui.Fail)
 	var rows []string
 	took := func() time.Duration {
 		if n.EndedAt.IsZero() || n.EndedAt.Before(n.StartedAt) {
@@ -386,9 +387,9 @@ func cardBody(o cardOpts, iw int) []string {
 		}
 		work := text.Render("Working for "+feedDuration(o.now.Sub(n.StartedAt))) + dim.Render(cardMeta(n))
 		if s := stallText(n, o.now); s != "" {
-			work += dim.Render(" · ") + lipgloss.NewStyle().Foreground(colWarn).Render(s)
+			work += dim.Render(" · ") + lipgloss.NewStyle().Foreground(ui.Warn).Render(s)
 		}
-		rows = append(rows, lipgloss.NewStyle().Foreground(colAccent).Render(sp)+" "+work+dim.Render(arrow))
+		rows = append(rows, lipgloss.NewStyle().Foreground(ui.Accent).Render(sp)+" "+work+dim.Render(arrow))
 		if check && !hasAct {
 			cmds()
 		}
@@ -413,7 +414,7 @@ func cardBody(o cardOpts, iw int) []string {
 			line = word + feedDuration(d)
 		}
 		if check {
-			rows = append(rows, lipgloss.NewStyle().Foreground(colOK).Render(line)+dim.Render(cardMeta(n)+arrow))
+			rows = append(rows, lipgloss.NewStyle().Foreground(ui.OK).Render(line)+dim.Render(cardMeta(n)+arrow))
 			cmds()
 		} else {
 			rows = append(rows, dim.Render(line+cardMeta(n)+arrow))
@@ -435,7 +436,7 @@ func cardBody(o cardOpts, iw int) []string {
 			rows = append(rows, limitCardRows(n, iw, o.now, line, arrow)...)
 			break
 		}
-		rows = append(rows, lipgloss.NewStyle().Foreground(colWarn).Render("◇ waiting")+dim.Render(line+cardMeta(n)+arrow))
+		rows = append(rows, lipgloss.NewStyle().Foreground(ui.Warn).Render("◇ waiting")+dim.Render(line+cardMeta(n)+arrow))
 		rows = append(rows, waitingRows(n, iw)...)
 		rows = append(rows, cardFiles(n, iw)...)
 		hint := "m reply"
@@ -522,7 +523,7 @@ func waitingRows(n *workspace.Node, iw int) []string {
 		lines = lines[:cardWaitingLines]
 		lines[cardWaitingLines-1] = truncateOneLine(lines[cardWaitingLines-1]+" …", iw)
 	}
-	st := lipgloss.NewStyle().Foreground(colWarn)
+	st := lipgloss.NewStyle().Foreground(ui.Warn)
 	out := make([]string, len(lines))
 	for i, l := range lines {
 		out[i] = st.Render(l)
@@ -544,25 +545,25 @@ func summaryRows(s string, iw int) []string {
 	}
 	out := make([]string, len(lines))
 	for i, l := range lines {
-		out[i] = lipgloss.NewStyle().Foreground(colText).Render(l)
+		out[i] = lipgloss.NewStyle().Foreground(ui.Text).Render(l)
 	}
 	return out
 }
 
 // renderNodeCard draws a node card in a rounded border of exactly o.width
-// cells: colAccent when selected, colFail when failed.
+// cells: ui.Accent when selected, ui.Fail when failed.
 func renderNodeCard(o cardOpts) []string {
 	iw := o.width - 4
 	if iw < 4 {
 		iw = 4
 	}
 	rows := append([]string{cardHeader(o, iw)}, cardBody(o, iw)...)
-	bc := colBorder
+	bc := ui.Border
 	switch {
 	case o.selected:
-		bc = colAccent
+		bc = ui.Accent
 	case o.n.Status == workspace.StatusFailed:
-		bc = colFail
+		bc = ui.Fail
 	}
 	b := lipgloss.NewStyle().Foreground(bc)
 	out := make([]string, 0, len(rows)+2)
@@ -661,11 +662,11 @@ func (m workspaceModel) feedLayout(pw int) (lines []string, spans map[string][2]
 		if len(lines) > 0 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, pad+lipgloss.NewStyle().Foreground(colAccent).Bold(true).Render("Lead")+"  "+
-			lipgloss.NewStyle().Foreground(colText).Render(spin+" splitting the task…  (Esc cancels)"))
+		lines = append(lines, pad+lipgloss.NewStyle().Foreground(ui.Accent).Bold(true).Render("Lead")+"  "+
+			lipgloss.NewStyle().Foreground(ui.Text).Render(spin+" splitting the task…  (Esc cancels)"))
 		if m.stream != nil {
 			if last := m.stream.lastLine(); last != "" {
-				lines = append(lines, pad+"  "+lipgloss.NewStyle().Foreground(colMuted).Render(truncateOneLine(last, cw-2)))
+				lines = append(lines, pad+"  "+lipgloss.NewStyle().Foreground(ui.Muted).Render(truncateOneLine(last, cw-2)))
 			}
 		}
 	}
@@ -674,8 +675,8 @@ func (m workspaceModel) feedLayout(pw int) (lines []string, spans map[string][2]
 		if len(lines) > 0 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, pad+lipgloss.NewStyle().Foreground(colAccent).Bold(true).Render("Lead")+"  "+
-			lipgloss.NewStyle().Foreground(colText).Render(spin+" reviewing the batch…  (Esc cancels)"))
+		lines = append(lines, pad+lipgloss.NewStyle().Foreground(ui.Accent).Bold(true).Render("Lead")+"  "+
+			lipgloss.NewStyle().Foreground(ui.Text).Render(spin+" reviewing the batch…  (Esc cancels)"))
 	}
 	return lines, spans
 }
@@ -774,8 +775,8 @@ func (m workspaceModel) feedSelect(dir int) workspaceModel {
 // feedPane draws the activity pane in exactly h rows of w cells: the label
 // row, then the feed or the empty state.
 func (m workspaceModel) feedPane(w, h int) []string {
-	dim := lipgloss.NewStyle().Foreground(colMuted)
-	label := paneLabel("Activity", m.focus != wsFocusPrompt) + dim.Render(" · g graph")
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
+	label := ui.PaneLabel("Activity", m.focus != wsFocusPrompt, 0) + dim.Render(" · g graph")
 	if !m.feedFollow {
 		tag := "G latest ↓"
 		if gap := w - ansi.StringWidth(label) - ansi.StringWidth(tag) - 2; gap > 0 {

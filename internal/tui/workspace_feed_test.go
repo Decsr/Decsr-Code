@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -313,17 +314,17 @@ func TestNodeCardBorderColours(t *testing.T) {
 	failed := feedTestNode("T1", workspace.StatusFailed, feedT0)
 	_, o := cardFixture(failed)
 	o.width = 60
-	if top := renderNodeCard(o)[0]; !strings.Contains(top, seq(string(colFail))) {
-		t.Errorf("failed border is not colFail: %q", top)
+	if top := renderNodeCard(o)[0]; !strings.Contains(top, seq(ui.Fail.Dark)) {
+		t.Errorf("failed border is not ui.Fail: %q", top)
 	}
 	o.selected = true
-	if top := renderNodeCard(o)[0]; !strings.Contains(top, seq(string(colAccent))) {
-		t.Errorf("selected border is not colAccent: %q", top)
+	if top := renderNodeCard(o)[0]; !strings.Contains(top, seq(ui.Accent.Dark)) {
+		t.Errorf("selected border is not ui.Accent: %q", top)
 	}
 	o.selected = false
 	o.n = feedTestNode("T2", workspace.StatusDone, feedT0)
-	if top := renderNodeCard(o)[0]; !strings.Contains(top, seq(string(colBorder))) {
-		t.Errorf("plain border is not colBorder: %q", top)
+	if top := renderNodeCard(o)[0]; !strings.Contains(top, seq(ui.Border.Dark)) {
+		t.Errorf("plain border is not ui.Border: %q", top)
 	}
 }
 
@@ -599,7 +600,7 @@ func TestSidebarTruncatesLongTitles(t *testing.T) {
 
 func TestSidebarSelectedRowHasBackgroundAcrossWidth(t *testing.T) {
 	forceTrueColor(t)
-	bg := termenv.TrueColor.Color(string(colSel)).Sequence(true)
+	bg := termenv.TrueColor.Color(ui.Sel.Dark).Sequence(true)
 	h := feedHarness(t)
 	rows := h.m.sidebarRows(30, 20)
 	// rows 0-1 are the title; T1 (selected) takes rows 2-3, T2 rows 4-5

@@ -4,20 +4,33 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
-// Markdown styles for the artifact viewer. Headings, list bullets, inline bold,
-// and "Label:" prefixes get CRT-palette colours so plans/specs are readable.
+// Markdown styles for the artifact viewer. Headings and inline bold are bold
+// Text, list bullets and "Label:" prefixes are Muted: weight carries the
+// structure and colour is left for meaning.
 var (
-	mdH1Style     = lipgloss.NewStyle().Bold(true).Foreground(crt.bright)
-	mdH2Style     = lipgloss.NewStyle().Bold(true).Foreground(crt.primary)
-	mdH3Style     = lipgloss.NewStyle().Foreground(crt.primary)
-	mdBulletStyle = lipgloss.NewStyle().Foreground(crt.success)
-	mdLabelStyle  = lipgloss.NewStyle().Foreground(crt.dim)
-	mdBoldStyle   = lipgloss.NewStyle().Bold(true).Foreground(crt.bright)
+	mdH1Style     = lipgloss.NewStyle().Bold(true).Foreground(ui.Text)
+	mdH2Style     = lipgloss.NewStyle().Bold(true).Foreground(ui.Text)
+	mdH3Style     = lipgloss.NewStyle().Foreground(ui.Text).Underline(true)
+	mdBulletStyle = lipgloss.NewStyle().Foreground(ui.Muted)
+	mdLabelStyle  = lipgloss.NewStyle().Foreground(ui.Muted)
+	mdBoldStyle   = lipgloss.NewStyle().Bold(true).Foreground(ui.Text)
 )
+
+// codeStyle is the syntax-highlighting palette for the active theme: a light
+// one on a light terminal so the code stays readable.
+func codeStyle() *chroma.Style {
+	if ui.IsDark() {
+		return styles.Get("dracula")
+	}
+	return styles.Get("github")
+}
 
 var (
 	mdBoldRe  = regexp.MustCompile(`\*\*(.+?)\*\*`)
@@ -30,7 +43,7 @@ var (
 // the wrap width math (which ignores ANSI) stays correct.
 func styleArtifactContent(filename, wrapped string) string {
 	if strings.HasSuffix(filename, ".json") {
-		return highlightCode(wrapped, "JSON", styles.Get("dracula"))
+		return highlightCode(wrapped, "JSON", codeStyle())
 	}
 	lines := strings.Split(wrapped, "\n")
 	for i, line := range lines {

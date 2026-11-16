@@ -9,9 +9,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Decsr/Decsr-Code/internal/bus"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 const maxConvLines = 200
+
+var convDim = lipgloss.NewStyle().Foreground(ui.Muted)
 
 // ConversationModel shows a scrollable log of bus messages.
 type ConversationModel struct {
@@ -67,9 +70,9 @@ func formatConvLine(msg bus.Message) string {
 		return ""
 	}
 
-	ts := styleConvTimestamp.Render(msg.Timestamp.Format("15:04:05"))
+	ts := convDim.Render(msg.Timestamp.Format("15:04:05"))
 	from := roleStyle(string(msg.From)).Render(padRole(string(msg.From)))
-	to := styleConvTimestamp.Render(padRole(string(msg.To)))
+	to := convDim.Render(padRole(string(msg.To)))
 
 	var summary string
 	switch p := msg.Payload.(type) {
@@ -87,7 +90,7 @@ func formatConvLine(msg bus.Message) string {
 }
 
 func roleStyle(role string) lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(roleColor(role))
+	return lipgloss.NewStyle().Foreground(classicRoleColor(role))
 }
 
 func padRole(r string) string {

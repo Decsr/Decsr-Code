@@ -12,6 +12,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/agent"
 	"github.com/Decsr/Decsr-Code/internal/bus"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -438,18 +439,18 @@ func (m SysmonModel) View() string {
 		contentW = 20
 	}
 
-	borderColor := crt.border
-	headerStyle := lipgloss.NewStyle().Foreground(galaxyBlue).Bold(true)
-	labelStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	valueStyle := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
+	borderColor := ui.Border
+	headerStyle := lipgloss.NewStyle().Foreground(ui.Accent).Bold(true)
+	labelStyle := lipgloss.NewStyle().Foreground(ui.Muted)
+	valueStyle := lipgloss.NewStyle().Foreground(ui.Text).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(ui.Muted)
 	bSt := lipgloss.NewStyle().Foreground(borderColor)
 
 	hRule := strings.Repeat("─", contentW+2)
 	thinSep := bSt.Render("│") + dimStyle.Render(strings.Repeat("┄", contentW+2)) + bSt.Render("│")
 
 	var lines []string
-	lines = append(lines, panelTop(contentW+4, "◆ SYSTEM MONITOR", galaxyCyan, borderColor))
+	lines = append(lines, classicPanelTop(contentW+4, "◆ SYSTEM MONITOR", ui.Accent, borderColor))
 
 	addLine := func(content string) {
 		vis := lipgloss.Width(content)
@@ -559,8 +560,8 @@ func (m SysmonModel) View() string {
 
 	// ── NET ──
 	addSection("NET")
-	netDnColor := galaxyCyan
-	netUpColor := galaxyBlue
+	netDnColor := ui.Accent
+	netUpColor := ui.Accent
 	dnStyle := lipgloss.NewStyle().Foreground(netDnColor).Bold(true)
 	upStyle := lipgloss.NewStyle().Foreground(netUpColor).Bold(true)
 	addLine(dnStyle.Render(" ▼ "+formatRate(m.recvRate)) + "  " +
@@ -572,13 +573,13 @@ func (m SysmonModel) View() string {
 	const tokenAgentRows = 5
 	if total := m.totalTokens(); total > 0 {
 		addSection("TOKENS")
-		totalColor := galaxyGold
+		totalColor := ui.Warn
 		totalStyle := lipgloss.NewStyle().Foreground(totalColor).Bold(true)
 		addLine(labelStyle.Render(" Total: ") + totalStyle.Render(formatTokens(total)))
 
 		renderAgentLine := func(role bus.AgentRole) string {
 			u := m.agentUsage[role]
-			roleStyle := lipgloss.NewStyle().Foreground(roleColor(string(role))).Bold(true)
+			roleStyle := lipgloss.NewStyle().Foreground(classicRoleColor(string(role))).Bold(true)
 			est := ""
 			if u.Estimated {
 				est = "~"
@@ -787,7 +788,7 @@ func (m SysmonModel) renderProjectTree(contentW, maxRows int) []string {
 	}
 
 	total := len(m.projectTree)
-	dimSt := lipgloss.NewStyle().Foreground(crt.dim)
+	dimSt := lipgloss.NewStyle().Foreground(ui.Muted)
 
 	// Focused navigation: window the list around the cursor and highlight it.
 	if m.treeFocused {
@@ -863,17 +864,17 @@ func (m SysmonModel) renderTreeEntry(entry projectTreeEntry, contentW int, selec
 	}
 
 	if entry.isDir {
-		style := lipgloss.NewStyle().Foreground(crt.dim)
+		style := lipgloss.NewStyle().Foreground(ui.Muted)
 		if m.hasActiveDescendant(entry.relPath) {
-			style = lipgloss.NewStyle().Foreground(crt.primary).Bold(true)
+			style = lipgloss.NewStyle().Foreground(ui.Text).Bold(true)
 		}
 		return style.Render(label)
 	}
 
 	if activity, ok := m.activeFiles[entry.relPath]; ok {
-		return lipgloss.NewStyle().Foreground(roleColor(string(activity.role))).Bold(true).Render(label)
+		return lipgloss.NewStyle().Foreground(classicRoleColor(string(activity.role))).Bold(true).Render(label)
 	}
-	return lipgloss.NewStyle().Foreground(crt.bright).Render(label)
+	return lipgloss.NewStyle().Foreground(ui.Text).Render(label)
 }
 
 func (m SysmonModel) hasActiveDescendant(relPath string) bool {
@@ -1002,7 +1003,7 @@ func renderCoreDotted(idx int, pct float64, history []float64, colW int) string 
 		barW = 3
 	}
 
-	coreStyle := lipgloss.NewStyle().Foreground(crt.dim)
+	coreStyle := lipgloss.NewStyle().Foreground(ui.Muted)
 	pctStyle := lipgloss.NewStyle().Foreground(color)
 
 	dotBar := renderBrailleDotBar(history, barW, color)
@@ -1012,7 +1013,7 @@ func renderCoreDotted(idx int, pct float64, history []float64, colW int) string 
 
 // renderBrailleDotBar renders a 1-row block sparkline history bar (one data
 // point per column, 8 levels via ▁..█). The name is historical.
-func renderBrailleDotBar(history []float64, width int, color lipgloss.Color) string {
+func renderBrailleDotBar(history []float64, width int, color lipgloss.TerminalColor) string {
 	data := make([]float64, width)
 	if len(history) >= width {
 		copy(data, history[len(history)-width:])
@@ -1051,7 +1052,7 @@ func renderSegmentedBar(percent float64, maxWidth int) string {
 	empty := barWidth - filled
 
 	segmentSize := 4 // gap every N characters
-	emptyStyle := lipgloss.NewStyle().Foreground(crt.muted)
+	emptyStyle := lipgloss.NewStyle().Foreground(ui.Border)
 
 	var sb strings.Builder
 	for i := 0; i < filled; i++ {
@@ -1061,7 +1062,7 @@ func renderSegmentedBar(percent float64, maxWidth int) string {
 		}
 		// Insert thin gap at segment boundaries.
 		if i > 0 && i%segmentSize == 0 {
-			sb.WriteString(lipgloss.NewStyle().Foreground(crt.bg).Render("▏"))
+			sb.WriteString(" ")
 		} else {
 			sb.WriteString(lipgloss.NewStyle().Foreground(gradientColors[bucketIdx]).Render("█"))
 		}
@@ -1082,7 +1083,7 @@ func renderSegmentedBar(percent float64, maxWidth int) string {
 // vertical resolution using ▁..█. When fixedMax is > 0 it is used as the
 // ceiling (e.g. 100 for CPU%); otherwise the max is auto-detected. The name is
 // historical.
-func renderBrailleGraph(history []float64, width, graphRows int, color lipgloss.Color, fixedMax float64) string {
+func renderBrailleGraph(history []float64, width, graphRows int, color lipgloss.TerminalColor, fixedMax float64) string {
 	totalLevels := graphRows * 8
 
 	data := make([]float64, width)
@@ -1140,13 +1141,11 @@ func renderBrailleGraph(history []float64, width, graphRows int, color lipgloss.
 	return strings.Join(rowStrings, "\n")
 }
 
-// gradientColors defines the bar gradient from aurora mint (low) through star gold to pulsar red (high).
-var gradientColors = []lipgloss.Color{
-	galaxyMint, galaxyMint, // 0-19%  aurora mint
-	lipgloss.Color("#a7e78f"), lipgloss.Color("#d3dc7a"), // 20-39% mint-gold blend
-	galaxyGold, galaxyGold, // 40-59% star gold
-	galaxyOrange, galaxyOrange, // 60-79% solar orange
-	galaxyRed, galaxyRed, // 80-100% pulsar red
+// gradientColors defines the bar gradient from OK (low) through Warn to Fail (high).
+var gradientColors = []lipgloss.TerminalColor{
+	ui.OK, ui.OK, ui.OK, ui.OK, // 0-39%
+	ui.Warn, ui.Warn, ui.Warn, ui.Warn, // 40-79%
+	ui.Fail, ui.Fail, // 80-100%
 }
 
 // renderGradientBar renders a horizontal bar with a btop-style color gradient.
@@ -1165,7 +1164,7 @@ func renderGradientBar(percent float64, maxWidth int) string {
 	}
 	empty := barWidth - filled
 
-	emptyStyle := lipgloss.NewStyle().Foreground(crt.muted)
+	emptyStyle := lipgloss.NewStyle().Foreground(ui.Border)
 
 	var sb strings.Builder
 	for i := 0; i < filled; i++ {
@@ -1181,11 +1180,11 @@ func renderGradientBar(percent float64, maxWidth int) string {
 
 // renderSparkline renders a Unicode sparkline from a history of values.
 func renderSparkline(history []float64, maxWidth int) string {
-	return renderSparklineColored(history, maxWidth, galaxyBlue)
+	return renderSparklineColored(history, maxWidth, ui.Accent)
 }
 
 // renderSparklineColored renders a sparkline with a custom color.
-func renderSparklineColored(history []float64, maxWidth int, color lipgloss.Color) string {
+func renderSparklineColored(history []float64, maxWidth int, color lipgloss.TerminalColor) string {
 	maxVal := 0.0
 	for _, v := range history {
 		if v > maxVal {
@@ -1219,7 +1218,7 @@ func renderSparklineColored(history []float64, maxWidth int, color lipgloss.Colo
 }
 
 // renderBar renders a horizontal progress bar with the given percentage.
-func renderBar(percent float64, maxWidth int, color lipgloss.Color) string {
+func renderBar(percent float64, maxWidth int, color lipgloss.TerminalColor) string {
 	barWidth := maxWidth
 	if barWidth < 4 {
 		barWidth = 4
@@ -1235,38 +1234,38 @@ func renderBar(percent float64, maxWidth int, color lipgloss.Color) string {
 	empty := barWidth - filled
 
 	filledStyle := lipgloss.NewStyle().Foreground(color)
-	emptyStyle := lipgloss.NewStyle().Foreground(crt.muted)
+	emptyStyle := lipgloss.NewStyle().Foreground(ui.Border)
 
 	return filledStyle.Render(strings.Repeat("█", filled)) +
 		emptyStyle.Render(strings.Repeat("░", empty))
 }
 
 // percentColor returns a color based on usage percentage (green → yellow → red).
-func percentColor(pct float64) lipgloss.Color {
+func percentColor(pct float64) lipgloss.TerminalColor {
 	switch {
 	case pct >= 90:
-		return galaxyRed // pulsar red
+		return ui.Fail // pulsar red
 	case pct >= 70:
-		return galaxyGold // star gold
+		return ui.Warn // star gold
 	case pct >= 50:
-		return galaxyOrange // solar orange
+		return ui.Warn // solar orange
 	default:
-		return galaxyMint // aurora mint
+		return ui.OK // aurora mint
 	}
 }
 
 // tempPercentColor maps a temperature in °C to a status color.
 // Thresholds match typical CPU thermal zones: green <60, orange <75, gold <90, red ≥90.
-func tempPercentColor(tempC float64) lipgloss.Color {
+func tempPercentColor(tempC float64) lipgloss.TerminalColor {
 	switch {
 	case tempC >= 90:
-		return galaxyRed
+		return ui.Fail
 	case tempC >= 75:
-		return galaxyGold
+		return ui.Warn
 	case tempC >= 60:
-		return galaxyOrange
+		return ui.Warn
 	default:
-		return galaxyMint
+		return ui.OK
 	}
 }
 

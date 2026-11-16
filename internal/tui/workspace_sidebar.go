@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -71,16 +72,16 @@ func (m workspaceModel) otherSessions() []workspace.SessionInfo {
 }
 
 // sbSeg renders text with the selected-row background when on is set.
-func sbSeg(text string, fg lipgloss.Color, bold, on bool) string {
+func sbSeg(text string, fg lipgloss.TerminalColor, bold, on bool) string {
 	st := lipgloss.NewStyle().Foreground(fg).Bold(bold)
 	if on {
-		st = st.Background(colSel)
+		st = st.Background(ui.Sel)
 	}
 	return st.Render(text)
 }
 
 // sbRow joins left and right into a w-cell row; the selected row is filled with
-// colSel across the whole width.
+// ui.Sel across the whole width.
 func sbRow(left, right string, w int, on bool) string {
 	room := w - 1 - ansi.StringWidth(right)
 	if right != "" {
@@ -90,7 +91,7 @@ func sbRow(left, right string, w int, on bool) string {
 	gap := max(w-ansi.StringWidth(left)-ansi.StringWidth(right), 0)
 	fill := strings.Repeat(" ", gap)
 	if on {
-		fill = lipgloss.NewStyle().Background(colSel).Render(fill)
+		fill = lipgloss.NewStyle().Background(ui.Sel).Render(fill)
 	}
 	return left + fill + right
 }
@@ -101,38 +102,38 @@ func (m workspaceModel) nodeRows(n *workspace.Node, w int, on bool, models, runn
 	if n.Status == workspace.StatusRunning {
 		glyph = pixelSpinner.Frames[m.spin%len(pixelSpinner.Frames)]
 	}
-	l1 := sbSeg(" ", colText, false, on) + sbSeg(glyph, statusLabelColor(m.g, n), true, on) + sbSeg(" ", colText, false, on) +
-		sbSeg(n.ID, colMuted, false, on) + sbSeg(" ", colText, false, on) + sbSeg(workspace.Sanitize(n.Title), colText, false, on)
+	l1 := sbSeg(" ", ui.Text, false, on) + sbSeg(glyph, statusLabelColor(m.g, n), true, on) + sbSeg(" ", ui.Text, false, on) +
+		sbSeg(n.ID, ui.Muted, false, on) + sbSeg(" ", ui.Text, false, on) + sbSeg(workspace.Sanitize(n.Title), ui.Text, false, on)
 	var l2, age string
 	switch {
 	case n.Kind == workspace.KindCheck:
-		l2 = sbSeg("    checks", colMuted, false, on)
+		l2 = sbSeg("    checks", ui.Muted, false, on)
 	case n.Role == "":
 		if n.SuggestedRole != "" {
-			l2 = sbSeg("    → "+n.SuggestedRole, colMuted, false, on)
+			l2 = sbSeg("    → "+n.SuggestedRole, ui.Muted, false, on)
 		} else {
-			l2 = sbSeg("    unassigned", colWarn, false, on)
+			l2 = sbSeg("    unassigned", ui.Warn, false, on)
 		}
 	default:
 		badge := lipgloss.NewStyle().Foreground(runnerColor(runners[n.Role]))
 		if on {
-			badge = badge.Background(colSel)
+			badge = badge.Background(ui.Sel)
 		}
-		l2 = sbSeg("    ", colMuted, false, on) + badge.Render(runnerGlyph(runners[n.Role], m.cfg.UI.Icons))
+		l2 = sbSeg("    ", ui.Muted, false, on) + badge.Render(runnerGlyph(runners[n.Role], m.cfg.UI.Icons))
 		if md := models[n.Role]; md != "" {
-			l2 += sbSeg(" "+md, colMuted, false, on)
+			l2 += sbSeg(" "+md, ui.Muted, false, on)
 		}
 	}
 	acting := false // line 2 shows what the node is doing, in place of the age
 	if n.Status == workspace.StatusRunning {
 		if st := stallText(n, m.now()); st != "" {
 			acting = true
-			l2 = sbSeg("    "+st, colWarn, false, on)
+			l2 = sbSeg("    "+st, ui.Warn, false, on)
 		} else if a, ok := currentAction(n); ok {
 			acting = true
 			col := actColor(a)
-			if col == colText {
-				col = colMuted
+			if col == ui.Text {
+				col = ui.Muted
 			}
 			l2 = sbSeg("    "+actGlyph(a.Kind)+" "+actText(a, max(w-7, 4), true), col, false, on)
 		}
@@ -146,7 +147,7 @@ func (m workspaceModel) nodeRows(n *workspace.Node, w int, on bool, models, runn
 		if n.Limit != nil {
 			word = "limit · " + limitResets(m.now(), n.Limit)
 		}
-		l2 = sbSeg("    "+word, colWarn, false, on)
+		l2 = sbSeg("    "+word, ui.Warn, false, on)
 	}
 	switch n.Status {
 	case workspace.StatusRunning:
@@ -156,7 +157,9 @@ func (m workspaceModel) nodeRows(n *workspace.Node, w int, on bool, models, runn
 	case workspace.StatusFailed:
 		age = "failed"
 	case workspace.StatusDone, workspace.StatusWaiting:
-		if !n.EndedAt.IsZero() {
+		// A limited node shows its reset time instead of an age, which would
+		// crowd the reset out of the narrow sidebar.
+		if !n.EndedAt.IsZero() && n.Limit == nil {
 			age = sbAge(m.now(), n.EndedAt)
 		}
 	}
@@ -167,17 +170,17 @@ func (m workspaceModel) nodeRows(n *workspace.Node, w int, on bool, models, runn
 		}
 		age = mark
 	}
-	return [2]string{sbRow(l1, "", w, on), sbRow(l2, sbSeg(age, colMuted, false, on), w, on)}
+	return [2]string{sbRow(l1, "", w, on), sbRow(l2, sbSeg(age, ui.Muted, false, on), w, on)}
 }
 
 // sidebarRows is the sidebar in exactly h rows of w cells: the session title
 // and progress, the node rows (scrolled to keep the selected one in view) and,
 // below a divider, the other saved sessions.
 func (m workspaceModel) sidebarRows(w, h int) []string {
-	dim := lipgloss.NewStyle().Foreground(colMuted)
-	titleCol := colText
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
+	titleCol := ui.Text
 	if m.focus == wsFocusSidebar {
-		titleCol = colAccent
+		titleCol = ui.Accent
 	}
 	title := workspace.Sanitize(m.sess.snapshot().Title)
 	if title == "" {
@@ -216,7 +219,7 @@ func (m workspaceModel) sidebarRows(w, h int) []string {
 		out = append(out, "")
 	}
 	if block > 0 {
-		out = append(out, lipgloss.NewStyle().Foreground(colBorder).Render(strings.Repeat("─", w)), " "+dim.Render("Sessions"))
+		out = append(out, lipgloss.NewStyle().Foreground(ui.Border).Render(strings.Repeat("─", w)), " "+dim.Render("Sessions"))
 		for i, s := range sessions {
 			on := m.sbSess == i && m.focus == wsFocusSidebar
 			t := workspace.Sanitize(s.Title)
@@ -226,9 +229,9 @@ func (m workspaceModel) sidebarRows(w, h int) []string {
 			total := s.Todo + s.Running + s.Done + s.Failed + s.Waiting
 			right := ""
 			if total > 0 {
-				right = sbSeg(fmt.Sprintf("%d/%d", s.Done, total), colMuted, false, on)
+				right = sbSeg(fmt.Sprintf("%d/%d", s.Done, total), ui.Muted, false, on)
 			}
-			left := sbSeg(" ○ "+t, colMuted, false, on)
+			left := sbSeg(" ○ "+t, ui.Muted, false, on)
 			out = append(out, sbRow(left, right, w, on))
 		}
 	}
@@ -254,31 +257,11 @@ func (m workspaceModel) sidebarProgress() string {
 	return s
 }
 
-// overlayAt draws box over base with its top-left corner at (x, y).
-func overlayAt(base, box string, x, y, w, h int) string {
-	lines := strings.Split(base, "\n")
-	for len(lines) < h {
-		lines = append(lines, "")
-	}
-	bl := strings.Split(box, "\n")
-	bw := 0
-	for _, l := range bl {
-		bw = max(bw, ansi.StringWidth(l))
-	}
-	for i, l := range bl {
-		if y+i >= len(lines) {
-			break
-		}
-		lines[y+i] = strings.Repeat(" ", x) + padRight(l, bw) + "\x1b[0m" + strings.Repeat(" ", max(w-x-bw, 0))
-	}
-	return strings.Join(lines, "\n")
-}
-
 // sidebarOverlayBox is the sidebar as a rounded box for narrow screens.
 func (m workspaceModel) sidebarOverlayBox(mainH int) string {
 	bw := min(wsSidebarOverlayW, m.width-4)
 	bh := max(mainH, 5)
-	return wsBox("Nodes", bw, m.sidebarRows(bw-4, bh-2))
+	return ui.Overlay("Nodes", m.sidebarRows(bw-4, bh-2), nil, bw)
 }
 
 // sbMove moves the sidebar cursor one row: through the nodes in order, then

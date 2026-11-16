@@ -11,7 +11,7 @@ import (
 
 func TestRenderHelpFitsSize(t *testing.T) {
 	for _, sz := range [][2]int{{60, 12}, {80, 24}, {120, 40}} {
-		out := renderHelp(sz[0], sz[1], "KEYBOARD — RUN", cockpitHelp())
+		out := renderHelp(sz[0], sz[1], "Keyboard — run", cockpitHelp())
 		lines := strings.Split(out, "\n")
 		if len(lines) > sz[1] {
 			t.Errorf("%dx%d: %d lines", sz[0], sz[1], len(lines))
@@ -25,7 +25,7 @@ func TestRenderHelpFitsSize(t *testing.T) {
 }
 
 func TestRenderHelpListsKeys(t *testing.T) {
-	out := stripANSI(renderHelp(120, 40, "KEYBOARD — RUN", cockpitHelp()))
+	out := stripANSI(renderHelp(120, 40, "Keyboard — run", cockpitHelp()))
 	for _, want := range []string{"Ctrl+A", "approve", "Tab", "inspector", "close"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help missing %q", want)
@@ -40,7 +40,7 @@ func TestCockpitHelpToggle(t *testing.T) {
 	if !c.showHelp {
 		t.Fatal("? should open help")
 	}
-	if !strings.Contains(stripANSI(c.View()), "KEYBOARD") {
+	if !strings.Contains(stripANSI(c.View()), "Keyboard") {
 		t.Fatal("view should show the help overlay")
 	}
 	before := c.tab
@@ -65,7 +65,7 @@ func TestHomeHelpToggle(t *testing.T) {
 	if !m.showHelp {
 		t.Fatal("? should open help")
 	}
-	if !strings.Contains(stripANSI(m.View()), "KEYBOARD") {
+	if !strings.Contains(stripANSI(m.View()), "Keyboard") {
 		t.Fatal("view should show the help overlay")
 	}
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -93,7 +93,7 @@ func TestFootersAdvertiseHelp(t *testing.T) {
 
 func TestRenderHelpPaneSingleTitle(t *testing.T) {
 	for _, sz := range [][2]int{{60, 12}, {80, 24}, {120, 40}} {
-		out := renderHelpPane(sz[0], sz[1], "KEYBOARD — RUN", cockpitHelp())
+		out := renderHelpPane(sz[0], sz[1], "Keyboard — run", cockpitHelp())
 		lines := strings.Split(out, "\n")
 		if len(lines) > sz[1] {
 			t.Errorf("%dx%d: %d lines", sz[0], sz[1], len(lines))
@@ -107,7 +107,7 @@ func TestRenderHelpPaneSingleTitle(t *testing.T) {
 		if strings.Contains(plain, "DECSR") {
 			t.Errorf("%dx%d: pane help must not draw a DECSR header", sz[0], sz[1])
 		}
-		if !strings.HasPrefix(strings.TrimSpace(stripANSI(lines[0])), "KEYBOARD — RUN") {
+		if !strings.HasPrefix(strings.TrimSpace(stripANSI(lines[0])), "Keyboard — run") {
 			t.Errorf("%dx%d: first line = %q", sz[0], sz[1], stripANSI(lines[0]))
 		}
 	}

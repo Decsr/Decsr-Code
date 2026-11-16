@@ -7,6 +7,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // spinnerFrame returns the pixelSpinner frame for the current time.
@@ -43,7 +45,7 @@ func (c *CockpitModel) renderAgentStrip(w int) string {
 			tokens = formatTokensCompact(a.tokens)
 		}
 		running := a.status == AgentRunning || a.status == AgentFixing
-		style := lipgloss.NewStyle().Foreground(roleColor(string(role)))
+		style := lipgloss.NewStyle().Foreground(classicRoleColor(string(role)))
 		var text string
 		if w >= 110 {
 			text = fmt.Sprintf("[%s %s %s ×%d]", agentStripGlyph(a), roleShort(role), tokens, a.calls)
@@ -51,7 +53,7 @@ func (c *CockpitModel) renderAgentStrip(w int) string {
 			text = fmt.Sprintf("%s %s %s", agentStripGlyph(a), roleShort(role), tokens)
 		}
 		if running {
-			style = style.Background(surfaceRaised).Bold(true)
+			style = style.Bold(true)
 		}
 		parts = append(parts, style.Render(text))
 	}
@@ -74,18 +76,18 @@ func (c *CockpitModel) phaseStrip() string {
 		seg := "▰"
 		switch p.status {
 		case "done":
-			st = st.Foreground(galaxyCyan)
+			st = st.Foreground(ui.Accent)
 		case "active":
 			switch {
 			case c.failed:
-				st = st.Foreground(galaxyRed).Bold(true)
+				st = st.Foreground(ui.Fail).Bold(true)
 			case c.gate != "":
-				st = st.Foreground(galaxyGold).Bold(true)
+				st = st.Foreground(ui.Warn).Bold(true)
 			default:
-				st = st.Foreground(galaxyAzure).Bold(true)
+				st = st.Foreground(ui.Accent).Bold(true)
 			}
 		default:
-			st = st.Foreground(crt.dim)
+			st = st.Foreground(ui.Muted)
 			seg = "▱"
 		}
 		b.WriteString(st.Render(seg))

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/bus"
 	"github.com/Decsr/Decsr-Code/internal/logging"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 const maxPanelLines = 500
@@ -141,9 +142,9 @@ func (m AgentPanelModel) View() string {
 	}
 
 	// Active panels glow in their role colour; idle ones keep the quiet border.
-	borderColor := crt.border
+	var borderColor lipgloss.TerminalColor = ui.Border
 	if m.state == AgentRunning || m.state == AgentFixing || m.state == AgentGate {
-		borderColor = roleColor(string(m.role))
+		borderColor = classicRoleColor(string(m.role))
 	}
 	bSt := lipgloss.NewStyle().Foreground(borderColor)
 
@@ -176,17 +177,17 @@ func (m AgentPanelModel) View() string {
 func (m AgentPanelModel) statusChip() string {
 	switch m.state {
 	case AgentWaiting:
-		return lipgloss.NewStyle().Background(crt.muted).Foreground(crt.dim).Bold(true).Render(" ▫ WAITING ")
+		return classicChip("▫ WAITING", ui.Muted)
 	case AgentRunning:
-		return chip(m.spinner.View()+" RUNNING", roleColor(string(m.role)))
+		return classicChip(m.spinner.View()+" RUNNING", classicRoleColor(string(m.role)))
 	case AgentFixing:
-		return chip(m.spinner.View()+" FIXING", galaxyGold)
+		return classicChip(m.spinner.View()+" FIXING", ui.Warn)
 	case AgentDone:
-		return chip("✓ DONE", galaxyCyan)
+		return classicChip("✓ DONE", ui.Accent)
 	case AgentError:
-		return chip("✗ ERROR", crt.warn)
+		return classicChip("✗ ERROR", ui.Fail)
 	case AgentGate:
-		return chip("⏸ GATE", galaxyGold)
+		return classicChip("⏸ GATE", ui.Warn)
 	}
 	return ""
 }
@@ -194,7 +195,7 @@ func (m AgentPanelModel) statusChip() string {
 // renderTopBorder draws ┌─ ■ ROLE ───── [STATUS] ─┐ with the role title in
 // its colour and the status badge on the right.
 func (m AgentPanelModel) renderTopBorder(contentW int, bSt lipgloss.Style) string {
-	roleStyle := lipgloss.NewStyle().Foreground(roleColor(string(m.role))).Bold(true)
+	roleStyle := lipgloss.NewStyle().Foreground(classicRoleColor(string(m.role))).Bold(true)
 	left := bSt.Render("┌─ ") + roleStyle.Render("■ "+strings.ToUpper(string(m.role))) + bSt.Render(" ")
 	right := m.statusChip() + bSt.Render(" ─┐")
 	fill := contentW + 2 - lipgloss.Width(left) - lipgloss.Width(right)
@@ -218,7 +219,7 @@ func (m AgentPanelModel) scrollIndicator() string {
 	}
 	pct := m.vp.ScrollPercent() * 100
 	indicator := fmt.Sprintf(" %d%% ", int(pct))
-	return lipgloss.NewStyle().Foreground(crt.dim).Render(indicator)
+	return lipgloss.NewStyle().Foreground(ui.Muted).Render(indicator)
 }
 
 // syncViewport updates the viewport content from the line buffer.

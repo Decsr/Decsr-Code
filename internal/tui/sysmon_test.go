@@ -10,6 +10,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/agent"
 	"github.com/Decsr/Decsr-Code/internal/bus"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -325,12 +326,12 @@ func TestRenderBar(t *testing.T) {
 func TestPercentColor(t *testing.T) {
 	tests := []struct {
 		pct      float64
-		expected lipgloss.Color
+		expected lipgloss.TerminalColor
 	}{
-		{10.0, galaxyMint},
-		{55.0, galaxyOrange},
-		{75.0, galaxyGold},
-		{95.0, galaxyRed},
+		{10.0, ui.OK},
+		{55.0, ui.Warn},
+		{75.0, ui.Warn},
+		{95.0, ui.Fail},
 	}
 	for _, tt := range tests {
 		got := percentColor(tt.pct)

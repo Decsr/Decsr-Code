@@ -6,6 +6,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 var phaseLetters = map[string]string{
@@ -13,7 +15,7 @@ var phaseLetters = map[string]string{
 }
 
 func (c *CockpitModel) tokenLines(w, h int) []string {
-	dim := lipgloss.NewStyle().Foreground(crt.dim)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	total := c.totalUsage.InputTokens + c.totalUsage.OutputTokens
 	calls := 0
 	for _, a := range c.agents {
@@ -25,7 +27,7 @@ func (c *CockpitModel) tokenLines(w, h int) []string {
 		formatTokensCompact(total), strings.TrimSpace(estimatedMark(c.totalUsage.Estimated)),
 		formatTokensCompact(c.totalUsage.InputTokens), formatTokensCompact(c.totalUsage.OutputTokens), calls)
 	lines := []string{
-		ansi.Truncate(lipgloss.NewStyle().Foreground(crt.bright).Bold(true).Render(totalLine), w, "…"),
+		ansi.Truncate(lipgloss.NewStyle().Foreground(ui.Text).Bold(true).Render(totalLine), w, "…"),
 		"",
 	}
 
@@ -67,7 +69,7 @@ func (c *CockpitModel) tokenShare(w int) []string {
 		if a == nil || a.tokens <= 0 {
 			continue
 		}
-		col := roleColor(string(role))
+		col := classicRoleColor(string(role))
 		segs = append(segs, chartSegment{value: a.tokens, color: col})
 		legend = append(legend, lipgloss.NewStyle().Foreground(col).Render("■")+
 			fmt.Sprintf(" %s %d%%", roleLabel(role), max(1, a.tokens*100/total)))
@@ -79,7 +81,7 @@ func (c *CockpitModel) tokenShare(w int) []string {
 }
 
 func (c *CockpitModel) tokenPerAgent(w int) []string {
-	lines := []string{lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render("PER AGENT")}
+	lines := []string{lipgloss.NewStyle().Foreground(ui.Muted).Bold(true).Render("PER AGENT")}
 	maxTok := 1
 	for _, a := range c.agents {
 		if a != nil && a.tokens > maxTok {
@@ -98,14 +100,14 @@ func (c *CockpitModel) tokenPerAgent(w int) []string {
 		prefix := fmt.Sprintf("%-9s %7s %5s ", roleLabel(role), formatTokensCompact(a.tokens), fmt.Sprintf("×%d", a.calls))
 		bar := ""
 		if barW > 0 {
-			bar = agentBar(in, out, maxTok, barW, roleColor(string(role)))
+			bar = agentBar(in, out, maxTok, barW, classicRoleColor(string(role)))
 		}
 		lines = append(lines, ansi.Truncate(prefix+bar, w, ""))
 	}
 	return lines
 }
 
-func agentBar(in, out, maxTok, width int, color lipgloss.Color) string {
+func agentBar(in, out, maxTok, width int, color lipgloss.TerminalColor) string {
 	total := in + out
 	if total <= 0 || maxTok <= 0 || width <= 0 {
 		return ""
@@ -127,10 +129,10 @@ func agentBar(in, out, maxTok, width int, color lipgloss.Color) string {
 }
 
 func (c *CockpitModel) tokenChart(w, h int) []string {
-	lines := []string{lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render("TOKENS PER CALL")}
+	lines := []string{lipgloss.NewStyle().Foreground(ui.Muted).Bold(true).Render("TOKENS PER CALL")}
 	cols := make([]chartColumn, len(c.sessions))
 	for i, s := range c.sessions {
-		cols[i] = chartColumn{value: s.in + s.out, color: roleColor(string(s.role))}
+		cols[i] = chartColumn{value: s.in + s.out, color: classicRoleColor(string(s.role))}
 	}
 	ch, hidden := columnChart(cols, w, max(1, min(8, h/4)))
 	lines = append(lines, ch...)
@@ -147,7 +149,7 @@ func (c *CockpitModel) tokenChart(w, h int) []string {
 		}
 		prev = s.phase
 	}
-	lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Render(string(marks)))
+	lines = append(lines, lipgloss.NewStyle().Foreground(ui.Muted).Render(string(marks)))
 	totalCalls := 0
 	for _, a := range c.agents {
 		if a != nil {
@@ -155,13 +157,13 @@ func (c *CockpitModel) tokenChart(w, h int) []string {
 		}
 	}
 	if hidden += totalCalls - len(c.sessions); hidden > 0 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(crt.dim).Render(fmt.Sprintf("+%d earlier calls", hidden)))
+		lines = append(lines, lipgloss.NewStyle().Foreground(ui.Muted).Render(fmt.Sprintf("+%d earlier calls", hidden)))
 	}
 	return lines
 }
 
 func (c *CockpitModel) tokenLog(w int) []string {
-	lines := []string{lipgloss.NewStyle().Foreground(crt.dim).Bold(true).Render("CALL LOG")}
+	lines := []string{lipgloss.NewStyle().Foreground(ui.Muted).Bold(true).Render("CALL LOG")}
 	for i := len(c.sessions) - 1; i >= 0; i-- {
 		s := c.sessions[i]
 		sub := s.subtask
@@ -172,7 +174,7 @@ func (c *CockpitModel) tokenLog(w int) []string {
 		if s.estimated {
 			mark = "~"
 		}
-		role := lipgloss.NewStyle().Foreground(roleColor(string(s.role))).Render(fmt.Sprintf("%-8s", roleLabel(s.role)))
+		role := lipgloss.NewStyle().Foreground(classicRoleColor(string(s.role))).Render(fmt.Sprintf("%-8s", roleLabel(s.role)))
 		body := fmt.Sprintf("#%-3d %s  ", s.seq, s.at.Format("15:04:05")) + role +
 			fmt.Sprintf(" %-7s %-4s %6s %6s %6s",
 				s.phase, sub, formatTokensCompact(s.in), formatTokensCompact(s.out), formatTokensCompact(s.in+s.out))

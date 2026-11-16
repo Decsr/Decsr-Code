@@ -6,7 +6,24 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
+
+// styleTextarea gives a textarea the shared look: no prompt, no cursor-line
+// highlight, Text for input and Muted for the placeholder and line numbers.
+func styleTextarea(ta *textarea.Model) {
+	ta.Prompt = ""
+	for _, st := range []*textarea.Style{&ta.FocusedStyle, &ta.BlurredStyle} {
+		st.Base = lipgloss.NewStyle()
+		st.CursorLine = lipgloss.NewStyle()
+		st.CursorLineNumber = lipgloss.NewStyle().Foreground(ui.Muted)
+		st.LineNumber = lipgloss.NewStyle().Foreground(ui.Muted)
+		st.EndOfBuffer = lipgloss.NewStyle().Foreground(ui.Muted)
+		st.Text = lipgloss.NewStyle().Foreground(ui.Text)
+		st.Placeholder = lipgloss.NewStyle().Foreground(ui.Muted)
+	}
+}
 
 // EditorModel is a full-screen requirements editor using an embedded textarea.
 type EditorModel struct {
@@ -18,6 +35,7 @@ type EditorModel struct {
 
 func NewEditor(initialContent string) EditorModel {
 	ta := textarea.New()
+	styleTextarea(&ta)
 	ta.Placeholder = "# Task\nDescribe what you want to implement…"
 	ta.SetValue(initialContent)
 	ta.Focus()
@@ -38,7 +56,7 @@ func (m EditorModel) Update(msg tea.Msg) (EditorModel, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.ta.SetWidth(msg.Width - 4)
-		m.ta.SetHeight(msg.Height - 4)
+		m.ta.SetHeight(msg.Height - 3)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -82,21 +100,24 @@ func (m *EditorModel) SetSize(w, h int) {
 	m.width = w
 	m.height = h
 	m.ta.SetWidth(w - 4)
-	m.ta.SetHeight(h - 4)
+	m.ta.SetHeight(h - 3)
 }
 
 func (m EditorModel) View() string {
-	warnStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.warn)
-
-	title := screenHeader(m.width, "Requirements Editor", "")
-	sep := lipgloss.NewStyle().Foreground(crt.border).Render(strings.Repeat("─", m.width))
-
+	w := m.width
 	var bottom string
 	if m.confirmExit {
-		bottom = warnStyle.Render("Unsaved changes — S save & start   D discard   Esc back to editing")
+		bottom = "  " + lipgloss.NewStyle().Bold(true).Foreground(ui.Warn).Render("Unsaved changes: S save & start · D discard · Esc back to editing")
 	} else {
-		bottom = hintBar(m.width, []keyHint{{"Ctrl+S", "save & start"}, {"Esc", "back"}}, "")
+		bottom = ui.HintBar([]ui.Hint{{Key: "Ctrl+S", Label: "save & start"}, {Key: "Esc", Label: "back"}}, w)
 	}
 
-	return strings.Join([]string{title, sep, m.ta.View(), sep, bottom}, "\n")
+	body := strings.Split(m.ta.View(), "\n")
+	for i, l := range body {
+		body[i] = ui.Truncate("  "+l, w)
+	}
+	lines := []string{ui.Header("Requirements editor", "", w), ""}
+	lines = append(lines, body...)
+	lines = append(lines, ui.Truncate(bottom, w))
+	return strings.Join(lines, "\n")
 }

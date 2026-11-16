@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Decsr/Decsr-Code/internal/notify"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -45,8 +46,8 @@ func limitResets(now time.Time, l *workspace.LimitInfo) string {
 // limitCardRows is the body of a limited node's card: the status line, the
 // provider message and the retry hint.
 func limitCardRows(n *workspace.Node, iw int, now time.Time, line, arrow string) []string {
-	dim := lipgloss.NewStyle().Foreground(colMuted)
-	warn := lipgloss.NewStyle().Foreground(colWarn)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
+	warn := lipgloss.NewStyle().Foreground(ui.Warn)
 	l := n.Limit
 	rows := []string{warn.Render(truncateOneLine("◷ waiting · "+limitResets(now, l), iw)) + dim.Render(line+arrow)}
 	if msg := strings.TrimSpace(oneLine(workspace.SanitizeText(l.Message))); msg != "" {
@@ -222,7 +223,7 @@ func (m *workspaceModel) retryLimitedKey(n *workspace.Node) {
 // limitStatusSegment renders "⬡ claude · limited until 14:30".
 func (m workspaceModel) limitStatusSegment(r limitedRunner) string {
 	text := runnerGlyph(r.name, m.cfg.UI.Icons) + " " + r.name + " · " + r.statusText(m.now())
-	return lipgloss.NewStyle().Foreground(colWarn).Render(ansi.Truncate(text, max(m.width-4, 1), "…"))
+	return lipgloss.NewStyle().Foreground(ui.Warn).Render(ansi.Truncate(text, max(m.width-4, 1), "…"))
 }
 
 func findLimited(list []limitedRunner, name string) (limitedRunner, bool) {

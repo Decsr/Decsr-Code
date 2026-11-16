@@ -5,10 +5,12 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 func TestRenderMarkdownChatLine_StylesStructure(t *testing.T) {
-	base := lipgloss.NewStyle().Foreground(crt.primary)
+	base := lipgloss.NewStyle().Foreground(ui.Text)
 	content := strings.Join([]string{
 		"## Must Have",
 		"- First **bold** item",

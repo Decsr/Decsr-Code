@@ -31,6 +31,9 @@ func limitHarness(t *testing.T, level int, reset time.Time) (*wsHarness, *autoNo
 		}
 	}
 	h.hitLimit(reset)
+	// The engine stamps EndedAt with the wall clock; pin it to the fake one so
+	// the sidebar age does not depend on when the test runs.
+	h.m.g.Node("T1").EndedAt = limitBase
 	return h, notes, &clock
 }
 

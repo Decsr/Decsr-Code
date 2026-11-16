@@ -16,6 +16,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/credentials"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // connectStage is the step of the connect overlay.
@@ -404,19 +405,19 @@ func (m connectModel) finish(model, scope string) (connectModel, tea.Cmd) {
 // box renders the overlay body for width w.
 func (m connectModel) box(w int) string {
 	boxW := min(64, w-2)
-	dim := lipgloss.NewStyle().Foreground(colMuted)
-	ok := lipgloss.NewStyle().Foreground(colOK)
-	fail := lipgloss.NewStyle().Foreground(colFail)
-	warn := lipgloss.NewStyle().Foreground(colWarn)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
+	ok := lipgloss.NewStyle().Foreground(ui.OK)
+	fail := lipgloss.NewStyle().Foreground(ui.Fail)
+	warn := lipgloss.NewStyle().Foreground(ui.Warn)
 	var body []string
 	title := "Connect a provider"
 	switch m.stage {
 	case connList:
 		for i, o := range m.opts {
-			st := lipgloss.NewStyle().Foreground(colText)
+			st := lipgloss.NewStyle().Foreground(ui.Text)
 			marker := "  "
 			if i == m.idx {
-				st, marker = st.Bold(true).Background(colSel), "▸ "
+				st, marker = st.Bold(true).Background(ui.Sel), "▸ "
 			}
 			status := connectStatus(o)
 			line := padRight(marker+o.label, 24) + " " + status
@@ -451,10 +452,10 @@ func (m connectModel) box(w int) string {
 			start = m.modelIdx - vis + 1
 		}
 		for i := start; i < start+vis; i++ {
-			st := lipgloss.NewStyle().Foreground(colText)
+			st := lipgloss.NewStyle().Foreground(ui.Text)
 			marker := "  "
 			if i == m.modelIdx {
-				st, marker = st.Bold(true).Background(colSel), "▸ "
+				st, marker = st.Bold(true).Background(ui.Sel), "▸ "
 			}
 			body = append(body, st.Render(marker+m.models[i]))
 		}
@@ -463,7 +464,7 @@ func (m connectModel) box(w int) string {
 	if m.err != "" && m.stage != connSaveAnyway {
 		body = append(body, "", fail.Render("! "+m.err))
 	}
-	return wsBox(title, boxW, body)
+	return ui.Overlay(title, body, nil, boxW)
 }
 
 func wrapStyled(s string, w int, st lipgloss.Style) []string {

@@ -9,7 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 type ftEntry struct {
@@ -140,118 +141,46 @@ func (m FileTreeModel) Update(msg tea.Msg) (FileTreeModel, tea.Cmd) {
 }
 
 func (m FileTreeModel) View() string {
-	p := homePalette
+	w, h := max(m.width, 20), max(m.height, 6)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 
-	dimStyle := lipgloss.NewStyle().Foreground(p.dim)
-	dirStyle := lipgloss.NewStyle().Foreground(p.cyan).Bold(true)
-	mdStyle := lipgloss.NewStyle().Foreground(p.bright)
-	fileStyle := lipgloss.NewStyle().Foreground(p.dim)
-	cursorBg := lipgloss.NewStyle().
-		Background(p.activeBg).
-		Foreground(p.green).
-		Bold(true)
-
-	// Header bar.
 	rel, _ := filepath.Rel(m.root, m.cwd)
 	if rel == "." || rel == "" {
 		rel = "/"
 	} else {
 		rel = "/" + rel + "/"
 	}
-	header := screenHeader(m.width, "Browse Files", filepath.Base(m.root))
 
-	// Card content.
-	cardW := m.width - 8
-	if cardW < 40 {
-		cardW = 40
-	}
-	if cardW > 90 {
-		cardW = 90
-	}
-
-	var lines []string
-	rows := m.visibleRows() - 4
-	if rows < 4 {
-		rows = 4
-	}
+	rows := max(h-4, 3)
 	start := 0
 	if m.cursor >= rows {
 		start = m.cursor - rows + 1
 	}
-
-	for i := start; i < len(m.entries) && i < start+rows; i++ {
+	lines := []string{ui.PaneLabel(rel, true, w)}
+	for i := start; i < len(m.entries) && i < start+rows-1; i++ {
 		e := m.entries[i]
-		maxW := cardW - 10
-		if maxW < 20 {
-			maxW = 20
-		}
-		label := e.name
-		if ansi.StringWidth(label) > maxW {
-			label = ansi.Truncate(label, maxW, "…")
-		}
-
-		var icon string
-		var styled string
-		if e.isDir {
-			if e.name == ".." {
-				icon = "↩"
-			} else {
-				icon = "■"
-			}
-			styled = dirStyle.Render(label)
-		} else if strings.HasSuffix(e.name, ".md") {
+		icon := " "
+		switch {
+		case e.name == "..":
+			icon = "↩"
+		case e.isDir:
+			icon = "■"
+		case strings.HasSuffix(e.name, ".md"):
 			icon = "□"
-			styled = mdStyle.Render(label)
-		} else {
-			icon = " "
-			styled = fileStyle.Render(label)
 		}
-
-		line := fmt.Sprintf("  %s %s", icon, styled)
-
-		if i == m.cursor {
-			padW := cardW - 8
-			if padW < 20 {
-				padW = 20
-			}
-			highlight := cursorBg.Width(padW).Render(
-				fmt.Sprintf(" %s %s", icon, label),
-			)
-			line = lipgloss.NewStyle().Foreground(p.green).Bold(true).Render("▸") + highlight
-		}
-
-		lines = append(lines, line)
+		lines = append(lines, "  "+ui.ListRow(ui.RowOpts{Left: icon + " " + e.name, Width: max(w-4, 10), Selected: i == m.cursor, Indent: 1}))
+	}
+	if len(m.entries) > rows-1 {
+		lines = append(lines, "  "+dim.Render(fmt.Sprintf("%d/%d", m.cursor+1, len(m.entries))))
 	}
 
-	// Scrollbar indicator.
-	if len(m.entries) > rows {
-		pct := 0
-		if len(m.entries) > 1 {
-			pct = m.cursor * 100 / (len(m.entries) - 1)
-		}
-		barLen := 10
-		filled := pct * barLen / 100
-		if filled < 1 && pct > 0 {
-			filled = 1
-		}
-		bar := strings.Repeat("█", filled) + strings.Repeat("░", barLen-filled)
-		lines = append(lines, "")
-		lines = append(lines, dimStyle.Render(fmt.Sprintf("  %s  %d/%d", bar, m.cursor+1, len(m.entries))))
+	out := append([]string{ui.Header("decsr · Browse files · "+filepath.Base(m.root), "", w), ""}, lines...)
+	for len(out) < h-1 {
+		out = append(out, "")
 	}
-
-	card := pixelPanel("◆ "+rel, p.gold, true,
-		lipgloss.NewStyle().Padding(0, 1).Width(cardW), strings.Join(lines, "\n"))
-
-	vpH := m.height - 2
-	if vpH < 4 {
-		vpH = 4
-	}
-	body := lipgloss.Place(m.width, vpH, lipgloss.Center, lipgloss.Center, card)
-
-	// Footer key hints.
-	footer := hintBar(m.width, []keyHint{{"↑↓", "navigate"}, {"Enter/→", "open"}, {"←", "back"}, {"PgUp/Dn", "page"}, {"Esc", "cancel"}}, "")
-
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	out = out[:h-1]
+	hints := []ui.Hint{{Key: "↑↓", Label: "navigate"}, {Key: "Enter/→", Label: "open"}, {Key: "←", Label: "back"}, {Key: "PgUp/Dn", Label: "page"}, {Key: "Esc", Label: "cancel"}}
+	return strings.Join(append(out, ui.HintBar(hints, w)), "\n")
 }
 
 func (m FileTreeModel) visibleRows() int {

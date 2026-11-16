@@ -11,6 +11,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/notify"
 	"github.com/Decsr/Decsr-Code/internal/plugins"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -35,7 +36,7 @@ func TestWaitingGlyphAndColour(t *testing.T) {
 	if glyph, label := nodeStatusGlyph(g, n); glyph != "◇" || label != "waiting" {
 		t.Errorf("glyph = %q %q", glyph, label)
 	}
-	if statusLabelColor(g, n) != colWarn {
+	if statusLabelColor(g, n) != ui.Warn {
 		t.Error("waiting uses the warning colour")
 	}
 }
@@ -104,7 +105,7 @@ func TestWaitingSidebarRows(t *testing.T) {
 func TestWaitingInspector(t *testing.T) {
 	for _, w := range []int{30, 38} {
 		n := waitingNode(workspace.ReportQuestion)
-		out := renderInspector(waitingGraph(n), n, config.DefaultConfig(), plugins.Set{}, w, 40, nil)
+		out := renderInspector(waitingGraph(n), n, config.DefaultConfig(), plugins.Set{}, time.Now(), w, 40, nil)
 		plain := ansi.Strip(out)
 		if !strings.Contains(plain, "◇ waiting") || !strings.Contains(plain, "Report  question") || !strings.Contains(plain, "Should the storage") {
 			t.Errorf("w=%d inspector:\n%s", w, plain)
@@ -118,7 +119,7 @@ func TestWaitingInspector(t *testing.T) {
 	d := waitingNode(workspace.ReportDone)
 	d.Status = workspace.StatusDone
 	d.Report.Summary = "all of it works"
-	plain := ansi.Strip(renderInspector(waitingGraph(d), d, config.DefaultConfig(), plugins.Set{}, 38, 40, nil))
+	plain := ansi.Strip(renderInspector(waitingGraph(d), d, config.DefaultConfig(), plugins.Set{}, time.Now(), 38, 40, nil))
 	if !strings.Contains(plain, "Report  done") || !strings.Contains(plain, "all of it works") {
 		t.Errorf("done inspector:\n%s", plain)
 	}

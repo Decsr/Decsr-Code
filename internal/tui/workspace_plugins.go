@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Decsr/Decsr-Code/internal/plugins"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -384,7 +385,7 @@ func renderSkillPicker(title string, items []wsSkillItem, sel map[string]bool, i
 		body = append(body, renderSkillRow(items[i], sel[items[i].id] || items[i].role, i == idx, inner))
 	}
 	body = append(body, "", styleWsSkillNote.Render("↑↓ move · Space toggle · Enter save · Esc cancel"))
-	return wsBox(ansi.Truncate(title, boxW-6, "…"), boxW, body)
+	return ui.Overlay(ansi.Truncate(title, boxW-6, "…"), body, nil, boxW)
 }
 
 // renderSkillRow draws one row of exactly inner cells. The check box and the

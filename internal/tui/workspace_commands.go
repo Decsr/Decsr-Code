@@ -16,6 +16,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/lang"
 	"github.com/Decsr/Decsr-Code/internal/plugins"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -626,7 +627,7 @@ func (m workspaceModel) listBox() string {
 			"↑↓ move · Enter apply · d delete · Esc close", w, h)
 	case wsOverlayText:
 		boxW := min(70, w-2)
-		dim := lipgloss.NewStyle().Foreground(colMuted)
+		dim := lipgloss.NewStyle().Foreground(ui.Muted)
 		title, label := "Open a project", "Path of the project directory"
 		if m.textKind == "profile" {
 			title, label = "Save profile", "Name for the current roles"
@@ -635,11 +636,11 @@ func (m workspaceModel) listBox() string {
 		if m.textErr != "" {
 			body = append(body, "")
 			for _, l := range wrapText("! "+m.textErr, boxW-4) {
-				body = append(body, lipgloss.NewStyle().Foreground(colFail).Render(l))
+				body = append(body, lipgloss.NewStyle().Foreground(ui.Fail).Render(l))
 			}
 		}
 		body = append(body, "", dim.Render("Enter confirm · Esc cancel"))
-		return wsBox(title, boxW, body)
+		return ui.Overlay(title, body, nil, boxW)
 	case wsOverlayInfo:
 		boxW := min(80, w-2)
 		rows := max(min(len(m.infoText), h-6), 1)
@@ -652,8 +653,8 @@ func (m workspaceModel) listBox() string {
 		if len(m.infoText) > rows {
 			foot = "↑↓ scroll · Esc close"
 		}
-		body = append(body, "", lipgloss.NewStyle().Foreground(colMuted).Render(foot))
-		return wsBox(m.infoName, boxW, body)
+		body = append(body, "", lipgloss.NewStyle().Foreground(ui.Muted).Render(foot))
+		return ui.Overlay(m.infoName, body, nil, boxW)
 	}
 	return ""
 }
@@ -670,32 +671,32 @@ func renderListBox(title string, rows []wsListItem, idx int, empty, footer strin
 	}
 	var body []string
 	if len(rows) == 0 && empty != "" {
-		body = append(body, lipgloss.NewStyle().Foreground(colMuted).Render(empty))
+		body = append(body, lipgloss.NewStyle().Foreground(ui.Muted).Render(empty))
 	}
 	for i := start; i < start+vis && i < len(rows); i++ {
 		sel := i == idx
-		fg := colText
+		fg := ui.Text
 		if rows[i].dim {
-			fg = colMuted
+			fg = ui.Muted
 		}
 		st := lipgloss.NewStyle().Foreground(fg)
 		marker := "  "
 		if sel {
-			st = st.Foreground(colText).Bold(true).Background(colSel)
+			st = st.Foreground(ui.Text).Bold(true).Background(ui.Sel)
 			marker = "▸ "
 		}
 		row := st.Render(marker + ansi.Truncate(rows[i].text, inner-2, "…"))
 		if pad := inner - ansi.StringWidth(row); pad > 0 {
 			ps := lipgloss.NewStyle()
 			if sel {
-				ps = ps.Background(colSel)
+				ps = ps.Background(ui.Sel)
 			}
 			row += ps.Render(strings.Repeat(" ", pad))
 		}
 		body = append(body, row)
 	}
-	body = append(body, "", lipgloss.NewStyle().Foreground(colMuted).Render(footer))
-	return wsBox(ansi.Truncate(title, boxW-6, "…"), boxW, body)
+	body = append(body, "", lipgloss.NewStyle().Foreground(ui.Muted).Render(footer))
+	return ui.Overlay(ansi.Truncate(title, boxW-6, "…"), body, nil, boxW)
 }
 
 // ── /status and /cost ────────────────────────────────────────────────────────

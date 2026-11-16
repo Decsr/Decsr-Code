@@ -176,14 +176,12 @@ func TestSetupAgentCustomProviderRoundTrip(t *testing.T) {
 	acme := kindByLabel(t, m, "acme (custom)")
 	m.section = sectionAgentSetup
 	m.agentCursor = 1 // coder
-	m.agentEditing, m.agentEditStep, m.agentEditProv = true, 0, acme
+	m.agentEditing, m.agentField, m.agentEditProv = true, agentFieldModel, acme
 	m.apiModelsLoading[m.entry(acme).key()] = false
-	m, _ = press(m, "enter")
-	if m.agentEditStep != 1 || !m.typedMode(acme) {
-		t.Fatalf("step %d typed %v", m.agentEditStep, m.typedMode(acme))
+	if !m.typedMode(acme) {
+		t.Fatalf("typed %v", m.typedMode(acme))
 	}
 	m.typed.SetValue("gpt-x")
-	m, _ = press(m, "enter")
 	m.agentEffortLoading = false
 	m, _ = press(m, "enter")
 	ac := config.LoadProject(root).Agents["coder"]

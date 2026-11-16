@@ -333,3 +333,26 @@ func TestModeLinePerInvalidRole(t *testing.T) {
 		t.Error("a valid mode has no line")
 	}
 }
+
+func TestThemeCheck(t *testing.T) {
+	has := func(rs []Result) *Result {
+		for i := range rs {
+			if rs[i].Name == "theme" {
+				return &rs[i]
+			}
+		}
+		return nil
+	}
+	d := baseDeps()
+	for _, ok := range []string{"", "auto", "dark", "Light"} {
+		d.Theme = ok
+		if has(Run(d)) != nil {
+			t.Errorf("theme %q should not be reported", ok)
+		}
+	}
+	d.Theme = "solarized"
+	r := has(Run(d))
+	if r == nil || r.Status != Warn || r.Required {
+		t.Fatalf("invalid theme result = %+v", r)
+	}
+}

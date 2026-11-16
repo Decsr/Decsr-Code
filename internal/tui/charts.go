@@ -6,16 +6,18 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 type chartSegment struct {
 	value int
-	color lipgloss.Color
+	color lipgloss.TerminalColor
 }
 
 type chartColumn struct {
 	value int
-	color lipgloss.Color
+	color lipgloss.TerminalColor
 	label string
 }
 
@@ -35,7 +37,7 @@ func stackedBar(segs []chartSegment, width int) string {
 		}
 	}
 	if total == 0 {
-		return lipgloss.NewStyle().Foreground(crt.muted).Render(strings.Repeat("░", width))
+		return lipgloss.NewStyle().Foreground(ui.Border).Render(strings.Repeat("░", width))
 	}
 	cells := make([]int, len(segs))
 	nonzero := 0
@@ -91,7 +93,7 @@ func renderCells(segs []chartSegment, cells []int) string {
 }
 
 // sparkline renders the last width values as eighth-blocks scaled to their max.
-func sparkline(values []int, width int, color lipgloss.Color) string {
+func sparkline(values []int, width int, color lipgloss.TerminalColor) string {
 	if width <= 0 {
 		return ""
 	}
@@ -169,6 +171,6 @@ func columnChart(cols []chartColumn, width, height int) (lines []string, hidden 
 		b.WriteString(pad)
 		lines = append(lines, b.String())
 	}
-	lines = append(lines, lipgloss.NewStyle().Foreground(crt.border).Render(strings.Repeat("─", width)))
+	lines = append(lines, lipgloss.NewStyle().Foreground(ui.Border).Render(strings.Repeat("─", width)))
 	return lines, hidden
 }

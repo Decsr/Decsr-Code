@@ -83,6 +83,7 @@ func buildDoctorDeps(root string) doctor.Deps {
 		Agents:      agents,
 		Layers:      layers,
 		ConfigErr:   cfgErr,
+		Theme:       cfg.UI.Theme,
 		Automations: automationDoctor(root, automation.ExecCrontab{}),
 		Notify: doctor.NotifyInfo{
 			DisableCMux:    cfg.Notifications.DisableCMux,

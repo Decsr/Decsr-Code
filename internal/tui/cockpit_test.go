@@ -14,6 +14,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/bus"
 	"github.com/Decsr/Decsr-Code/internal/config"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 func cockpitFixture(t *testing.T) (CockpitModel, string) {
@@ -422,8 +423,8 @@ func TestAgentsTabShowsCalls(t *testing.T) {
 }
 
 func TestFocusedPaneMarker(t *testing.T) {
-	on := ansi.Strip(cockpitPane("RUN", 30, 5, nil, true, galaxyBlue))
-	off := ansi.Strip(cockpitPane("RUN", 30, 5, nil, false, galaxyBlue))
+	on := ansi.Strip(cockpitPane("RUN", 30, 5, nil, true, ui.Accent))
+	off := ansi.Strip(cockpitPane("RUN", 30, 5, nil, false, ui.Accent))
 	if !strings.Contains(on, "▌") {
 		t.Errorf("focused pane has no marker:\n%s", on)
 	}
@@ -598,7 +599,7 @@ func TestCockpitFooterIsHintBar(t *testing.T) {
 	}
 	c.SetGate("task_spec.md")
 	f = stripANSI(c.renderFooter())
-	if !strings.HasPrefix(strings.TrimSpace(f), "Ctrl+A  approve") {
+	if !strings.HasPrefix(strings.TrimSpace(f), "Ctrl+A approve") {
 		t.Errorf("gate footer should start with Ctrl+A approve: %q", f)
 	}
 }

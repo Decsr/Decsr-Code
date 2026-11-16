@@ -26,6 +26,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/lang"
 	"github.com/Decsr/Decsr-Code/internal/plugins"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -54,6 +55,8 @@ type WorkspaceResult struct {
 type WorkspaceOptions struct {
 	Resume bool   // open with the session picker showing
 	Issue  string // /issue arguments to run after start ("42", "<URL> --force")
+	// Session is the ID of a saved session to open; empty keeps the new one.
+	Session string
 	// Automation makes this an unattended automation run.
 	Automation AutomationOptions
 }
@@ -579,6 +582,7 @@ type workspaceModel struct {
 	cmdPicked    bool // the highlight was moved with the arrows
 	splitting    bool
 	startIssue   string  // /issue arguments to run at start
+	startCmd     tea.Cmd // command of the session opened at start
 	auto         *wsAuto // automation run; nil in a normal Workspace
 	splitGen     int
 	splitTask    string
@@ -678,8 +682,8 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...Work
 	for _, st := range []*textarea.Style{&ta.FocusedStyle, &ta.BlurredStyle} {
 		st.Base = lipgloss.NewStyle()
 		st.CursorLine = lipgloss.NewStyle()
-		st.Text = lipgloss.NewStyle().Foreground(colText)
-		st.Placeholder = lipgloss.NewStyle().Foreground(colMuted)
+		st.Text = lipgloss.NewStyle().Foreground(ui.Text)
+		st.Placeholder = lipgloss.NewStyle().Foreground(ui.Muted)
 	}
 	ta.Cursor.SetMode(cursor.CursorStatic)
 	ta.Focus()
@@ -690,9 +694,9 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...Work
 		ti.Placeholder = placeholder
 		ti.CharLimit = 200
 		ti.Cursor.SetMode(cursor.CursorStatic)
-		ti.PromptStyle = lipgloss.NewStyle().Foreground(colMuted)
-		ti.TextStyle = lipgloss.NewStyle().Foreground(colText)
-		ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(colMuted)
+		ti.PromptStyle = lipgloss.NewStyle().Foreground(ui.Muted)
+		ti.TextStyle = lipgloss.NewStyle().Foreground(ui.Text)
+		ti.PlaceholderStyle = lipgloss.NewStyle().Foreground(ui.Muted)
 		return ti
 	}
 
@@ -734,10 +738,16 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...Work
 	if len(opts) > 0 && opts[0].Resume {
 		m = m.openSessions()
 	}
+	if len(opts) > 0 && opts[0].Session != "" {
+		next, cmd := m.loadSession(opts[0].Session)
+		m, m.startCmd = next.(workspaceModel), cmd
+	}
 	return m
 }
 
-func (m workspaceModel) Init() tea.Cmd { return tea.Batch(m.startIssueCmd(), m.autoStartCmd()) }
+func (m workspaceModel) Init() tea.Cmd {
+	return tea.Batch(m.startCmd, m.startIssueCmd(), m.autoStartCmd())
+}
 
 func (m workspaceModel) project() string {
 	if m.cfg.Project.Name != "" {
@@ -1610,7 +1620,7 @@ func (m *workspaceModel) refreshOutput() {
 		if n := m.g.Node(m.outNode); n != nil && n.Status == workspace.StatusRunning {
 			msg = fmt.Sprintf("waiting for %s's first output… (%s)", n.Role, formatElapsed(m.now().Sub(n.StartedAt)))
 		}
-		content = lipgloss.NewStyle().Foreground(colMuted).Render(msg)
+		content = lipgloss.NewStyle().Foreground(ui.Muted).Render(msg)
 	}
 	m.outVP.SetContent(content)
 	if m.outFollow {
@@ -2213,7 +2223,7 @@ func (m workspaceModel) View() string {
 	w, h := m.width, m.height
 	if w < wsMinW || h < wsMinH {
 		msg := fmt.Sprintf("Terminal too small (need %d×%d)", wsMinW, wsMinH)
-		return paintBackground(ansi.Truncate(msg, max(w, 1), ""), w, h)
+		return ansi.Truncate(msg, max(w, 1), "")
 	}
 	var v string
 	switch {
@@ -2228,10 +2238,10 @@ func (m workspaceModel) View() string {
 	}
 	if !m.showHelp {
 		if box := m.overlayBox(); box != "" {
-			v = overlayCenter(v, box, w, h)
+			v = ui.PlaceOverlay(v, box, w, h)
 		}
 	}
-	return paintBackground(fitView(v, w, h), w, h)
+	return fitView(v, w, h)
 }
 
 // fitView guarantees at most h lines of at most w cells.
@@ -2267,7 +2277,7 @@ func (m workspaceModel) overlayBox() string {
 		return renderRoleForm(m.formName.View(), m.formDesc.View(), m.formFocus, m.formCanChange, inherits, m.formErr, w)
 	case wsOverlayConfirm:
 		boxW := min(56, w-2)
-		warn := lipgloss.NewStyle().Foreground(colWarn).Bold(true)
+		warn := lipgloss.NewStyle().Foreground(ui.Warn).Bold(true)
 		var body []string
 		for _, l := range wrapText(m.confirm.text, boxW-4) {
 			body = append(body, warn.Render(l))
@@ -2278,7 +2288,7 @@ func (m workspaceModel) overlayBox() string {
 		case !strings.HasSuffix(m.confirm.text, "y/n"): // otherwise the text already asks
 			body = append(body, "", wsKey("y")+" yes   "+wsKey("n")+" no")
 		}
-		return wsBox("Confirm", boxW, body)
+		return ui.Overlay("Confirm", body, nil, boxW)
 	case wsOverlaySkills:
 		n := m.g.Node(m.skillNode)
 		if n == nil {
@@ -2308,18 +2318,17 @@ func oneLine(s string) string {
 }
 
 // wsKey renders a key name in normal weight, to stand out from dim labels.
-func wsKey(k string) string { return lipgloss.NewStyle().Foreground(colText).Render(k) }
+func wsKey(k string) string { return lipgloss.NewStyle().Foreground(ui.Text).Render(k) }
 
 // wsHintBar renders footer hints as "key label" pairs, the key in normal
 // weight and the label dim, separated by a dim " · ".
 func wsHintBar(width int, hints []keyHint) string {
 	hints = detachHints(hints)
-	dim := lipgloss.NewStyle().Foreground(colMuted)
-	parts := make([]string, len(hints))
+	hs := make([]ui.Hint, len(hints))
 	for i, h := range hints {
-		parts[i] = wsKey(h.key) + dim.Render(" "+h.label)
+		hs[i] = ui.Hint{Key: h.key, Label: h.label}
 	}
-	return ansi.Truncate("  "+strings.Join(parts, dim.Render(" · ")), width, "")
+	return ui.HintBar(hs, width)
 }
 
 // fitHints keeps the first hint and the last (help) and drops the ones in
@@ -2359,15 +2368,15 @@ func (m workspaceModel) statusLine() string {
 	if text == "" {
 		return ""
 	}
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	if !isErr {
 		return "  " + dim.Render(truncateOneLine(text+orSep(long), w-4))
 	}
 	// An error is one line: a red glyph, the short text, then the dim advice.
 	text = strings.TrimPrefix(text, "! ")
-	glyph := lipgloss.NewStyle().Foreground(colFail).Bold(true).Render("!") + " "
+	glyph := lipgloss.NewStyle().Foreground(ui.Fail).Bold(true).Render("!") + " "
 	short := truncateOneLine(text, max(w-6, 4))
-	line := glyph + lipgloss.NewStyle().Foreground(colText).Render(short)
+	line := glyph + lipgloss.NewStyle().Foreground(ui.Text).Render(short)
 	if room := w - 4 - 2 - ansi.StringWidth(short) - 2; long != "" && room >= 8 {
 		line += dim.Render("  " + truncateOneLine(long, room))
 	}
@@ -2463,17 +2472,17 @@ func (m workspaceModel) transcriptLines(w int, withStream bool) []string {
 		var body lipgloss.Style
 		switch l.Who {
 		case "you":
-			prefix = lipgloss.NewStyle().Foreground(colText).Bold(true).Render("you ›") + " "
-			body = lipgloss.NewStyle().Foreground(colText)
+			prefix = lipgloss.NewStyle().Foreground(ui.Text).Bold(true).Render("you ›") + " "
+			body = lipgloss.NewStyle().Foreground(ui.Text)
 		case "lead":
-			prefix = lipgloss.NewStyle().Foreground(colAccent).Bold(true).Render("lead ›") + " "
-			body = lipgloss.NewStyle().Foreground(colText)
+			prefix = lipgloss.NewStyle().Foreground(ui.Accent).Bold(true).Render("lead ›") + " "
+			body = lipgloss.NewStyle().Foreground(ui.Text)
 		case "system":
-			prefix = lipgloss.NewStyle().Foreground(colMuted).Bold(true).Render("· ")
-			body = lipgloss.NewStyle().Foreground(colMuted)
+			prefix = lipgloss.NewStyle().Foreground(ui.Muted).Bold(true).Render("· ")
+			body = lipgloss.NewStyle().Foreground(ui.Muted)
 		default:
-			prefix = lipgloss.NewStyle().Foreground(colFail).Bold(true).Render("! ")
-			body = lipgloss.NewStyle().Foreground(colFail)
+			prefix = lipgloss.NewStyle().Foreground(ui.Fail).Bold(true).Render("! ")
+			body = lipgloss.NewStyle().Foreground(ui.Fail)
 		}
 		pw := ansi.StringWidth(prefix)
 		first := true
@@ -2494,11 +2503,11 @@ func (m workspaceModel) transcriptLines(w int, withStream bool) []string {
 	}
 	if m.splitting {
 		spin := pixelSpinner.Frames[m.spin%len(pixelSpinner.Frames)]
-		out = append(out, "  "+lipgloss.NewStyle().Foreground(colAccent).Bold(true).Render("lead ›")+" "+
-			lipgloss.NewStyle().Foreground(colText).Render(spin+" splitting the task…  (Esc cancels)"))
+		out = append(out, "  "+lipgloss.NewStyle().Foreground(ui.Accent).Bold(true).Render("lead ›")+" "+
+			lipgloss.NewStyle().Foreground(ui.Text).Render(spin+" splitting the task…  (Esc cancels)"))
 		if withStream && m.stream != nil {
 			if last := m.stream.lastLine(); last != "" {
-				out = append(out, "    "+lipgloss.NewStyle().Foreground(colMuted).Render(truncateOneLine(last, w-4)))
+				out = append(out, "    "+lipgloss.NewStyle().Foreground(ui.Muted).Render(truncateOneLine(last, w-4)))
 			}
 		}
 	}
@@ -2652,11 +2661,11 @@ func (m workspaceModel) progressStats() string {
 // the progress stats dim on the right. The branch is in the bottom bar.
 func (m workspaceModel) headerLine() string {
 	w := m.width
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	right := dim.Render(m.progressStats())
 	fits := func(r string) bool { return ansi.StringWidth(r)+2+12 <= w }
 	if m.eng != nil && m.eng.Auto() {
-		if r := lipgloss.NewStyle().Foreground(colWarn).Render("AUTO") + dim.Render(" · ") + right; fits(r) {
+		if r := lipgloss.NewStyle().Foreground(ui.Warn).Render("AUTO") + dim.Render(" · ") + right; fits(r) {
 			right = r
 		}
 	}
@@ -2666,9 +2675,9 @@ func (m workspaceModel) headerLine() string {
 		}
 	}
 	right += "  "
-	left := "  " + lipgloss.NewStyle().Foreground(colAccent).Bold(true).Render("◆ decsr")
+	left := "  " + lipgloss.NewStyle().Foreground(ui.Accent).Bold(true).Render("◆ decsr")
 	if p := m.project(); p != "" {
-		left += dim.Render(" · ") + lipgloss.NewStyle().Foreground(colText).Render(truncateOneLine(p, max(w/4, 8)))
+		left += dim.Render(" · ") + lipgloss.NewStyle().Foreground(ui.Text).Render(truncateOneLine(p, max(w/4, 8)))
 	}
 	if ansi.StringWidth(left)+ansi.StringWidth(right) > w {
 		right = ""
@@ -2683,12 +2692,12 @@ func (m workspaceModel) titleLine() string {
 	if title == "" {
 		title = "new session"
 	}
-	return "  " + lipgloss.NewStyle().Foreground(colText).Bold(true).Render(truncateOneLine(title, max(m.width-4, 4)))
+	return "  " + lipgloss.NewStyle().Foreground(ui.Text).Bold(true).Render(truncateOneLine(title, max(m.width-4, 4)))
 }
 
 // emptyPane is the body of the graph pane before the first task.
 func (m workspaceModel) emptyPane(iw, ih int) []string {
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	var body []string
 	for _, l := range wrapText("No nodes yet. Describe a task below — the lead splits it into nodes and you assign the agents.", max(iw-4, 8)) {
 		body = append(body, centerLine(dim.Render(l), iw))
@@ -2705,14 +2714,14 @@ func (m workspaceModel) emptyPane(iw, ih int) []string {
 		pre := fmt.Sprintf("Spec Kit: %s has %d open %s — ", m.spec.Dir, m.spec.Open, pluralize(m.spec.Open, "task", "tasks"))
 		const cmd = "/import speckit"
 		if ansi.StringWidth(pre+cmd) <= iw-2 {
-			line := dim.Render(pre) + lipgloss.NewStyle().Foreground(colText).Render(cmd)
+			line := dim.Render(pre) + lipgloss.NewStyle().Foreground(ui.Text).Render(cmd)
 			body = append(body, "", centerLine(line, iw))
 		}
 	}
 	// The logo is one accent colour, without the stars; a narrow pane gets none.
 	var logo []string
 	if iw >= 62 {
-		accent := []lipgloss.Color{colAccent, colAccent, colAccent, colAccent, colAccent}
+		accent := []lipgloss.TerminalColor{ui.Accent, ui.Accent, ui.Accent, ui.Accent, ui.Accent}
 		for _, l := range renderBlockTextColored("DECSR", accent) {
 			logo = append(logo, centerLine(l, iw))
 		}
@@ -2731,15 +2740,6 @@ const (
 	wsGraphMinHInsp  = 16 // the same with the inspector beside it
 	wsChatExtraLimit = 16 // most rows the chat takes over from the graph
 )
-
-// paneLabel is the dim line that names a pane; a focused pane gets normal weight.
-func paneLabel(text string, focused bool) string {
-	st := lipgloss.NewStyle().Foreground(colMuted)
-	if focused {
-		st = lipgloss.NewStyle().Foreground(colText).Bold(true)
-	}
-	return "  " + st.Render(text)
-}
 
 // inspDefault reports whether the inspector sits beside the graph unless the
 // user hides it: only in graph mode with room for both.
@@ -2779,7 +2779,7 @@ func (m workspaceModel) mainPanes(mainH int) []string {
 		if !m.showGraph {
 			return m.feedPane(cw, mainH)
 		}
-		out := []string{paneLabel("Graph", m.focus == wsFocusGraph) + lipgloss.NewStyle().Foreground(colMuted).Render(" · g activity")}
+		out := []string{ui.PaneLabel("Graph", m.focus == wsFocusGraph, 0) + lipgloss.NewStyle().Foreground(ui.Muted).Render(" · g activity")}
 		var body []string
 		if len(g.Nodes) == 0 {
 			body = m.emptyPane(cw-4, mainH-1)
@@ -2792,7 +2792,7 @@ func (m workspaceModel) mainPanes(mainH int) []string {
 		return out
 	}
 	inspBody := func(iw, ih int) []string {
-		return strings.Split(renderInspector(g, n, m.cfg, m.plug, iw, ih, tail), "\n")
+		return strings.Split(renderInspector(g, n, m.cfg, m.plug, m.now(), iw, ih, tail), "\n")
 	}
 	var main []string
 	switch {
@@ -2800,8 +2800,8 @@ func (m workspaceModel) mainPanes(mainH int) []string {
 		cw := w - wsInspectorW
 		iw := wsInspectorW - 3 // divider, one cell of padding on each side
 		cl := graphPane(cw)
-		il := append([]string{lipgloss.NewStyle().Foreground(colMuted).Render("Inspector")}, inspBody(iw, mainH-1)...)
-		div := lipgloss.NewStyle().Foreground(colBorder).Render("│")
+		il := append([]string{lipgloss.NewStyle().Foreground(ui.Muted).Render("Inspector")}, inspBody(iw, mainH-1)...)
+		div := ui.VDivider(1)
 		for i := 0; i < mainH; i++ {
 			c, p := "", ""
 			if i < len(cl) {
@@ -2825,8 +2825,8 @@ func (m workspaceModel) mainPanes(mainH int) []string {
 		if n != nil {
 			title = n.ID
 		}
-		box := wsBox(title, bw, body[:bh-2])
-		main = strings.Split(overlayCenter(strings.Join(graphPane(w), "\n"), box, w, mainH), "\n")
+		box := ui.Overlay(title, body[:bh-2], nil, bw)
+		main = strings.Split(ui.PlaceOverlay(strings.Join(graphPane(w), "\n"), box, w, mainH), "\n")
 	default:
 		main = graphPane(w)
 	}
@@ -2837,9 +2837,9 @@ func (m workspaceModel) mainPanes(mainH int) []string {
 }
 
 func (m workspaceModel) promptBox() []string {
-	bc := colBorder
+	bc := ui.Border
 	if m.focus == wsFocusPrompt && !m.splitting {
-		bc = colAccent
+		bc = ui.Accent
 	}
 	boxStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(bc).MarginLeft(2)
 	in := m.input
@@ -2873,7 +2873,7 @@ func (m workspaceModel) paletteLines(maxRows int) []string {
 	matches := m.cmdMatches(m.input.Value())
 	var pal []string
 	if len(matches) == 0 {
-		pal = []string{lipgloss.NewStyle().Foreground(colFail).Render("! no such command")}
+		pal = []string{lipgloss.NewStyle().Foreground(ui.Fail).Render("! no such command")}
 	} else {
 		pal = renderCmdList(matches, m.cmdIdx, m.width-2, maxRows)
 	}
@@ -2913,7 +2913,7 @@ func (m workspaceModel) mainArea(mainH int) []string {
 	case m.sidebarInline():
 		sw := m.sidebarW()
 		side := m.sidebarRows(sw, mainH)
-		div := lipgloss.NewStyle().Foreground(colBorder).Render("│")
+		div := ui.VDivider(1)
 		out := make([]string, mainH)
 		for i := range out {
 			out[i] = padRight(ansi.Truncate(side[i], sw, ""), sw) + div + main[i]
@@ -2921,7 +2921,7 @@ func (m workspaceModel) mainArea(mainH int) []string {
 		return out
 	case m.sidebarOverlay():
 		box := m.sidebarOverlayBox(mainH)
-		return strings.Split(overlayAt(strings.Join(main, "\n"), box, 1, 0, m.width, mainH), "\n")[:mainH]
+		return strings.Split(ui.PlaceAt(strings.Join(main, "\n"), box, 1, 0, m.width, mainH), "\n")[:mainH]
 	}
 	return main
 }

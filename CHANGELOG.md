@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ui.theme: auto | dark | light` selects the colour theme. `auto` asks the
+  terminal for its background at startup and falls back to dark when it does
+  not answer. The Workspace now works on light terminals. `decsr doctor` warns
+  about an invalid value.
 - Automations: `.decsr/automations.yaml` defines scheduled unattended runs with
   a name, a cron schedule, a task or a GitHub issue query, autonomy 2 or 3, a
   budget and a timeout. `decsr automation list|run|install|uninstall` manage
@@ -174,6 +178,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HOMEBREW_TAP_GITHUB_TOKEN` secret is set (skipped otherwise).
 
 ### Changed
+- One look for every screen. The shared components in `internal/ui` (header,
+  pane label, list row, card, hint bar, input box, overlay) now draw Home, the
+  setup screens, the artifact viewer, file preview, editor, chat, the project
+  picker, help and the classic pipeline chrome; the old galaxy palette is
+  gone. Home is a launcher: recent projects and sessions on the left, actions
+  on the right, and `Enter` on a session opens the Workspace on it. Global
+  Settings shows Model and Effort side by side and lists unreachable
+  providers on an `offline:` line; Project Setup edits an agent's runner,
+  model, effort and mode in one editor. Columns keep a space around the
+  divider.
 - Claude roles without a model now use claude-opus-5-5 with high effort.
 - Codex runs with `--sandbox read-only` (text) or `--sandbox workspace-write`
   (agent) instead of `--full-auto`, which current Codex versions reject.

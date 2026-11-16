@@ -52,9 +52,11 @@ func TestClaudeAgentSelectFable(t *testing.T) {
 	m.agentRoles = []string{"coder"}
 	m.agentCursor = 0
 	m.section = sectionAgentSetup
-	m.agentEditing, m.agentEditStep, m.agentEditProv = true, 1, providerClaude
+	m, _ = press(m, "enter") // open the editor
+	if !m.agentEditing || m.agentEditProv != providerClaude {
+		t.Fatalf("editing = %v prov = %v", m.agentEditing, m.agentEditProv)
+	}
 	m.agentEditIdx = 0
-	m, _ = press(m, "enter")
 	m.agentEffortLoading = false
 	m, _ = press(m, "enter")
 	if ov := m.agentOverrides["coder"]; ov.model != "fable" || ov.runner != "claude" {
@@ -104,22 +106,23 @@ func TestClaudeTypedIdAgent(t *testing.T) {
 	m.claudeModelsLoading = false
 	m.agentRoles = []string{"coder"}
 	m.section = sectionAgentSetup
-	m.agentEditing, m.agentEditStep, m.agentEditProv = true, 1, providerClaude
+	m, _ = press(m, "enter") // open the editor
+	m.agentField = agentFieldModel
 	m.agentEditIdx = len(m.claudeRows()) - 1
 	m, _ = press(m, "enter")
-	if !m.claudeTyping || m.agentEditStep != 1 {
-		t.Fatalf("typing = %v step = %d", m.claudeTyping, m.agentEditStep)
+	if !m.claudeTyping || m.agentField != agentFieldModel {
+		t.Fatalf("typing = %v field = %d", m.claudeTyping, m.agentField)
 	}
 	m, _ = press(m, "esc")
-	if m.claudeTyping || !m.agentEditing || m.agentEditStep != 1 {
-		t.Fatalf("after esc: typing = %v editing = %v step = %d", m.claudeTyping, m.agentEditing, m.agentEditStep)
+	if m.claudeTyping || !m.agentEditing {
+		t.Fatalf("after esc: typing = %v editing = %v", m.claudeTyping, m.agentEditing)
 	}
 	m.agentEditIdx = len(m.claudeRows()) - 1
 	m, _ = press(m, "enter")
 	m = typeInto(m, "claude-custom-1")
 	m, _ = press(m, "enter")
-	if m.agentEditStep != 2 {
-		t.Fatalf("step = %d", m.agentEditStep)
+	if m.claudeTyping || !m.agentEditing || m.agentModel() != "claude-custom-1" {
+		t.Fatalf("typing = %v editing = %v model = %q", m.claudeTyping, m.agentEditing, m.agentModel())
 	}
 	m.agentEffortLoading = false
 	m, _ = press(m, "enter")
@@ -148,7 +151,7 @@ func TestClaudeSavedUnknownIdShowsCustom(t *testing.T) {
 
 func TestClaudeDefaultLine(t *testing.T) {
 	m := claudeSetup(t, "")
-	const want = "default → claude-opus-5-5 · high effort"
+	const want = "default → claude-opus-5-5 · high"
 	if got := m.claudeDefaultLine(true); got != want {
 		t.Errorf("line = %q", got)
 	}
@@ -185,26 +188,26 @@ func TestClaudeEffortDefaultLabel(t *testing.T) {
 	}
 }
 
-func TestClaudeAgentStepShowsDefaultLine(t *testing.T) {
+func TestClaudeAgentEditorShowsDefault(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	m := NewSetupModelWithOverrides("claude", "sonnet", "default", "go", "proj", nil)
+	m := NewSetupModelWithOverrides("claude", "", "default", "go", "proj", nil)
 	m.width, m.height = 140, 40
+	m.syncViewport()
 	m.claudeModelsLoading = false
 	m.agentRoles = []string{"coder"}
 	m.section = sectionAgentSetup
-	m.agentEditing, m.agentEditStep, m.agentEditProv = true, 1, providerClaude
-	if !strings.Contains(ansi.Strip(m.renderContent()), "default → claude-opus-5-5 · high effort") {
-		t.Error("agent step lacks the default line")
+	m, _ = press(m, "enter")
+	if view := ansi.Strip(m.View()); !strings.Contains(view, "claude-opus-5-5") || !strings.Contains(view, "default") {
+		t.Errorf("editor lacks the default model:\n%s", view)
 	}
 	m.agentEditing = false
 	m.agentOverrides["coder"] = agentSetupOverride{runner: "claude"}
-	if !strings.Contains(ansi.Strip(m.renderContent()), "claude / default → claude-opus-5-5 · high") {
+	if !strings.Contains(ansi.Strip(m.renderContent()), "claude · default · default") {
 		t.Error("agent list lacks the default text for a claude role without a model")
 	}
-	m.agentEditing = true
 	m.agentOverrides["coder"] = agentSetupOverride{runner: "claude", model: "haiku"}
-	if strings.Contains(ansi.Strip(m.renderContent()), "default → ") {
-		t.Error("default line shown for a role with a model")
+	if strings.Contains(ansi.Strip(m.renderContent()), "default · default") || !strings.Contains(ansi.Strip(m.renderContent()), "claude · haiku") {
+		t.Error("agent list shows a default for a role with a model")
 	}
 }
 

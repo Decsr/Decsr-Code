@@ -17,6 +17,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/gitclient"
 	"github.com/Decsr/Decsr-Code/internal/lang"
 	"github.com/Decsr/Decsr-Code/internal/safefile"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 type startupPhase int
@@ -37,29 +38,30 @@ const (
 // launched without a requirements file. It progresses through:
 // home → (open project →) (setup →) PM chat | picker → done.
 type startupModel struct {
-	phase         startupPhase
-	projectPicker ProjectPickerModel
-	dirBrowser    DirBrowserModel
-	taskHistory   TaskHistoryModel
-	home          HomeModel
-	setup         SetupModel
-	modelMemory   modelMemoryModel
-	moduleInput   textinput.Model
-	moduleGuess   string // module path guessed from git remote; computed once on entry
-	picker        PickerModel
-	editor        EditorModel
-	root          string
-	wsDir         string // .decsr directory path
-	wsReqPath     string // absolute path to write new requirements
-	cfg           config.Config
-	reqPath       string     // result — non-empty when resolved (legacy pipeline)
-	chatMode      bool       // result — true when PM chat-based requirements gathering was selected
-	resume        bool       // result — true when the user chose to resume an interrupted task
-	reviewProject bool       // result — true when the user chose "Resume Project" (PM review)
-	workspace     bool       // result — true when the user chose the Workspace
-	pendingAction homeAction // action to resume after module path input
-	width         int
-	height        int
+	phase            startupPhase
+	projectPicker    ProjectPickerModel
+	dirBrowser       DirBrowserModel
+	taskHistory      TaskHistoryModel
+	home             HomeModel
+	setup            SetupModel
+	modelMemory      modelMemoryModel
+	moduleInput      textinput.Model
+	moduleGuess      string // module path guessed from git remote; computed once on entry
+	picker           PickerModel
+	editor           EditorModel
+	root             string
+	wsDir            string // .decsr directory path
+	wsReqPath        string // absolute path to write new requirements
+	cfg              config.Config
+	reqPath          string     // result — non-empty when resolved (legacy pipeline)
+	chatMode         bool       // result — true when PM chat-based requirements gathering was selected
+	resume           bool       // result — true when the user chose to resume an interrupted task
+	reviewProject    bool       // result — true when the user chose "Resume Project" (PM review)
+	workspace        bool       // result — true when the user chose the Workspace
+	workspaceSession string     // result — session to open in the Workspace; empty for the current one
+	pendingAction    homeAction // action to resume after module path input
+	width            int
+	height           int
 }
 
 func newStartupModel(root, wsReqPath string, cfg config.Config) startupModel {
@@ -119,7 +121,10 @@ func (m startupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			case homeActionWorkspace:
 				m.workspace = true
+				m.workspaceSession = msg.session
 				return m, tea.Quit
+			case homeActionSwitchProject:
+				return m, m.switchProject(msg.path)
 			case homeActionNewTask:
 				// PM chat-based requirements gathering — skip file picker.
 				if m.needsModulePath() {
@@ -178,7 +183,7 @@ func (m startupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if projectCfg.Agents != nil {
 					projectOverrides = projectCfg.Agents
 				}
-				setup := NewSetupModelWithOverrides(currentRunner, currentModel, currentEffort, m.cfg.Project.Language, m.cfg.Project.Name, projectOverrides).WithGlobalAgents(m.cfg.Agents)
+				setup := NewSetupModelWithOverrides(currentRunner, currentModel, currentEffort, m.cfg.Project.Language, m.cfg.Project.Name, projectOverrides).WithGlobalAgents(m.cfg.Agents).WithProjectInfo(m.cfg)
 				setup.root = m.root
 				setup.width, setup.height = m.width, m.height
 				setup.syncViewport()
@@ -441,7 +446,7 @@ func (m *startupModel) cleanAfterEditorSave(newContent string) {
 }
 
 func (m startupModel) View() string {
-	return paintBackground(m.view(), m.width, m.height)
+	return m.view()
 }
 
 func (m startupModel) view() string {
@@ -609,47 +614,40 @@ func (m startupModel) viewModulePath() string {
 // renderModulePathScreen draws the Go module path prompt in the shared
 // header / panel / footer chrome. escLabel is the Esc hint ("back"/"cancel").
 func renderModulePathScreen(width, height int, root, guess, inputView, escLabel string) string {
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	exampleStyle := lipgloss.NewStyle().Foreground(crt.primary)
-	hintStyle := lipgloss.NewStyle().Foreground(crt.success)
+	dimStyle := lipgloss.NewStyle().Foreground(ui.Muted)
+	exampleStyle := lipgloss.NewStyle().Foreground(ui.Text)
+	hintStyle := lipgloss.NewStyle().Foreground(ui.OK)
 
 	projectName := filepath.Base(root)
+	inner := max(width-6, 20)
 
 	lines := []string{
-		"No go.mod found. A module path is required for Go projects.",
-		"It will be used for imports between packages and to run go mod init.",
+		ui.PaneLabel("Go module path", true, width),
 		"",
-		dimStyle.Render("Format: <host>/<owner>/<repo>"),
+		"  No go.mod found. A module path is required for Go projects.",
+		"  It will be used for imports between packages and to run go mod init.",
 		"",
-		exampleStyle.Render("Examples"),
-		dimStyle.Render("  ▪ ") + exampleStyle.Render("github.com/yourname/"+projectName),
-		dimStyle.Render("  ▪ ") + exampleStyle.Render("gitlab.com/team/"+projectName),
-		dimStyle.Render("  ▪ ") + exampleStyle.Render(projectName) + dimStyle.Render("  (for local-only projects)"),
+		"  " + dimStyle.Render("Format: <host>/<owner>/<repo>"),
+		"",
+		"  " + exampleStyle.Render("Examples"),
+		"  " + dimStyle.Render("  ▪ ") + exampleStyle.Render("github.com/yourname/"+projectName),
+		"  " + dimStyle.Render("  ▪ ") + exampleStyle.Render("gitlab.com/team/"+projectName),
+		"  " + dimStyle.Render("  ▪ ") + exampleStyle.Render(projectName) + dimStyle.Render("  (for local-only projects)"),
 	}
-
 	if guess != "" {
-		lines = append(lines,
-			"",
-			hintStyle.Render("✓ Detected from git remote: "+guess),
-		)
+		lines = append(lines, "", "  "+hintStyle.Render("✓ Detected from git remote: "+guess))
+	}
+	lines = append(lines, "")
+	for _, l := range strings.Split(ui.InputBox(inputView, "", min(inner, 70), true, ""), "\n") {
+		lines = append(lines, "  "+l)
 	}
 
-	lines = append(lines, "", inputView)
-
-	panelW := width - 4
-	if panelW < 40 {
-		panelW = 40
+	out := append([]string{ui.Header("decsr · Go module path · "+projectName, "", width), ""}, lines...)
+	for len(out) < height-1 {
+		out = append(out, "")
 	}
-	panel := pixelPanel("◆ GO MODULE PATH", galaxyAzure, true,
-		lipgloss.NewStyle().Padding(1, 2).Width(panelW), strings.Join(lines, "\n"))
-
-	header := screenHeader(width, "Go Module Path", projectName)
-	footer := hintBar(width, []keyHint{{"Enter", "confirm"}, {"Esc", escLabel}}, "")
-	body := "\n " + strings.ReplaceAll(panel, "\n", "\n ")
-	if pad := height - 2 - strings.Count(body, "\n"); pad > 0 {
-		body += strings.Repeat("\n", pad)
-	}
-	return header + body + "\n" + footer
+	hints := []ui.Hint{{Key: "Enter", Label: "confirm"}, {Key: "Esc", Label: escLabel}}
+	return strings.Join(append(out, ui.HintBar(hints, width)), "\n")
 }
 
 // cleanWorkspace removes all files in the workspace directory except preserved ones.
@@ -807,6 +805,7 @@ type StartupResult struct {
 	Resume        bool          // true when the user chose to resume an interrupted task
 	ReviewProject bool          // true when the user chose "Resume Project" (PM reviews .decsr)
 	Workspace     bool          // true when the user chose the Workspace
+	Session       string        // session ID to open in the Workspace; empty for the current one
 	Cfg           config.Config // possibly updated config
 }
 
@@ -829,6 +828,7 @@ func RunStartup(root, wsReqPath string, cfg config.Config) (StartupResult, error
 		Resume:        final.resume,
 		ReviewProject: final.reviewProject,
 		Workspace:     final.workspace,
+		Session:       final.workspaceSession,
 		Cfg:           final.cfg,
 	}, nil
 }
@@ -904,7 +904,7 @@ func (m modulePathModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m modulePathModel) View() string {
-	return paintBackground(m.view(), m.width, m.height)
+	return m.view()
 }
 
 func (m modulePathModel) view() string {

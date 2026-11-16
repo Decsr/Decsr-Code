@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // SendHumanReplyFunc is called when the user sends a reply during PM negotiation.
@@ -234,9 +236,9 @@ func (m *NegotiateModel) sendToPM(visible string) {
 }
 
 func (m *NegotiateModel) refreshViewport() {
-	userStyle := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
-	pmStyle := lipgloss.NewStyle().Foreground(crt.primary)
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
+	userStyle := lipgloss.NewStyle().Foreground(ui.Text).Bold(true)
+	pmStyle := lipgloss.NewStyle().Foreground(ui.Text)
+	dimStyle := lipgloss.NewStyle().Foreground(ui.Muted)
 
 	var sb strings.Builder
 	for _, line := range m.lines {
@@ -268,51 +270,35 @@ func (m *NegotiateModel) SetSize(w, h int) {
 }
 
 func (m NegotiateModel) View() string {
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	inputStyle := lipgloss.NewStyle().Foreground(crt.bright)
-
-	sep := lipgloss.NewStyle().Foreground(crt.border).Render(strings.Repeat("─", m.width))
-
 	// The .md attach picker takes over the body while open.
 	if m.picking {
 		return strings.Join([]string{
-			screenHeader(m.width, "PM Requirements Conversation", "attach project files"),
-			sep,
+			ui.Header("PM requirements conversation", "attach project files", m.width),
 			m.picker.View(),
 		}, "\n")
 	}
 
-	var statusLine string
+	status := ""
 	if m.waiting {
-		statusLine = dimStyle.Render("  PM is thinking…")
-	} else {
-		statusLine = inputStyle.Render("› ") + renderInputWithCursor(m.input, m.cursor)
+		status = "PM is thinking…"
 	}
 
-	hints := []keyHint{{"Esc", "close"}, {"Enter", "send"}, {"Ctrl+A", "accept now"}, {"Ctrl+C", "clear"}}
+	hints := []ui.Hint{{Key: "Enter", Label: "send"}, {Key: "Esc", Label: "close"}, {Key: "Ctrl+A", Label: "accept now"}, {Key: "Ctrl+C", Label: "clear"}}
 	if m.requireInput {
-		hints = []keyHint{{"Esc", "close"}, {"Enter", "send"}, {"Ctrl+C", "clear"}}
+		hints = []ui.Hint{{Key: "Enter", Label: "send"}, {Key: "Esc", Label: "close"}, {Key: "Ctrl+C", Label: "clear"}}
 	}
 	if m.root != "" {
-		hints = append(hints, keyHint{"Ctrl+F", "attach .md"})
+		hints = append(hints, ui.Hint{Key: "Ctrl+F", Label: "attach .md"})
 	}
 
-	lines := []string{
-		screenHeader(m.width, "PM Requirements Conversation", ""),
-		sep,
-		m.vp.View(),
-		hintBar(m.width, hints, ""),
+	names := make([]string, len(m.attached))
+	for i, a := range m.attached {
+		names[i] = a.rel
 	}
-	if len(m.attached) > 0 {
-		names := make([]string, len(m.attached))
-		for i, a := range m.attached {
-			names[i] = a.rel
-		}
-		lines = append(lines, dimStyle.Render("▪ "+strings.Join(names, ", ")))
-	}
-	lines = append(lines, statusLine)
-
-	return strings.Join(lines, "\n")
+	return chatScreen(chatScreenOpts{
+		Width: m.width, Title: "PM requirements conversation", Attached: names, Body: m.vp.View(), Hints: hints,
+		Input: m.input, Cursor: m.cursor, Status: status,
+	})
 }
 
 // NegotiateClosedMsg is sent when the user closes the negotiate overlay.

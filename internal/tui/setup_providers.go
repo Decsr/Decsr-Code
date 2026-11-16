@@ -12,6 +12,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/credentials"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // providerEntry is one choice of the setup provider row: a built-in runner, a
@@ -395,16 +396,16 @@ func (m SetupModel) indexOfKey(key string) int {
 
 func (m SetupModel) urlEditBox() string {
 	ue := m.urlEdit
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	emptyHint := "empty resets to the default"
 	if ue.entry.custom() {
 		emptyHint = "required"
 	}
 	body := []string{dim.Render("Base URL (https; http only for localhost) · " + emptyHint), ue.in.View(), "", dim.Render("Enter save · Esc cancel")}
 	if ue.err != "" {
-		body = append(body, "", lipgloss.NewStyle().Foreground(colFail).Render("! "+ue.err))
+		body = append(body, "", lipgloss.NewStyle().Foreground(ui.Fail).Render("! "+ue.err))
 	}
-	return wsBox("Base URL · "+ue.entry.label, min(64, m.width-2), body)
+	return ui.Overlay("Base URL · "+ue.entry.label, body, nil, min(64, m.width-2))
 }
 
 // ── global provider detection ────────────────────────────────────────────────
@@ -442,24 +443,4 @@ func (m *SetupModel) applyGlobalEndpoint(agents map[string]config.AgentConfig, r
 	if base != "" {
 		m.baseURLs[runnerName] = base
 	}
-}
-
-// packTabs lays the provider tabs out in rows that fit width, so a tab is
-// never split across lines.
-func packTabs(tabs []string, width int) []string {
-	var rows []string
-	row, rowW := "  ", 2
-	for i, t := range tabs {
-		w := lipgloss.Width(t)
-		if i > 0 && rowW+2+w > width {
-			rows = append(rows, row)
-			row, rowW = "  ", 2
-		} else if i > 0 {
-			row += "  "
-			rowW += 2
-		}
-		row += t
-		rowW += w
-	}
-	return append(rows, row)
 }

@@ -8,10 +8,12 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/shirou/gopsutil/v4/mem"
 
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // modelMemory mode indices for the on-screen toggle.
@@ -211,104 +213,108 @@ func (m modelMemoryModel) result() config.ModelMemoryConfig {
 }
 
 func (m modelMemoryModel) View() string {
-	dimStyle := lipgloss.NewStyle().Foreground(homePalette.dim)
+	w := m.width
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
+	lines := []string{
+		ui.Header("decsr · Model memory", "saved to ~/.decsr/config.yaml", w),
+		"",
+		ui.PaneLabel("Mode", true, w),
+	}
+	lines = append(lines, wrapDim("  ", "Cap how much memory local models may use: a RAM budget (converted to a per-agent context window) or a fixed context size.", w, ui.Muted)...)
+	lines = append(lines, "")
 
-	var b strings.Builder
-	b.WriteString(dimStyle.Render("Cap how much memory local models may use. Choose RAM (auto-converted to a per-agent context window) OR a fixed context size."))
-	b.WriteString("\n\n")
-
-	// Mode toggle row; the marker column doubles as the indent.
+	var tabs []string
 	for i, label := range mmModeLabels {
 		if i == m.mode {
-			b.WriteString("▸ " + chip(label, galaxyAzure))
+			tabs = append(tabs, lipgloss.NewStyle().Foreground(ui.Accent).Render("▌")+lipgloss.NewStyle().Foreground(ui.Text).Bold(true).Render(label)+lipgloss.NewStyle().Foreground(ui.Accent).Render("▐"))
 		} else {
-			b.WriteString(dimStyle.Render("   " + label + " "))
-		}
-		if i < len(mmModeLabels)-1 {
-			b.WriteString("  ")
+			tabs = append(tabs, lipgloss.NewStyle().Foreground(ui.Text).Render(label))
 		}
 	}
-	b.WriteString("\n\n")
+	lines = append(lines, wrapItems(tabs, 4, max(w-2, 20), "  ")...)
+	lines = append(lines, "")
 
 	switch m.mode {
 	case mmModeOff:
-		b.WriteString(dimStyle.Render("  Local models run with their own default context window."))
+		lines = append(lines, "  "+dim.Render("Local models run with their own default context window."))
 	case mmModeRAM:
-		b.WriteString("  Max RAM (GB):  ")
-		b.WriteString(m.value.View())
+		label := "Max RAM (GB)"
 		if m.totalRAMGB > 0 {
-			b.WriteString(dimStyle.Render(fmt.Sprintf("   (system total: %.1f GB)", m.totalRAMGB)))
+			label += fmt.Sprintf(" · system total %.1f GB", m.totalRAMGB)
 		}
-		b.WriteString("\n\n")
-		b.WriteString(m.renderPreview(dimStyle))
+		lines = append(lines, ui.PaneLabel(label, false, w))
+		lines = append(lines, indentLines(ui.InputBox(m.value.View(), "", min(24, max(w-4, 5)), true, ""), "  ")...)
+		lines = append(lines, "")
+		lines = append(lines, m.renderPreview(w)...)
 	case mmModeContext:
-		b.WriteString("  Max context (tokens):  ")
-		b.WriteString(m.value.View())
-		b.WriteString("\n\n")
-		b.WriteString(dimStyle.Render("  Applied verbatim to every agent."))
+		lines = append(lines, ui.PaneLabel("Max context (tokens)", false, w))
+		lines = append(lines, indentLines(ui.InputBox(m.value.View(), "", min(24, max(w-4, 5)), true, ""), "  ")...)
+		lines = append(lines, "", "  "+dim.Render("Applied verbatim to every agent."))
 	}
 
-	panelW := min(m.width-4, 96)
-	if panelW < 20 {
-		panelW = 20
+	body := lines
+	if h := m.height - 1; h > 0 && len(body) > h {
+		body = body[:h]
 	}
-	panel := pixelPanel("◆ MODEL MEMORY", homePalette.accent, true,
-		lipgloss.NewStyle().Width(panelW).Padding(0, 1), b.String())
-	if m.width > 100 {
-		panel = lipgloss.PlaceHorizontal(m.width, lipgloss.Center, panel)
+	for len(body) < max(m.height-1, len(body)) {
+		body = append(body, "")
 	}
-	return screenHeader(m.width, "Model Memory", "") + "\n" + panel + "\n" +
-		hintBar(m.width, []keyHint{{"←→", "mode"}, {"Enter", "save"}, {"Esc", "cancel"}}, "")
+	for i, l := range body {
+		body[i] = ansi.Truncate(l, w, "")
+	}
+	hints := ui.HintBar([]ui.Hint{{Key: "←→", Label: "mode"}, {Key: "Enter", Label: "save"}, {Key: "Esc", Label: "cancel"}}, w)
+	return strings.Join(append(body, hints), "\n")
+}
+
+func indentLines(block, prefix string) []string {
+	lines := strings.Split(block, "\n")
+	for i, l := range lines {
+		lines[i] = prefix + l
+	}
+	return lines
 }
 
 // renderPreview lists the estimated context window the RAM limit yields for
 // every local model currently available across backends, so the user sees the
 // effect on each model before saving.
-func (m modelMemoryModel) renderPreview(dim lipgloss.Style) string {
+func (m modelMemoryModel) renderPreview(w int) []string {
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	gb, err := strconv.ParseFloat(strings.TrimSpace(m.value.Value()), 64)
 	if err != nil || gb <= 0 {
-		return dim.Render("  Enter a RAM budget to preview the derived context size.")
+		return wrapDim("  ", "Enter a RAM budget to preview the derived context size.", w, ui.Muted)
 	}
 	if m.localLoading {
-		return dim.Render("  Estimated context per available local model:\n  scanning local backends…")
+		return []string{ui.PaneLabel("Estimated context per local model", false, w), "  " + dim.Render("scanning local backends…")}
 	}
 	if len(m.localModels) == 0 {
-		return dim.Render("  No local models detected (Ollama / LM Studio / oMLX not running?).\n  Heuristic for a typical 7B model: ≈ " +
-			strconv.Itoa(runner.ContextTokensForWeights(0, gb)) + " tokens.")
+		return wrapDim("  ", "No local models detected (Ollama / LM Studio / oMLX not running?). Heuristic for a typical 7B model: ≈ "+
+			strconv.Itoa(runner.ContextTokensForWeights(0, gb))+" tokens.", w, ui.Muted)
 	}
 
-	headStyle := lipgloss.NewStyle().Foreground(homePalette.gold)
-	valStyle := lipgloss.NewStyle().Foreground(homePalette.green)
-
-	var lines []string
-	lines = append(lines, headStyle.Render("  Estimated context per available local model:"))
-
+	lines := []string{ui.PaneLabel("Estimated context per local model", false, w)}
 	// Cap the list so the screen does not overflow; note any remainder.
-	maxRows := m.height - 14
-	if maxRows < 4 {
-		maxRows = 4
-	}
+	maxRows := max(m.height-14, 4)
 	shown := m.localModels
 	extra := 0
 	if len(shown) > maxRows {
 		extra = len(shown) - maxRows
 		shown = shown[:maxRows]
 	}
-
+	rowW := min(w-2, 72)
 	for _, lm := range shown {
 		tokens := runner.ContextTokensForWeights(lm.WeightBytes, gb)
 		est := ""
 		if lm.WeightBytes <= 0 {
-			est = dim.Render(" (est)")
+			est = " (est)"
 		}
-		label := fmt.Sprintf("%-9s %s", lm.Runner, lm.Model)
-		lines = append(lines, "  "+dim.Render(label)+"  "+
-			valStyle.Render(fmt.Sprintf("≈ %d tok", tokens))+est)
+		lines = append(lines, "  "+ui.ListRow(ui.RowOpts{
+			Left: fmt.Sprintf("%-9s %s", lm.Runner, lm.Model), Right: fmt.Sprintf("≈ %d tok%s", tokens, est), Width: rowW, Indent: 1,
+		}))
 	}
 	if extra > 0 {
-		lines = append(lines, dim.Render(fmt.Sprintf("  … and %d more", extra)))
+		lines = append(lines, "    "+dim.Render(fmt.Sprintf("… and %d more", extra)))
 	}
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 func digitsOnly(s string, allowDot bool) string {

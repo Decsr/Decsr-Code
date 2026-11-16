@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Decsr/Decsr-Code/internal/gitclient"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 type gitFocus int
@@ -233,15 +234,15 @@ func (m GitPanelModel) fileRows() int {
 }
 
 func (m GitPanelModel) View() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.primary)
-	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(crt.bright)
-	dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-	stagedStyle := lipgloss.NewStyle().Foreground(crt.success)
-	unstagedStyle := lipgloss.NewStyle().Foreground(crt.primary)
-	errorStyle := lipgloss.NewStyle().Foreground(crt.warn)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(ui.Text)
+	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(ui.Text)
+	dimStyle := lipgloss.NewStyle().Foreground(ui.Muted)
+	stagedStyle := lipgloss.NewStyle().Foreground(ui.OK)
+	unstagedStyle := lipgloss.NewStyle().Foreground(ui.Text)
+	errorStyle := lipgloss.NewStyle().Foreground(ui.Fail)
 	borderStyle := lipgloss.NewStyle().
-		Border(pixelBorder).
-		BorderForeground(crt.border)
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(ui.Border)
 
 	fileW := m.width / 3
 	diffW := m.width - fileW - 3
@@ -304,8 +305,7 @@ func (m GitPanelModel) View() string {
 	if m.focus == gitFocusCommit {
 		bottom = activeStyle.Render("Commit message: ") + m.commitMsg + "█"
 	} else {
-		hints := "Space stage/unstage  r reset  c commit  Tab diff  Esc/q close"
-		bottom = dimStyle.Render(hints)
+		bottom = ui.HintBar([]ui.Hint{{Key: "Space", Label: "stage/unstage"}, {Key: "r", Label: "reset"}, {Key: "c", Label: "commit"}, {Key: "Tab", Label: "diff"}, {Key: "Esc/q", Label: "close"}}, m.width)
 	}
 	if m.statusMsg != "" {
 		bottom = bottom + "  " + dimStyle.Render(m.statusMsg)

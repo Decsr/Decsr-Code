@@ -4,20 +4,22 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
-// Markdown accent colors for chat-rendered agent output (PM negotiation, AI
-// chat). These layer on top of the CRT amber base so generated prose reads as
-// structured markdown instead of one flat color. (Artifact rendering has its
-// own styles in artifact_style.go; mdBoldStyle is shared.)
+// Styles for chat-rendered agent output (PM negotiation, AI chat): weight
+// carries the structure, Accent marks the MoSCoW sections and inline code, and
+// the rest stays in Text and Muted. (Artifact rendering has its own styles in
+// artifact_style.go; mdBoldStyle is shared.)
 var (
-	chatHeadingStyle = lipgloss.NewStyle().Foreground(galaxyCyan).Bold(true) // comet cyan
-	chatMoscowStyle  = lipgloss.NewStyle().Foreground(galaxyGold).Bold(true) // star gold
-	chatBulletMark   = lipgloss.NewStyle().Foreground(galaxyMint).Bold(true) // aurora mint
-	chatNumberMark   = lipgloss.NewStyle().Foreground(galaxyCyan).Bold(true) // comet cyan
-	chatLabelStyle   = lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
-	chatQuoteStyle   = lipgloss.NewStyle().Foreground(crt.dim).Italic(true)
-	chatCodeStyle    = lipgloss.NewStyle().Foreground(galaxyCyan)
+	chatHeadingStyle = lipgloss.NewStyle().Foreground(ui.Text).Bold(true)
+	chatMoscowStyle  = lipgloss.NewStyle().Foreground(ui.Accent).Bold(true)
+	chatBulletMark   = lipgloss.NewStyle().Foreground(ui.Muted)
+	chatNumberMark   = lipgloss.NewStyle().Foreground(ui.Muted)
+	chatLabelStyle   = lipgloss.NewStyle().Foreground(ui.Text).Bold(true)
+	chatQuoteStyle   = lipgloss.NewStyle().Foreground(ui.Muted).Italic(true)
+	chatCodeStyle    = lipgloss.NewStyle().Foreground(ui.Accent)
 )
 
 // moscowHeaders are MoSCoW section titles the PM emits; they get a distinct

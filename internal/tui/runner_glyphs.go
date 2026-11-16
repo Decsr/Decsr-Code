@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
+)
 
 // Icon sets for ui.icons.
 const (
@@ -57,16 +61,16 @@ func runnerGlyph(runner, icons string) string {
 
 // runnerColor is the colour of a runner's glyph: a brand colour for the two
 // that have one, green for local runners, muted for the rest.
-func runnerColor(runner string) lipgloss.Color {
+func runnerColor(runner string) lipgloss.TerminalColor {
 	switch runnerKey(runner) {
 	case "claude":
-		return colClaude
+		return ui.Claude
 	case "deepseek":
-		return colDeepseek
+		return ui.DeepSeek
 	case "ollama", "lmstudio", "mlx":
-		return colOK
+		return ui.OK
 	}
-	return colMuted
+	return ui.Muted
 }
 
 // runnerBadge is the coloured glyph of a runner.

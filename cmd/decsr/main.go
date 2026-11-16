@@ -209,6 +209,7 @@ func runCmdWith(args []string, wsOpts tui.WorkspaceOptions) {
 	if err != nil {
 		fatal(fmt.Errorf("load config: %w", err))
 	}
+	tui.ApplyTheme(cfg)
 	if *noContextPack {
 		cfg.Project.Context.Pack.Disable = true
 	}
@@ -335,6 +336,7 @@ func runCmdWith(args []string, wsOpts tui.WorkspaceOptions) {
 			if !returnsToWorkspace(result) {
 				break
 			}
+			wsOpts.Session = result.Session // a session chosen on Home opens in the Workspace
 		}
 
 		if result.ReqPath != "" {
@@ -513,7 +515,7 @@ func runTaskFlow(root, taskInput, branch, uiMode string, cfg config.Config, ws a
 		if cfg.Project.Context.Pack.Disable {
 			args = append(args, "--no-context-pack")
 		}
-		runCmd(args)
+		runCmdWith(args, tui.WorkspaceOptions{Session: startupResult.Session})
 		return
 	}
 	if startupResult.ReqPath != "" {
@@ -560,6 +562,7 @@ func taskCmd(args []string) {
 	if err != nil {
 		fatal(fmt.Errorf("load config: %w", err))
 	}
+	tui.ApplyTheme(cfg)
 	if *noContextPack {
 		cfg.Project.Context.Pack.Disable = true
 	}

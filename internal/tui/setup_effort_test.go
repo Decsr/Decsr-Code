@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Decsr/Decsr-Code/internal/config"
 )
@@ -19,10 +20,10 @@ func TestSetupRender_IncludesEffortCard(t *testing.T) {
 	m.width, m.height = 100, 40
 
 	content := m.renderContent()
-	if !strings.Contains(content, "EFFORT") {
-		t.Fatalf("expected effort card in global setup content:\n%s", content)
+	if !strings.Contains(content, "Effort") {
+		t.Fatalf("expected effort pane in global setup content:\n%s", content)
 	}
-	if !strings.Contains(content, "Reasoning effort") {
+	if !strings.Contains(content, "default (high)") {
 		t.Fatalf("expected effort explanation in setup content:\n%s", content)
 	}
 }
@@ -32,7 +33,7 @@ func TestSetupRender_ProjectHidesGlobalDefaults(t *testing.T) {
 	m.width, m.height = 100, 40
 
 	content := m.renderContent()
-	if strings.Contains(content, "◆ EFFORT") {
+	if strings.Contains(ansi.Strip(content), "Effort") {
 		t.Fatalf("project setup must not render the global effort card:\n%s", content)
 	}
 	if !strings.Contains(content, "configured in Global Settings") {
@@ -46,17 +47,20 @@ func TestSetupRender_EffortStepDoesNotPanic(t *testing.T) {
 	m.agentRoles = []string{"coder"}
 	m.agentCursor = 0
 	m.agentEditing = true
-	m.agentEditStep = 2
+	m.agentField = agentFieldEffort
 	m.agentEditProv = providerClaude
 	m.claudeModels = []string{"sonnet"}
 	m.agentEditIdx = 0
 	m.agentEffortOptions = []string{"low", "medium", "high"}
 	m.agentEffortFor = "claude/sonnet"
-	m.agentEditEffortIdx = 2
+	m.agentEditEffortIdx = 3
 
-	content := m.renderContent()
-	if !strings.Contains(content, "Select effort for coder") {
-		t.Fatalf("expected effort picker in setup content:\n%s", content)
+	m.syncViewport()
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"coder", "Effort", "high"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected %q in the agent editor:\n%s", want, view)
+		}
 	}
 }
 
@@ -195,7 +199,7 @@ func TestAgentEffortSavesAndStays(t *testing.T) {
 	m.agentRoles = []string{"coder"}
 	m.agentCursor = 0
 	m.agentEditing = true
-	m.agentEditStep = 2
+	m.agentField = agentFieldEffort
 	m.agentEditProv = providerClaude
 	m.claudeModels = []string{"sonnet"}
 	m.agentEditIdx = 0

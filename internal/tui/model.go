@@ -24,6 +24,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/logging"
 	"github.com/Decsr/Decsr-Code/internal/prompts"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 var agentOrder = []bus.AgentRole{
@@ -972,7 +973,7 @@ func (m Model) updateOverlay(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	return paintBackground(m.view(), m.width, m.height)
+	return m.view()
 }
 
 func (m Model) view() string {
@@ -1004,18 +1005,14 @@ func (m Model) view() string {
 	// Main area: workflow cockpit. The old single-agent panel and system
 	// monitor are gone; the cockpit owns the phase spine, subtask tree,
 	// activity stream, tokens and inspector.
-	panelH := m.height - 1 - m.statusbar.Height()
+	panelH := m.height - m.statusbar.Height()
 	if panelH < 4 {
 		panelH = 4
 	}
 	m.cockpit.SetSize(m.width, panelH)
 
-	projectName := ""
-	if m.wsPath != "" {
-		projectName = filepath.Base(filepath.Dir(m.wsPath))
-	}
+	// The cockpit draws the screen header itself (ui.Header).
 	parts := []string{
-		screenHeader(m.width, "Pipeline", projectName),
 		m.cockpit.View(),
 		m.statusbar.View(),
 	}
@@ -1023,12 +1020,12 @@ func (m Model) view() string {
 	mainView := strings.Join(parts, "\n")
 
 	if m.confirmQuit {
-		dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-		warnStyle := lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
-		brightStyle := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
+		dimStyle := lipgloss.NewStyle().Foreground(ui.Muted)
+		warnStyle := lipgloss.NewStyle().Foreground(ui.Fail).Bold(true)
+		brightStyle := lipgloss.NewStyle().Foreground(ui.Text).Bold(true)
 		confirmBox := lipgloss.NewStyle().
-			Border(pixelBorder).
-			BorderForeground(crt.warn).
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(ui.Fail).
 			Padding(1, 3).
 			Render(
 				warnStyle.Render("  QUIT DECSR?") + "\n\n" +
@@ -1042,12 +1039,12 @@ func (m Model) view() string {
 	}
 
 	if m.cancelConfirm {
-		dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-		warnStyle := lipgloss.NewStyle().Foreground(crt.primary).Bold(true)
-		brightStyle := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
+		dimStyle := lipgloss.NewStyle().Foreground(ui.Muted)
+		warnStyle := lipgloss.NewStyle().Foreground(ui.Text).Bold(true)
+		brightStyle := lipgloss.NewStyle().Foreground(ui.Text).Bold(true)
 		confirmBox := lipgloss.NewStyle().
-			Border(pixelBorder).
-			BorderForeground(crt.primary).
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(ui.Text).
 			Padding(1, 3).
 			Render(
 				warnStyle.Render("  CANCEL PIPELINE AND RETURN TO MENU?") + "\n\n" +
@@ -1061,12 +1058,12 @@ func (m Model) view() string {
 	}
 
 	if m.pauseConfirm {
-		dimStyle := lipgloss.NewStyle().Foreground(crt.dim)
-		warnStyle := lipgloss.NewStyle().Foreground(crt.primary).Bold(true)
-		brightStyle := lipgloss.NewStyle().Foreground(crt.bright).Bold(true)
+		dimStyle := lipgloss.NewStyle().Foreground(ui.Muted)
+		warnStyle := lipgloss.NewStyle().Foreground(ui.Text).Bold(true)
+		brightStyle := lipgloss.NewStyle().Foreground(ui.Text).Bold(true)
 		confirmBox := lipgloss.NewStyle().
-			Border(pixelBorder).
-			BorderForeground(crt.primary).
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(ui.Text).
 			Padding(1, 3).
 			Render(
 				warnStyle.Render("  PAUSE TASK TO CHANGE MODEL?") + "\n\n" +
@@ -1141,17 +1138,13 @@ func (m *Model) regenerateCurrentGate() {
 //
 //	✓ architecture → ◉ plan → ○ prompts → ○ coding → …
 func (m Model) renderPhaseBar() string {
-	sepStyle := lipgloss.NewStyle().Foreground(crt.border)
-	// Pixel chips: pending = dim text, done = cyan on a raised chip, active =
-	// solid phase colour.
-	dimStyle := chipStyle{fg: crt.dim}
-	doneStyle := chipStyle{fg: galaxyCyan, bg: crt.muted}
+	sepStyle := lipgloss.NewStyle().Foreground(ui.Border)
+	// Phase labels: pending = muted, done = OK, active = the phase colour.
+	dimStyle := classicChipStyle{fg: ui.Muted}
+	doneStyle := classicChipStyle{fg: ui.OK}
 
-	phaseStyle := func(label string) chipStyle {
-		if c, ok := pipelineColors[label]; ok {
-			return chipStyle{fg: crt.bg, bg: c}
-		}
-		return chipStyle{fg: crt.bg, bg: crt.primary}
+	phaseStyle := func(label string) classicChipStyle {
+		return classicChipStyle{fg: classicPhaseColor(label)}
 	}
 
 	var parts []string
@@ -1262,7 +1255,7 @@ func (m Model) renderPhaseBar() string {
 	// Prefix the bar with the active pipeline type (green/brown/fix/rnd).
 	if m.pipeline != "" {
 		tag := lipgloss.NewStyle().
-			Foreground(crt.bright).
+			Foreground(ui.Text).
 			Bold(true).
 			Render("[" + strings.ToUpper(m.pipeline) + "]")
 		joined = "  " + tag + joined
@@ -1320,7 +1313,7 @@ func (m *Model) resizeActiveOverlay() tea.Cmd {
 
 func (m *Model) layout() {
 	m.statusbar = m.statusbar.WithWidth(m.width)
-	panelH := m.height - 1 - m.statusbar.Height()
+	panelH := m.height - m.statusbar.Height()
 	if panelH < 4 {
 		panelH = 4
 	}

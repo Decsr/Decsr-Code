@@ -262,7 +262,7 @@ func TestInspectorShowsAttemptAndReply(t *testing.T) {
 	n := attemptNode()
 	n.PendingReply = "next one\nsecond line"
 	g := &workspace.Graph{Nodes: []*workspace.Node{n}}
-	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, 40, 30, nil))
+	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, time.Now(), 40, 30, nil))
 	for _, want := range []string{"Attempt  2 of 2", "Reply  use tabs, please", "Queued  next one"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("inspector lacks %q:\n%s", want, out)

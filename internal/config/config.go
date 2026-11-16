@@ -96,6 +96,9 @@ type UIConfig struct {
 	Icons string `yaml:"icons,omitempty"`
 	// Tmux makes plain `decsr` behave like `decsr --tmux`.
 	Tmux bool `yaml:"tmux,omitempty"`
+	// Theme picks the colour theme: "auto" (default, asks the terminal and
+	// falls back to dark), "dark" or "light". "" = auto.
+	Theme string `yaml:"theme,omitempty"`
 }
 
 // NotifyConfig controls external notifications (e.g. cmux alerts on approval
@@ -556,6 +559,9 @@ func merge(dst *Config, src Config) {
 	}
 	if src.UI.Tmux {
 		dst.UI.Tmux = true
+	}
+	if src.UI.Theme != "" {
+		dst.UI.Theme = src.UI.Theme
 	}
 
 	if src.Workspace.MaxParallel > 0 {

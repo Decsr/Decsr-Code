@@ -16,6 +16,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/notify"
 	"github.com/Decsr/Decsr-Code/internal/pricing"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -266,7 +267,7 @@ func (m workspaceModel) budgetLines() []string {
 // cells; elements drop out when it is narrow.
 func (m workspaceModel) statusBar() string {
 	w := m.width
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	u := m.use()
 	c, s := m.liveCfg(), m.sess.snapshot()
 	limit, warn := budgetOf(c, s)
@@ -327,7 +328,7 @@ func (m workspaceModel) statusBar() string {
 
 // costSegment is "$0.38 / $5.00", "$0.38", "≥ $0.38" or "tokens only".
 func (m workspaceModel) costSegment(u sessionUse, limit float64, warnPct int) string {
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	if !u.priced && limit == 0 {
 		if u.tokens > 0 {
 			return dim.Render("tokens only")
@@ -338,15 +339,15 @@ func (m workspaceModel) costSegment(u sessionUse, limit float64, warnPct int) st
 	if u.unknown {
 		text = "≥ " + text
 	}
-	col := colMuted
+	col := ui.Muted
 	if limit > 0 {
 		text += " / " + usd(limit)
 		pct := u.spent / limit * 100
 		switch {
 		case pct >= 100:
-			col = colFail
+			col = ui.Fail
 		case pct >= float64(warnPct):
-			col = colWarn
+			col = ui.Warn
 		}
 	}
 	return lipgloss.NewStyle().Foreground(col).Render(text)
@@ -354,7 +355,7 @@ func (m workspaceModel) costSegment(u sessionUse, limit float64, warnPct int) st
 
 // statusRights are the right-hand variants, richest first.
 func (m workspaceModel) statusRights() []string {
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	branch := ""
 	if m.iso != nil {
 		branch = "⎇ " + m.iso.Branch()
@@ -403,7 +404,7 @@ func (m workspaceModel) promptChips() string {
 	if m.promptRows() < 2 {
 		return ""
 	}
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	c, s := m.liveCfg(), m.sess.snapshot()
 	var chips []string
 	switch {

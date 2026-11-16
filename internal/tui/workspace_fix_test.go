@@ -69,7 +69,7 @@ func TestWorkspaceReadOnlyShownInPickerAndInspector(t *testing.T) {
 	h.want("read-only")
 	h.key("enter")
 	h.want("security is read-only: it will report, not change files")
-	out := ansi.Strip(renderInspector(h.m.g, h.m.g.Node("T5"), h.m.cfg, plugins.Set{}, 36, 20, nil))
+	out := ansi.Strip(renderInspector(h.m.g, h.m.g.Node("T5"), h.m.cfg, plugins.Set{}, time.Now(), 36, 20, nil))
 	if !strings.Contains(out, "read-only") {
 		t.Fatalf("inspector lacks read-only:\n%s", out)
 	}
@@ -84,13 +84,13 @@ func TestWorkspaceWarnings(t *testing.T) {
 	if !strings.Contains(out, "✓ done ⚠") {
 		t.Fatalf("no warning mark in the title border:\n%s", out)
 	}
-	insp := ansi.Strip(renderInspector(g, g.Node("T1"), config.DefaultConfig(), plugins.Set{}, 36, 30, nil))
+	insp := ansi.Strip(renderInspector(g, g.Node("T1"), config.DefaultConfig(), plugins.Set{}, time.Now(), 36, 30, nil))
 	i, j := strings.Index(insp, "Warnings"), strings.Index(insp, "⚠ ignored write")
 	if i < 0 || j < i {
 		t.Fatalf("inspector lacks Warnings:\n%s", insp)
 	}
 	g.Nodes[0].Summary = "did it"
-	insp = ansi.Strip(renderInspector(g, g.Node("T1"), config.DefaultConfig(), plugins.Set{}, 36, 30, nil))
+	insp = ansi.Strip(renderInspector(g, g.Node("T1"), config.DefaultConfig(), plugins.Set{}, time.Now(), 36, 30, nil))
 	if strings.Index(insp, "Warnings") > strings.Index(insp, "Summary") {
 		t.Fatalf("Warnings must come above Summary:\n%s", insp)
 	}
@@ -281,7 +281,7 @@ func TestInspectorDescriptionUsesFreeSpace(t *testing.T) {
 	n := g.Node("T1")
 	n.Description = strings.Join([]string{"l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10", "l11", "l12"}, "\n")
 	n.Description = strings.Repeat("word ", 60) // about 9 lines at width 34
-	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, 34, 30, nil))
+	out := ansi.Strip(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, time.Now(), 34, 30, nil))
 	if strings.Count(out, "word") < 55 || strings.Contains(out, "…") {
 		t.Fatalf("description was cut although the pane is free:\n%s", out)
 	}
@@ -289,7 +289,7 @@ func TestInspectorDescriptionUsesFreeSpace(t *testing.T) {
 	n.Status = workspace.StatusRunning
 	n.Role = "coder"
 	tail := []string{"o1", "o2", "o3", "o4", "o5", "o6"}
-	out = ansi.Strip(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, 34, 16, tail))
+	out = ansi.Strip(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, time.Now(), 34, 16, tail))
 	for _, want := range []string{"o3", "o4", "o5", "o6", "Output"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("Output lost %q:\n%s", want, out)

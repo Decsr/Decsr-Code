@@ -12,6 +12,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/notify"
 	"github.com/Decsr/Decsr-Code/internal/plugins"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -85,13 +86,13 @@ func TestActivityLineFormats(t *testing.T) {
 
 func TestActivityLineColours(t *testing.T) {
 	run := mkAct("1", runner.ActCommand, runner.ActRunning, "x")
-	if actColor(run) != colAccent {
+	if actColor(run) != ui.Accent {
 		t.Error("running is not accent")
 	}
-	if actColor(mkAct("2", runner.ActCommand, runner.ActFailed, "x")) != colFail {
+	if actColor(mkAct("2", runner.ActCommand, runner.ActFailed, "x")) != ui.Fail {
 		t.Error("failed is not red")
 	}
-	if actColor(mkAct("3", runner.ActEdit, runner.ActDone, "x")) != colText {
+	if actColor(mkAct("3", runner.ActEdit, runner.ActDone, "x")) != ui.Text {
 		t.Error("done is not normal")
 	}
 }
@@ -344,7 +345,7 @@ func TestInspectorShowsContextAndActivity(t *testing.T) {
 	n.Activity[3].State = runner.ActFailed
 	n.ContextTokens, n.ContextLimit = 18000, 128000
 	g := &workspace.Graph{Nodes: []*workspace.Node{n}}
-	out := actPlain(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, 50, 40, nil))
+	out := actPlain(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, time.Now(), 50, 40, nil))
 	for _, want := range []string{"Context  18k / 128k tokens", "Activity  4 steps (2 failed)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q:\n%s", want, out)
@@ -353,12 +354,12 @@ func TestInspectorShowsContextAndActivity(t *testing.T) {
 	n.ContextLimit = 0
 	n.Activity = n.Activity[:1]
 	n.Activity[0].State = runner.ActDone
-	out = actPlain(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, 50, 40, nil))
+	out = actPlain(renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, time.Now(), 50, 40, nil))
 	if !strings.Contains(out, "Context  18k tokens") || !strings.Contains(out, "Activity  1 step") || strings.Contains(out, "failed") {
 		t.Errorf("inspector:\n%s", out)
 	}
 	// a short pane still fits
-	out = renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, 50, 8, nil)
+	out = renderInspector(g, n, config.DefaultConfig(), plugins.Set{}, time.Now(), 50, 8, nil)
 	if got := len(strings.Split(out, "\n")); got > 8 {
 		t.Errorf("%d lines in an 8 row pane", got)
 	}

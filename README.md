@@ -17,7 +17,7 @@
   <a href="#install">Install</a> ·
   <a href="#usage">Usage</a> ·
   <a href="#pipeline">Pipeline</a> ·
-  <a href="#theme-galaxy--pixel">Theme</a> ·
+  <a href="#theme">Theme</a> ·
   <a href="#docs">Docs</a>
 </p>
 
@@ -108,7 +108,7 @@ nodes into a summary. `/profile` saves the role settings once in
 project, and markdown files in `.decsr/commands/` and `.decsr/skills/` add your
 own `/commands` and role skills. Claude-format plugins in `.decsr/plugins/` add
 commands, skills and agent roles (`/plugin`). The classic pipeline stays available from the
-Home menu (`/config`). See [`doc/workspace.md`](doc/workspace.md).
+Home launcher (`/config`). See [`doc/workspace.md`](doc/workspace.md).
 
 ### Interactive TUI
 
@@ -399,15 +399,12 @@ decsr run --requirements requirements.md
 
 <p align="center"><img src="doc/assets/divider.svg" width="100%" alt=""></p>
 
-## Theme: Galaxy × Pixel
+## Theme
 
-A deep-space navy base with starlight text and azure, comet and star-gold accents.
-
-<p align="center">
-  <img src="doc/assets/palette.svg" alt="Galaxy × Pixel palette" width="100%">
-</p>
-
-**Role legend:** PM azure `#4a86ff` · Coder comet cyan `#5ce1e6` · Coder fixer teal `#3fb8c0` · QA sky `#7cb8ff` · UX frost `#bfe3ff` · Security star gold `#ffd166` · PR ice `#9ee8ff`. Errors use pulsar red `#ff5c7a`, passing tests use aurora mint `#6ff2b4`, and gates use star gold.
+Every screen shares one small colour set: an accent for focus, green for done,
+amber for waiting, red for failures and a dim grey for secondary text. Set
+`ui.theme: auto | dark | light` (default `auto`, which asks the terminal and
+falls back to dark). See [`doc/tui.md`](doc/tui.md#themes).
 
 <p align="center"><img src="doc/assets/divider.svg" width="100%" alt=""></p>
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -40,7 +41,7 @@ func (m workspaceModel) outTimelineOn() bool { return !m.outRaw }
 // the viewport follows the newest item or keeps the cursor in view.
 func (m *workspaceModel) refreshTimeline() {
 	n := m.g.Node(m.outNode)
-	dim := lipgloss.NewStyle().Foreground(colMuted)
+	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	if n == nil {
 		m.outVP.SetContent(dim.Render("(no activity recorded; t shows the raw output)"))
 		return
@@ -72,7 +73,7 @@ func (m *workspaceModel) refreshTimeline() {
 	for i, a := range acts {
 		bar := "  "
 		if i == m.outCur {
-			bar = lipgloss.NewStyle().Foreground(colAccent).Render("▌ ")
+			bar = lipgloss.NewStyle().Foreground(ui.Accent).Render("▌ ")
 			curTop = len(lines)
 		}
 		lines = append(lines, bar+activityLine(a, m.now(), w-2))
@@ -183,8 +184,8 @@ func (m workspaceModel) outputHeader(w int) string {
 	left := n.ID + " · " + n.Title
 	room := w - 4 - len([]rune(right)) - 3
 	if room < 10 {
-		return lipgloss.NewStyle().Foreground(colText).Bold(true).Render(truncateOneLine(left+" · "+right, w-4))
+		return lipgloss.NewStyle().Foreground(ui.Text).Bold(true).Render(truncateOneLine(left+" · "+right, w-4))
 	}
-	return lipgloss.NewStyle().Foreground(colText).Bold(true).Render(truncateOneLine(left, room)) +
-		lipgloss.NewStyle().Foreground(colMuted).Render(" · "+right)
+	return lipgloss.NewStyle().Foreground(ui.Text).Bold(true).Render(truncateOneLine(left, room)) +
+		lipgloss.NewStyle().Foreground(ui.Muted).Render(" · "+right)
 }

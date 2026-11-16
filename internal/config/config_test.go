@@ -742,6 +742,19 @@ func TestMerge_UIIcons(t *testing.T) {
 	}
 }
 
+func TestMerge_UITheme(t *testing.T) {
+	var dst Config
+	merge(&dst, Config{UI: UIConfig{Theme: "light"}})
+	merge(&dst, Config{})
+	if dst.UI.Theme != "light" {
+		t.Fatalf("empty layer changed theme: %q", dst.UI.Theme)
+	}
+	merge(&dst, Config{UI: UIConfig{Theme: "dark"}})
+	if dst.UI.Theme != "dark" {
+		t.Errorf("later layer should override: %q", dst.UI.Theme)
+	}
+}
+
 func TestLoad_PricingAndBudgetMerge(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

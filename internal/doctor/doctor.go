@@ -75,6 +75,9 @@ type Deps struct {
 	// Automations is the optional "automations" line; nil when the project has
 	// no .decsr/automations.yaml.
 	Automations *Result
+
+	// Theme is the ui.theme setting; "" is auto.
+	Theme string
 }
 
 // NotifyInfo is the notification config the "notify" check reports on.
@@ -100,6 +103,9 @@ func Run(d Deps) []Result {
 	rs = append(rs, checkOptional(d)...)
 	if d.Automations != nil {
 		rs = append(rs, *d.Automations)
+	}
+	if r, ok := checkTheme(d); ok {
+		rs = append(rs, r)
 	}
 	return rs
 }
@@ -466,6 +472,15 @@ func checkNotify(d Deps) Result {
 		return Result{Name: name, Status: Warn, Detail: detail + "; " + strings.Join(problems, "; "), Hint: strings.Join(hints, "; ")}
 	}
 	return Result{Name: name, Status: OK, Detail: detail}
+}
+
+// checkTheme warns about an invalid ui.theme; a valid or empty one is silent.
+func checkTheme(d Deps) (Result, bool) {
+	switch strings.ToLower(strings.TrimSpace(d.Theme)) {
+	case "", "auto", "dark", "light":
+		return Result{}, false
+	}
+	return Result{Name: "theme", Status: Warn, Detail: fmt.Sprintf("ui.theme %q is not valid; using auto", d.Theme), Hint: "set ui.theme to auto, dark or light"}, true
 }
 
 func checkTerm(d Deps) Result {

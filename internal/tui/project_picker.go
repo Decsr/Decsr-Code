@@ -7,6 +7,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // ProjectSelectedMsg is sent when user picks a project directory.
@@ -174,93 +177,55 @@ func (m ProjectPickerModel) View() string {
 	if m.mode == projectPickerModeBrowse {
 		return m.dirBrowser.View()
 	}
-
-	p := homePalette
-	dimStyle := lipgloss.NewStyle().Foreground(p.dim)
-	activeStyle := lipgloss.NewStyle().Foreground(p.green).Bold(true)
-	warnStyle := lipgloss.NewStyle().Foreground(p.red).Bold(true)
-	browseStyle := lipgloss.NewStyle().Foreground(p.cyan)
-
-	var lines []string
-
-	// --- Current directory (hidden when cwd is the home directory) ---
-	if m.showCurrentDir() {
-		currentLabel := "◆ Use current directory"
-		currentPath := dimStyle.Render("     " + m.currentDir)
-		kind, _ := m.itemAt(m.cursor)
-		if kind == "current" {
-			lines = append(lines, activeStyle.Render("  ▌ "+currentLabel))
-			lines = append(lines, "  "+currentPath)
-		} else {
-			lines = append(lines, "    "+currentLabel)
-			lines = append(lines, "  "+currentPath)
+	w := max(m.width, 1)
+	lines := []string{ui.Header("decsr · select project", "", w), ""}
+	sel := 0
+	row := func(left, right string, selected bool) {
+		if selected {
+			sel = len(lines)
 		}
-		lines = append(lines, "")
+		lines = append(lines, ui.ListRow(ui.RowOpts{Left: left, Right: right, Width: w, Selected: selected, Indent: 1}))
 	}
+	kind, recentIdx := m.itemAt(m.cursor)
 
-	// --- Open project… ---
-	openLabel := "▸ Open project…"
-	kindBrowse, _ := m.itemAt(m.cursor)
-	if kindBrowse == "browse" {
-		lines = append(lines, activeStyle.Render("  ▌ "+openLabel))
-		lines = append(lines, "  "+dimStyle.Render("     Browse filesystem for a project directory"))
-	} else {
-		lines = append(lines, "    "+browseStyle.Render(openLabel))
-		lines = append(lines, "  "+dimStyle.Render("     Browse filesystem for a project directory"))
+	lines = append(lines, ui.PaneLabel("Start", false, w))
+	if m.showCurrentDir() {
+		row("Use current directory", ui.TruncateMiddle(tildePath(m.currentDir), max(w/2, 8)), kind == "current")
 	}
+	row("Open project…", "browse the filesystem", kind == "browse")
 	lines = append(lines, "")
 
-	// --- Items 2+: Recent projects ---
-	if len(m.projects) > 0 {
-		lines = append(lines, dimStyle.Render("  RECENT PROJECTS"))
-		lines = append(lines, "")
-		for i, proj := range m.projects {
-			exists := dirExists(proj.Path)
-
-			if m.confirmDel == i {
-				lines = append(lines, warnStyle.Render(fmt.Sprintf(
-					"    ✗ Remove %s? (y/N)", proj.Name)))
-				lines = append(lines, "")
-				continue
-			}
-
-			label := fmt.Sprintf("■ %s", proj.Name)
-			detail := dimStyle.Render("     " + proj.Path)
-			if !exists {
-				label = fmt.Sprintf("⊘ %s", proj.Name)
-				detail = dimStyle.Render("     " + proj.Path + " (not found)")
-			}
-
-			kind, recentIdx := m.itemAt(m.cursor)
-			if kind == "recent" && recentIdx == i {
-				lines = append(lines, activeStyle.Render("  ▌ "+label))
-			} else {
-				lines = append(lines, "    "+label)
-			}
-			lines = append(lines, "  "+detail)
-			if i < len(m.projects)-1 {
-				lines = append(lines, "")
-			}
+	lines = append(lines, ui.PaneLabel("Recent projects", false, w))
+	if len(m.projects) == 0 {
+		lines = append(lines, dim("   no recent projects"))
+	}
+	for i, proj := range m.projects {
+		if m.confirmDel == i {
+			lines = append(lines, lipgloss.NewStyle().Foreground(ui.Fail).Render(ui.Truncate(fmt.Sprintf("   Remove %s? (y/N)", proj.Name), w)))
+			continue
 		}
-	} else {
-		lines = append(lines, dimStyle.Render("  No recent projects"))
+		name := ui.Truncate(proj.Name, max((w-2)/2, 4))
+		meta := ui.TruncateMiddle(tildePath(proj.Path), max(w-4-ansi.StringWidth(name), 0))
+		if !dirExists(proj.Path) {
+			meta = "not found"
+		}
+		row(name, meta, kind == "recent" && recentIdx == i)
 	}
 
-	panelW := m.width - 4
-	if panelW < 40 {
-		panelW = 40
+	// Keep the selected row on screen when the list is longer than the screen.
+	if bodyH := max(m.height, 4) - 3; len(lines)-2 > bodyH {
+		start := 2
+		if sel-2 >= bodyH {
+			start = sel - bodyH + 1
+		}
+		start = min(start, len(lines)-bodyH)
+		lines = append(lines[:2:2], lines[start:start+bodyH]...)
 	}
-	panel := pixelPanel("◆ SELECT PROJECT", p.accent, true,
-		lipgloss.NewStyle().Padding(0, 1).Width(panelW), strings.Join(lines, "\n"))
-
-	header := screenHeader(m.width, "Select Project", "")
-	footer := hintBar(m.width, []keyHint{{"↑↓", "navigate"}, {"Enter", "select"}, {"d", "remove"}, {"Esc", "back"}}, "")
-	bodyH := m.height - 2
-	if bodyH < 4 {
-		bodyH = 4
+	for len(lines) < max(m.height, 4)-1 {
+		lines = append(lines, "")
 	}
-	body := lipgloss.Place(m.width, bodyH, lipgloss.Center, lipgloss.Top, panel)
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	lines = append(lines, ui.HintBar([]ui.Hint{{Key: "↑↓", Label: "move"}, {Key: "Enter", Label: "select"}, {Key: "d", Label: "remove"}, {Key: "Esc", Label: "back"}}, w))
+	return strings.Join(lines, "\n")
 }
 
 func dirExists(path string) bool {

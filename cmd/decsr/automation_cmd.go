@@ -400,6 +400,7 @@ func runAutomationWorkspace(root string, opts tui.WorkspaceOptions) (tui.Automat
 	if err != nil {
 		return tui.AutomationResult{}, fmt.Errorf("load config: %w", err)
 	}
+	tui.ApplyTheme(cfg)
 	ws, err := artifacts.EnsureWorkspace(root)
 	if err != nil {
 		return tui.AutomationResult{}, err
