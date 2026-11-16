@@ -394,5 +394,46 @@
       "review",
       "testing"
     ]
+  },
+  {
+    "name": "mattpocock-skills",
+    "repo": "mattpocock/skills",
+    "path": "",
+    "description": "Engineering skills: grilling, spec and ticket flows, TDD, diagnosing bugs, code review, domain modelling and codebase design.",
+    "skills": [
+      "ask-matt",
+      "code-review",
+      "codebase-design",
+      "diagnosing-bugs",
+      "domain-modeling",
+      "grill-me",
+      "grill-with-docs",
+      "grilling",
+      "handoff",
+      "implement",
+      "implement-spec",
+      "improve-codebase-architecture",
+      "pr",
+      "prototype",
+      "research",
+      "retro",
+      "setup-matt-pocock-skills",
+      "tdd",
+      "teach",
+      "to-questionnaire",
+      "to-spec",
+      "to-tickets",
+      "triage",
+      "wait-what",
+      "wayfinder",
+      "wizard",
+      "writing-for-agents"
+    ],
+    "agents": [],
+    "tags": [
+      "docs",
+      "review",
+      "testing"
+    ]
   }
 ]

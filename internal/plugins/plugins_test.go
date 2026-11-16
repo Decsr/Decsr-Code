@@ -319,3 +319,73 @@ func TestDescriptionSanitized(t *testing.T) {
 		t.Errorf("command desc = %q", d)
 	}
 }
+
+func skillIDs(p *Plugin) []string {
+	var ids []string
+	for _, s := range p.Skills {
+		ids = append(ids, s.ID)
+	}
+	return ids
+}
+
+func TestSkillsListedAsDirectories(t *testing.T) {
+	home, proj := setup(t)
+	root := mkPlugin(t, home, "pack", `{"name":"pack","skills":["./skills/eng/tdd","./skills/prod/grill","./skills/eng/tdd","./skills/../../outside","./pool","./single"]}`)
+	write(t, filepath.Join(root, "skills", "eng", "tdd", "SKILL.md"), "TDD body")
+	write(t, filepath.Join(root, "skills", "prod", "grill", "SKILL.md"), "Grill body")
+	write(t, filepath.Join(root, "pool", "a", "SKILL.md"), "A body")
+	write(t, filepath.Join(root, "pool", "b", "SKILL.md"), "B body")
+	write(t, filepath.Join(root, "single", "SKILL.md"), "Single body")
+	write(t, filepath.Join(root, "..", "outside", "SKILL.md"), "Escaped")
+	p := find(Load(proj), "pack")
+	if p == nil {
+		t.Fatal("plugin missing")
+	}
+	want := "pack:a pack:b pack:grill pack:single pack:tdd"
+	if got := strings.Join(skillIDs(p), " "); got != want {
+		t.Fatalf("skills = %q, want %q", got, want)
+	}
+	if body, err := LoadSkill(proj, "pack:tdd"); err != nil || body != "TDD body" {
+		t.Errorf("body = %q err=%v", body, err)
+	}
+}
+
+func TestSkillDirSymlinkEscapeRejected(t *testing.T) {
+	home, proj := setup(t)
+	root := mkPlugin(t, home, "esc", `{"name":"esc","skills":["./link"]}`)
+	out := t.TempDir()
+	write(t, filepath.Join(out, "SKILL.md"), "Escaped")
+	if err := os.Symlink(out, filepath.Join(root, "link")); err != nil {
+		t.Skip(err)
+	}
+	if p := find(Load(proj), "esc"); p == nil || len(p.Skills) != 0 {
+		t.Fatalf("skills = %+v", p)
+	}
+}
+
+func TestAgentsAndCommandsSingleFiles(t *testing.T) {
+	home, proj := setup(t)
+	root := mkPlugin(t, home, "files", `{"name":"files","agents":["./x/reviewer.md"],"commands":"./y/go.md"}`)
+	write(t, filepath.Join(root, "x", "reviewer.md"), "Review things")
+	write(t, filepath.Join(root, "y", "go.md"), "Go do it")
+	p := find(Load(proj), "files")
+	if p == nil || len(p.Agents) != 1 || p.Agents[0].Name != "reviewer" || len(p.Commands) != 1 || p.Commands[0].Name != "go" {
+		t.Fatalf("plugin = %+v", p)
+	}
+}
+
+func TestMattpocockSkillsFixture(t *testing.T) {
+	home, proj := setup(t)
+	root := mkPlugin(t, home, "mattpocock-skills", `{"name":"mattpocock-skills","skills":["./skills/engineering/tdd","./skills/engineering/code-review","./skills/productivity/grilling","./skills/productivity/handoff"]}`)
+	for _, d := range []string{"engineering/tdd", "engineering/code-review", "productivity/grilling", "productivity/handoff"} {
+		write(t, filepath.Join(root, "skills", filepath.FromSlash(d), "SKILL.md"), "---\nname: x\ndescription: About "+d+"\n---\nBody of "+d)
+	}
+	p := find(Load(proj), "mattpocock-skills")
+	want := "mattpocock-skills:code-review mattpocock-skills:grilling mattpocock-skills:handoff mattpocock-skills:tdd"
+	if p == nil || strings.Join(skillIDs(p), " ") != want {
+		t.Fatalf("skills = %+v", p)
+	}
+	if body, err := LoadSkill(proj, "mattpocock-skills:tdd"); err != nil || body != "Body of engineering/tdd" {
+		t.Errorf("body = %q err=%v", body, err)
+	}
+}

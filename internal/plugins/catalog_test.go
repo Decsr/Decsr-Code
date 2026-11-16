@@ -96,3 +96,10 @@ func TestSetFindAndState(t *testing.T) {
 		t.Errorf("none = %v", got)
 	}
 }
+
+func TestCatalogHasMattpocockSkills(t *testing.T) {
+	e, ok := FindCatalog("mattpocock-skills")
+	if !ok || e.Repo != "mattpocock/skills" || len(e.Skills) != 27 {
+		t.Fatalf("mattpocock-skills = %+v ok=%v", e, ok)
+	}
+}

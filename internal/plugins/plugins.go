@@ -271,29 +271,39 @@ func loadCommands(dir, plugin string, raw json.RawMessage) []Command {
 	return out
 }
 
+// loadSkills reads each scan path as either one skill directory (it holds a
+// SKILL.md) or a directory of skill directories.
 func loadSkills(dir, plugin string, raw json.RawMessage) []Skill {
 	var out []Skill
 	seen := map[string]bool{}
+	add := func(name, file string) {
+		if !config.ValidName(name) || seen[name] {
+			return
+		}
+		text, ok, _ := readFile(file)
+		if !ok {
+			return
+		}
+		fm, body := ParseFrontmatter(string(text))
+		if strings.TrimSpace(body) == "" {
+			return
+		}
+		seen[name] = true
+		out = append(out, Skill{ID: plugin + ":" + name, Plugin: plugin, Name: name, Description: fm.String("description"), path: file})
+	}
 	for _, sp := range scanPaths(dir, "skills", raw) {
+		if isFile(filepath.Join(sp, "SKILL.md")) {
+			add(filepath.Base(sp), filepath.Join(sp, "SKILL.md"))
+			continue
+		}
 		entries, err := os.ReadDir(sp)
 		if err != nil {
 			continue
 		}
 		for _, e := range entries {
-			if !e.IsDir() || !config.ValidName(e.Name()) || seen[e.Name()] {
-				continue
+			if e.IsDir() {
+				add(e.Name(), filepath.Join(sp, e.Name(), "SKILL.md"))
 			}
-			file := filepath.Join(sp, e.Name(), "SKILL.md")
-			text, ok, _ := readFile(file)
-			if !ok {
-				continue
-			}
-			fm, body := ParseFrontmatter(string(text))
-			if strings.TrimSpace(body) == "" {
-				continue
-			}
-			seen[e.Name()] = true
-			out = append(out, Skill{ID: plugin + ":" + e.Name(), Plugin: plugin, Name: e.Name(), Description: fm.String("description"), path: file})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
