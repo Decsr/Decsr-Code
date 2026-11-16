@@ -248,9 +248,6 @@ type SetupModel struct {
 	// claudeTyping is set while a model id is typed instead of picked.
 	claudeTyping  bool
 	claudeTypeErr string
-	// claudeDefault is the model of the user's Claude settings, used when a
-	// role has no model of its own.
-	claudeDefault string
 	// globalModelEmpty is set while the global model is unset and untouched.
 	globalModelEmpty bool
 
@@ -416,7 +413,6 @@ func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs 
 		}
 	}
 
-	m.claudeDefault, _ = runner.ClaudeSettingsModel()
 	m.globalModelEmpty = currentModel == ""
 	if currentRunner == "claude" {
 		m.noteClaudeCustom(currentModel)
@@ -427,6 +423,9 @@ func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs 
 		m.typed.SetValue(currentModel)
 	}
 
+	if currentModel == "" && m.provider == providerClaude {
+		m.modelIdx = findModelIndex(m.claudeRows(), runner.ClaudeDefaultModel)
+	}
 	if currentModel != "" {
 		for i, mdl := range m.activeModels() {
 			if mdl == currentModel {
@@ -598,12 +597,17 @@ func effortChoices(options []string) []string {
 	return out
 }
 
-// effortLabels renders the default sentinel as a human-readable option.
-func effortLabels(choices []string) []string {
+// effortLabels renders the default sentinel as a human-readable option;
+// claude names the effort its default stands for.
+func effortLabels(choices []string, claude bool) []string {
+	defaultLabel := "(provider default)"
+	if claude {
+		defaultLabel = "default (" + runner.ClaudeDefaultEffort + ")"
+	}
 	out := make([]string, len(choices))
 	for i, choice := range choices {
 		if choice == setupEffortDefault {
-			out[i] = "(provider default)"
+			out[i] = defaultLabel
 			continue
 		}
 		out[i] = choice
@@ -1461,6 +1465,9 @@ func (m SetupModel) handleAgentEditKeys(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			m.agentEditIdx = 0
 			m.typed.SetValue("")
 			m.claudeTyping = false
+			if m.agentEditProv == providerClaude {
+				m.agentEditIdx = findModelIndex(m.claudeRows(), runner.ClaudeDefaultModel)
+			}
 			// Pre-select current model if exists.
 			role := m.agentRoles[m.agentCursor]
 			if ov, ok := m.agentOverrides[role]; ok {
@@ -2005,7 +2012,7 @@ func (m SetupModel) renderEffortCard(contentWidth int, active, inactive, dim lip
 		if cursor >= len(choices) {
 			cursor = len(choices) - 1
 		}
-		lines = append(lines, renderWindowedList(effortLabels(choices), cursor, m.section == sectionEffort, active, inactive, dim)...)
+		lines = append(lines, renderWindowedList(effortLabels(choices, m.provider == providerClaude), cursor, m.section == sectionEffort, active, inactive, dim)...)
 	}
 
 	if m.effortUnsupported != "" {
@@ -2090,7 +2097,7 @@ func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active,
 			if ov.model == "" {
 				modelPart = dim.Render("(auto)")
 				if ov.runner == "claude" {
-					modelPart = dim.Render(m.claudeDefaultLine(true))
+					modelPart = dim.Render("default → " + runner.ClaudeDefaultModel + " · " + runner.ClaudeDefaultEffort)
 				}
 			}
 			display = runnerPart + dim.Render(" / ") + modelPart
@@ -2194,7 +2201,7 @@ func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active,
 				if cursor >= len(choices) {
 					cursor = len(choices) - 1
 				}
-				agentLines = append(agentLines, renderWindowedList(effortLabels(choices), cursor, true, active, inactive, dim)...)
+				agentLines = append(agentLines, renderWindowedList(effortLabels(choices, m.agentEditProv == providerClaude), cursor, true, active, inactive, dim)...)
 				if m.agentEditEffortUnsupported != "" {
 					warnStyle := lipgloss.NewStyle().Foreground(crt.warn).Bold(true)
 					agentLines = append(agentLines, "")

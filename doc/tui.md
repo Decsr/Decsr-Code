@@ -267,11 +267,12 @@ shows the aliases `fable`, `opus`, `sonnet` and `haiku` (each with a dim
 as `claude --model`. The last row, `type a model id…`, opens a text input: Enter
 saves the id (no spaces), Esc returns to the list. A saved id that is not listed
 shows as `<id> (custom)` and stays selected. When a role has no model, DECSR
-passes no `--model` and Claude uses its own setting; the first line of the
-section then reads `default → <model> (from ~/.claude/settings.json)`, taken from
-the `model` key of that file, or `default → Claude Code's own default` when the
-file has none. The same line shows in the per-agent model step of a role with no
-model.
+passes `--model claude-opus-5-5` and, when its effort is empty or `default`,
+`--effort high`; an explicit model or effort is passed unchanged. The first line
+of the section then reads `default → claude-opus-5-5 · high effort`, the default
+row carries a dim `default` hint, the effort step labels its default entry
+`default (high)`, and an unset model starts the cursor on `claude-opus-5-5`. The
+same line shows in the per-agent model step of a role with no model.
 
 The provider row of Global Settings offers the same runners. A custom provider
 is stored as `runner: openai` plus `provider: <name>` and uses the base URL

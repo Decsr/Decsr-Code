@@ -60,6 +60,8 @@ func (m workspaceModel) commandList() []wsCommand {
 		{name: "/status", desc: "project, session, roles and limits", run: workspaceModel.cmdStatus},
 		{name: "/cost", desc: "tokens per node and per role", run: workspaceModel.cmdCost},
 		{name: "/autonomy", args: "[1|2|3]", desc: "how much runs by itself: 1 manual, 2 assisted, 3 unattended", run: workspaceModel.cmdAutonomy},
+		{name: "/coordinator", args: "[on|off]", desc: "let the lead review each finished batch and propose changes to the graph", run: workspaceModel.cmdCoordinator},
+		{name: "/review", args: "[y|n]", desc: "run one lead review now; y applies the waiting proposals, n rejects them", run: workspaceModel.cmdReview},
 		{name: "/budget", args: "[amount|off]", desc: "spending per runner; set this session's budget", run: workspaceModel.cmdBudget},
 		{name: "/export", desc: "write this session to a markdown file", run: workspaceModel.cmdExport},
 		{name: "/config", aliases: []string{"/menu"}, desc: "settings, project setup, classic pipeline", run: func(m workspaceModel, _ string) (tea.Model, tea.Cmd) {
@@ -749,7 +751,7 @@ func (m workspaceModel) cmdStatus(string) (tea.Model, tea.Cmd) {
 		kv("Language", orDefault(lang.Resolve(m.cfg.Project.Language, m.root), "(not detected)")),
 		kv("Profile", profile),
 		kv("Session", s.ID+" · "+title),
-		kv("Nodes", fmt.Sprintf("%d: %d todo · %d running · %d done · %d failed", len(m.g.Nodes), todo, running, done, failed)),
+		kv("Nodes", fmt.Sprintf("%d: %d todo · %d running · %d done · %d waiting · %d failed", len(m.g.Nodes), todo, running, done, m.g.CountWaiting(), failed)),
 		kv("Parallel", fmt.Sprintf("%d nodes at once", workspace.MaxParallel(m.cfg))),
 		"",
 		"Roles",
@@ -834,7 +836,7 @@ func (m workspaceModel) cmdCost(string) (tea.Model, tea.Cmd) {
 	mark := est(anyEst)
 	lines = append(lines, row("Total", "", tok(mark, totIn+s.In), tok(mark, totOut+s.Out)))
 	if strings.TrimSpace(s.Summary) != "" {
-		lines = append(lines, "", "Nodes folded by /compact are not counted.")
+		lines = append(lines, "", "Tokens of nodes folded by /compact or cancelled are not listed; their cost still counts toward the budget.")
 	}
 	if anyEst {
 		lines = append(lines, "~ marks estimates")

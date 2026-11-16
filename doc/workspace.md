@@ -206,6 +206,7 @@ Status is always a glyph plus a word, never color alone.
 | spinner | running | The agent is working. |
 | `✓` | done | Finished; files it wrote are listed. |
 | `!` | failed | The run failed; the error is shown. |
+| `◇` | waiting | The node ended with a question or a blocked report and waits for your reply (see [Node reports and waiting nodes](#node-reports-and-waiting-nodes)). |
 
 A `⚠` after the status on a node card means the node has warnings
 (see [Warnings](#warnings)).
@@ -270,7 +271,7 @@ node keys work with focus on the sidebar or on the main pane, in either mode.
 | `A` | Accept all suggestions that are defined roles |
 | `d` | Open the diff of the selected node (see [Diff and review notes](#diff-and-review-notes)) |
 | `D` | Open the diff of the whole session branch |
-| `m` | Reply to the selected node: focus the prompt filled with `@T3 ` (see [Reply to a node](#reply-to-a-node)) |
+| `m` | Reply to the selected node: focus the prompt filled with `@T3 `. It answers the question of a waiting node `◇` (see [Reply to a node](#reply-to-a-node)) |
 | `!` | Open a shell in the selected node's worktree (tmux split under tmux; see [Agent mode](#agent-mode)) |
 | `K` | Choose the plugin skills of the selected node (see [How the lead picks skills](#how-the-lead-picks-skills)) |
 | `r` | Run the selected node |
@@ -335,6 +336,8 @@ prompt and lands there.
 | `/plugin` (`/plugins`) | List plugins; `/plugin available`, `/plugin install <name>`, `/plugin enable <name>`, `/plugin disable <name>` and `/plugin reload` (see [Plugins](#plugins)) |
 | `/status` | Project path, language, profile, session, node counts, roles with runner/model/effort, parallel limit, custom commands and skills found |
 | `/cost` | Tokens in and out per node and per role, the lead's usage, and the total |
+| `/coordinator [on\|off]` | Show or set, for this session, whether the lead reviews each finished batch (see [Coordinator mode](#coordinator-mode)) |
+| `/review [y\|n]` | Run one lead review now; `y` applies the waiting proposals, `n` rejects them (see [Coordinator mode](#coordinator-mode)) |
 | `/budget [amount\|off]` | Spending per runner and the models without a price; `/budget 10` sets this session's budget, `/budget off` removes that override (see [Cost and budget](#cost-and-budget)) |
 | `/export` | Write the session to `.decsr/exports/<session id>.md` (title, transcript, summary, each node with role, status, files and summary) |
 | `/config` (`/menu`) | Leave for the classic menu: settings, project setup, classic pipeline |
@@ -395,6 +398,8 @@ fix nodes are done and nothing runs (not while automation is paused or the
 budget is reached). It writes `auto › compacted 10 finished nodes` and runs
 again only after the count has dropped below 10 and reached it again. At
 level 1 the prompt suggests `/compact` instead.
+
+The cost of folded nodes is kept (`removed_cost_usd` in the graph) and still counts toward the spent total and the budget; the same holds for nodes the lead cancels.
 
 ## Profiles
 
@@ -799,6 +804,141 @@ Resuming the CLI's own session is not used.
 The session keeps the earlier attempts of a node (summary, error, file
 statistics, commit); the activity timeline is kept for the three most recent
 ones. The budget gate and the autonomy level apply as for any node.
+
+## Node reports and waiting nodes
+
+Every work node ends its reply with a report, in text and agent mode and for
+read-only roles too:
+
+```
+REPORT
+status: done | blocked | question
+summary: <one or two sentences>
+question: <only when status is question: the exact question for the user>
+```
+
+decsr reads the last `REPORT` line of the reply. Key names are case-insensitive;
+surrounding markdown fences or bold, extra spaces and CRLF line ends are
+accepted, and a `summary` or `question` may span several lines until the next
+key. An unknown `status` counts as `done`. A reply without a report counts as
+`done`, and the node keeps the summary decsr extracts as before. The report
+block is not part of the summary shown on the card. The report is stored on the
+node (`report` in the session file) and in each archived attempt.
+
+- `done`: the node is done, as before.
+- `question` or `blocked`: the node ends **waiting** (`◇ waiting`), not done.
+  Its changes are committed and merged into the session branch like those of a
+  done node, so the next attempt starts from the partial work. Nodes that depend
+  on it stay blocked and Build & test cannot run, but independent nodes keep
+  running. A waiting node is not folded by `/compact` and counts as unfinished
+  for the pull request (its question is listed under `Waiting for an answer`).
+  The header and the sidebar count it (`2/5 done · 1 waiting`).
+- The card shows `? <question>` (up to 4 lines) or `blocked: <summary>` in the
+  warning colour and the hint `m reply`; the sidebar row says `asks a question`
+  or `blocked`; the inspector shows `Report  question` and the question.
+- A notification asks for you: `T3 asks: <question>` or `T3 is blocked:
+  <summary>`.
+- Autonomy levels 2 and 3 never answer or fix a waiting node: it always waits
+  for you. The lead of [coordinator mode](#coordinator-mode) sees the question
+  but never answers it.
+
+Reply to the node (`m`, or `@T3 <message>`) to answer. The reply archives the
+attempt, with its report, and starts the next one. Its context includes what the
+node asked:
+
+```
+Previous attempt (attempt 1, waiting — asked a question):
+<excerpt>
+
+Your question was:
+<question>
+
+The user replied:
+<message>
+```
+
+For a blocked node the heading is `waiting — blocked` and the block that follows
+is `You reported:` with its summary. `r` on a waiting node is refused: reply
+instead.
+
+## Coordinator mode
+
+Coordinator mode lets the lead steer the graph while it runs. After a batch of
+nodes has finished, the lead reads the reports and may propose to add, change
+or cancel nodes. It is off by default.
+
+```yaml
+workspace:
+  coordinator: true   # default false
+```
+
+`/coordinator on` or `/coordinator off` overrides the config for one session
+(saved with it); `/coordinator` alone shows the state and where it comes from.
+The prompt box shows the chip `coord` while it is on.
+
+**When a review runs.** A batch is over when no node runs and at least one node
+ended (done, failed or waiting) since the last review. A node you stopped does
+not count. The lead then runs one review. It does not run when the coordinator
+is off, when automation is paused (`S`), when the budget is reached (the
+conversation says `auto › budget reached, review skipped`), when there is no
+graph, or when the round limit is reached. A node that waits for you is not
+answered by the lead: its question is shown to the lead, and it keeps waiting
+for your reply.
+
+**What the lead sees.** The task, the session summary, a table with one row per
+node (id, title, role, status, report status with its summary or question, the
+first line of the error, the number of files touched) and, for failed nodes, a
+budgeted excerpt of what failed (at most 6000 characters, the same excerpt
+builder as fix nodes). It is the lead of the split: the `pm` role's runner and
+model. The call is counted in the session's lead usage and in the budget. The
+prompt is the template `ws-review`.
+
+**What it answers.** One JSON object, bare or in a code fence:
+
+```json
+{"note": "one line", "proposals": [
+  {"action": "add", "title": "...", "description": "...", "role": "coder", "depends_on": ["T1"]},
+  {"action": "change", "id": "T4", "title": "...", "description": "...", "role": "...", "depends_on": ["T2"]},
+  {"action": "cancel", "id": "T5", "reason": "..."}
+]}
+```
+
+An empty `proposals` list means no changes. An answer that cannot be read gives
+no proposals and a note saying so.
+
+**Proposal rules.** Invalid proposals are skipped and shown with the reason;
+the valid ones still count. At most 8 proposals are applied per review.
+
+- `add` creates a node `T<n>`; its `depends_on` must name existing nodes (never
+  `CHECK`, and no cycle). Build & test depends on it and goes back to `todo` if
+  it had run. A role that is defined is assigned; an unknown one leaves the node
+  unassigned with that role as the suggestion, as after a split.
+- `change` edits the title, description, role or dependencies of a `todo` or
+  `failed` node. A failed node goes back to `todo`.
+- `cancel` removes a `todo`, `failed` or `waiting` node and drops the edges that
+  pointed at it, and adds `- T5 cancelled by the lead: <reason>` to the session
+  summary. The cost of a cancelled node stays in the spent total.
+- A `done` or `running` node and the Build & test node are never touched.
+
+**Who applies them.** At autonomy level 1 a **Lead review** card appears in the
+activity feed: `+ add T7 ...`, `~ change T4 ...`, `x cancel T5 ...`, skipped
+proposals dim with their reason, and a "needs you" notification. `y` applies all
+valid proposals and `n` rejects them (graph, sidebar or feed focus, shown in the
+hint bar; `/review y` and `/review n` do the same from the prompt). The proposals
+are checked again when you press `y`, so a node that changed meanwhile is
+skipped. At level 2 and 3 the valid proposals are applied at once, each with a
+line `auto › lead: added T7 ...`, and then the new nodes get their roles and run
+as after a split. A resolved card folds to one line (`Lead review 2 · 3 changes
+applied ›`); select it with the arrow keys and press `Space` to expand it. The
+last 20 reviews are kept in the session.
+
+**Loop guard.** At most 5 reviews run by themselves per task. The count resets
+when a new task, issue or import adds nodes. After the fifth review a "needs
+you" notification says `5 lead reviews done for this task - /review to
+continue` and no sixth starts by itself. `/review` runs one review now, also
+past the limit (it counts, and does not reset the counter). It is refused while
+nodes run, while a review waits for `y` or `n`, and when the budget is reached.
+`Esc` cancels a review that is running.
 
 ## Cost and budget
 

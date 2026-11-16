@@ -110,12 +110,8 @@ func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemP
 	}
 
 	args := claudeBaseArgs(agent, allowed)
-	if r.Model != "" {
-		args = append(args, "--model", r.Model)
-	}
-	if effort != "" {
-		args = append(args, "--effort", mapClaudeEffort(effort))
-	}
+	args = append(args, "--model", EffectiveModel("claude", r.Model))
+	args = append(args, "--effort", mapClaudeEffort(EffectiveEffort("claude", effort)))
 	if systemPrompt != "" {
 		args = append(args, "--system-prompt", systemPrompt)
 	}

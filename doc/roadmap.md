@@ -134,12 +134,12 @@ add, change or cancel nodes.
 
 **Done when**
 
-- [ ] Reports are parsed, and a missing report becomes `done`.
-- [ ] The lead reviews once per finished batch.
-- [ ] At L1 a proposal card waits for `y`/`n`; at L2/L3 changes apply with
+- [x] Reports are parsed, and a missing report becomes `done`.
+- [x] The lead reviews once per finished batch.
+- [x] At L1 a proposal card waits for `y`/`n`; at L2/L3 changes apply with
       `auto ›` lines.
-- [ ] A `question` report stops the node until you reply.
-- [ ] The sixth review round does not start without your answer.
+- [x] A `question` report stops the node until you reply.
+- [x] The sixth review round does not start without your answer.
 
 **Builds on.** The lead, the node graph, autonomy levels, budgets,
 notifications, reply to a node (Phase 2).

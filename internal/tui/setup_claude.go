@@ -36,6 +36,9 @@ func (m SetupModel) claudeLabels() (labels, hints []string) {
 			labels[i] = r + " (custom)"
 		default:
 			hints[i] = runner.ClaudeModelHint(r)
+			if r == runner.ClaudeDefaultModel {
+				hints[i] = "default"
+			}
 		}
 	}
 	return labels, hints
@@ -64,10 +67,7 @@ func (m SetupModel) claudeDefaultLine(modelEmpty bool) string {
 	if !modelEmpty {
 		return ""
 	}
-	if m.claudeDefault == "" {
-		return "default → Claude Code's own default"
-	}
-	return "default → " + m.claudeDefault + " (from ~/.claude/settings.json)"
+	return "default → " + runner.ClaudeDefaultModel + " · " + runner.ClaudeDefaultEffort + " effort"
 }
 
 // globalClaudeModelEmpty reports whether the global setting names no model.

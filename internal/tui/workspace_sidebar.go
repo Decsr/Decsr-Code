@@ -137,6 +137,14 @@ func (m workspaceModel) nodeRows(n *workspace.Node, w int, on bool, models, runn
 			l2 = sbSeg("    "+actGlyph(a.Kind)+" "+actText(a, max(w-7, 4), true), col, false, on)
 		}
 	}
+	if n.Status == workspace.StatusWaiting {
+		acting = true
+		word := "asks a question"
+		if n.Report != nil && n.Report.Status == workspace.ReportBlocked {
+			word = "blocked"
+		}
+		l2 = sbSeg("    "+word, colWarn, false, on)
+	}
 	switch n.Status {
 	case workspace.StatusRunning:
 		if !acting {
@@ -144,7 +152,7 @@ func (m workspaceModel) nodeRows(n *workspace.Node, w int, on bool, models, runn
 		}
 	case workspace.StatusFailed:
 		age = "failed"
-	case workspace.StatusDone:
+	case workspace.StatusDone, workspace.StatusWaiting:
 		if !n.EndedAt.IsZero() {
 			age = sbAge(m.now(), n.EndedAt)
 		}
@@ -212,7 +220,7 @@ func (m workspaceModel) sidebarRows(w, h int) []string {
 			if t == "" {
 				t = "untitled"
 			}
-			total := s.Todo + s.Running + s.Done + s.Failed
+			total := s.Todo + s.Running + s.Done + s.Failed + s.Waiting
 			right := ""
 			if total > 0 {
 				right = sbSeg(fmt.Sprintf("%d/%d", s.Done, total), colMuted, false, on)
@@ -233,6 +241,9 @@ func (m workspaceModel) sidebarProgress() string {
 	s := fmt.Sprintf("%d/%d", done, len(m.g.Nodes))
 	if running > 0 {
 		s += fmt.Sprintf(" · %d running", running)
+	}
+	if w := m.g.CountWaiting(); w > 0 {
+		s += fmt.Sprintf(" · %d waiting", w)
 	}
 	if failed > 0 {
 		s += fmt.Sprintf(" · %d failed", failed)

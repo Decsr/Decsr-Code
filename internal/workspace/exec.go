@@ -34,6 +34,10 @@ const (
 	// Event.ContextTokens (estimated) and Event.ContextLimit (0 = unknown).
 	EventContext EventType = "context"
 	EventDone    EventType = "done"
+	// EventWaiting ends a node that reported a question or was blocked, in
+	// place of EventDone. Text is the question (or the blocked summary); the
+	// node's Report holds the details.
+	EventWaiting EventType = "waiting"
 	EventFailed  EventType = "failed"
 	// EventBudgetWarn and EventBudgetReached are engine-level (NodeID "");
 	// Text is the message to show.
@@ -71,6 +75,9 @@ type Result struct {
 	// worktree and changed something.
 	Commit   string
 	Warnings []string
+	// Report is the worker's closing report; the zero value (no Status) for a
+	// node that has none, such as Build & test.
+	Report Report
 }
 
 // Executor runs one node. It must return promptly when ctx is cancelled.
@@ -219,7 +226,7 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	if err != nil {
 		return Result{}, err
 	}
-	out := Result{Summary: res.Summary, Files: res.Files, Warnings: skillWarnings}
+	out := Result{Summary: res.Summary, Files: res.Files, Warnings: skillWarnings, Report: res.Report}
 	if snapOK {
 		if after, ok := snapshotTree(wx.root, maxSnapshotFiles); ok {
 			out.Observed = diffSnapshots(before, after, res.Files)
@@ -366,7 +373,23 @@ func replySection(n *Node) string {
 		if ex == "" {
 			ex = "(nothing was recorded)"
 		}
-		fmt.Fprintf(&sb, "Previous attempt (attempt %d, %s):\n%s\n\n", prev.N, prev.Status, ex)
+		state := string(prev.Status)
+		after := ""
+		if prev.Status == StatusWaiting && prev.Report != nil {
+			switch prev.Report.Status {
+			case agent.ReportQuestion:
+				state += " — asked a question"
+				if q := prev.Report.Ask(); q != "" {
+					after = "Your question was:\n" + q + "\n\n"
+				}
+			case agent.ReportBlocked:
+				state += " — blocked"
+				if s := strings.TrimSpace(prev.Report.Summary); s != "" {
+					after = "You reported:\n" + s + "\n\n"
+				}
+			}
+		}
+		fmt.Fprintf(&sb, "Previous attempt (attempt %d, %s):\n%s\n\n%s", prev.N, state, ex, after)
 	}
 	sb.WriteString("The user replied:\n" + n.Reply + "\n")
 	return sb.String()

@@ -816,3 +816,18 @@ func TestMerge_WorkspaceAutonomy(t *testing.T) {
 		t.Errorf("autonomy %d, max auto fixes %d", dst.Workspace.Autonomy, dst.Workspace.MaxAutoFixes)
 	}
 }
+
+func TestMerge_WorkspaceCoordinator(t *testing.T) {
+	var dst Config
+	if dst.Workspace.Coordinator {
+		t.Fatal("the coordinator is off by default")
+	}
+	merge(&dst, Config{Workspace: WorkspaceConfig{Coordinator: true}})
+	if !dst.Workspace.Coordinator {
+		t.Fatal("the coordinator was not merged")
+	}
+	merge(&dst, Config{})
+	if !dst.Workspace.Coordinator {
+		t.Error("an empty layer reset the coordinator")
+	}
+}

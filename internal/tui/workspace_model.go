@@ -62,6 +62,9 @@ type wsDeps struct {
 	// the current nodes ("" for a fresh session). existing are the node IDs
 	// already in the graph and next the first number for new sub-tasks.
 	split func(ctx context.Context, task, earlier string, existing []string, next int, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error)
+	// review asks the lead to review the graph after a batch (the coordinator);
+	// nil disables reviews.
+	review func(ctx context.Context, in workspace.ReviewInput) (workspace.ReviewResult, runner.TokenUsage, error)
 	// newEngine builds the engine; summary gives the workers the session summary.
 	newEngine func(g *workspace.Graph, save func(*workspace.Graph) error, summary func() string, iso *workspace.Isolator) *workspace.Engine
 	// isolator returns the worktree isolator of a session, nil when its nodes
@@ -252,6 +255,21 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 			})
 			writeSplitRaw(root, raw.String())
 			return g, u, err
+		},
+		review: func(ctx context.Context, in workspace.ReviewInput) (workspace.ReviewResult, runner.TokenUsage, error) {
+			c := getCfg()
+			agents := make(map[string]config.AgentConfig, len(c.Agents))
+			for k, v := range c.Agents {
+				agents[k] = v
+			}
+			c.Agents = agents
+			runner.ApplyModelMemory(&c)
+			pm := c.Agents["pm"]
+			r, err := runner.New(pm, nil, c.PromptLanguage)
+			if err != nil {
+				return workspace.ReviewResult{}, runner.TokenUsage{}, fmt.Errorf("lead runner: %w", err)
+			}
+			return workspace.RunReview(ctx, r, pm.Model, in, nil)
 		},
 		isolator: func(session string) *workspace.Isolator {
 			return workspace.NewIsolator(root, session, getCfg().Workspace.Isolation)
@@ -563,6 +581,10 @@ type workspaceModel struct {
 	pr           wsPRState           // pull request loop (/pr)
 	autoPaused   bool                // S paused the automation of /autonomy
 	autoWarned   bool                // the lowered level 3 was announced
+	reviewDirty  bool                // a node ended since the last lead review
+	reviewing    bool                // a lead review is running
+	reviewGen    int
+	cancelReview context.CancelFunc
 
 	// plugin install started from the dialog
 	installing    string // plugin being installed; "" for none
@@ -849,6 +871,8 @@ func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case wsSplitDoneMsg:
 		return m.onSplitDone(msg)
+	case wsReviewDoneMsg:
+		return m.onReviewDone(msg)
 	case wsEventMsg:
 		return m.onEvent(msg)
 	case wsInstallMsg:
@@ -875,7 +899,7 @@ func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshOutput() // keeps the timers moving
 		}
 		m.checkStalls()
-		if m.splitting || m.running() > 0 || m.installing != "" {
+		if m.splitting || m.reviewing || m.running() > 0 || m.installing != "" {
 			return m, wsTick()
 		}
 		m.ticking = false
@@ -919,6 +943,11 @@ func (m workspaceModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if k == "esc" {
 			return m.cancelSplitting(), nil
 		}
+		return m, nil
+	}
+	if m.reviewing && k == "esc" && !m.paletteOpen() {
+		m.stopReview()
+		m.say("error", "lead review cancelled")
 		return m, nil
 	}
 	if m.focus != wsFocusPrompt {
@@ -1177,6 +1206,10 @@ func (m workspaceModel) earlierContext() string {
 
 // sendTask sends task to the lead; shown is what the chat displays.
 func (m workspaceModel) sendTask(task, shown string) (tea.Model, tea.Cmd) {
+	if m.reviewing {
+		m.setNotice("The lead is reviewing the batch: wait for it, or press Esc to cancel the review", true)
+		return m, nil
+	}
 	if m.running() > 0 {
 		m.setNotice("Stop the running nodes first (Tab to the graph, then S), then send the task", true)
 		return m, nil
@@ -1394,6 +1427,8 @@ func (m workspaceModel) resetSession(s *workspace.Session) workspaceModel {
 	m.sess = newWsSess(m.root, s)
 	m.iso, m.isoAnnounced = nil, false
 	m.autoPaused, m.autoWarned = false, false
+	m.stopReview()
+	m.reviewDirty = false
 	m.prStop()
 	m.outputs = map[string][]string{}
 	m.partial = map[string]string{}
@@ -1446,6 +1481,9 @@ func (m workspaceModel) onEvent(msg wsEventMsg) (tea.Model, tea.Cmd) {
 		if n := m.g.Node(ev.NodeID); m.iso != nil && n != nil && n.Kind == workspace.KindCheck {
 			m.say("system", "Build & test passed. Use /merge to bring the result into your checkout.")
 		}
+	case workspace.EventWaiting:
+		m.setNotice("◇ "+ev.NodeID+" waits for you: "+oneLine(ev.Text), false)
+		m.sayQueuedReplyStarted(ev.NodeID)
 	case workspace.EventBudgetWarn, workspace.EventBudgetReached:
 		m.onBudgetEvent(ev)
 	case workspace.EventFailed:
@@ -1462,7 +1500,8 @@ func (m workspaceModel) onEvent(msg wsEventMsg) (tea.Model, tea.Cmd) {
 		m.refreshOutput()
 	}
 	m, autoCmd := m.autoAfterEvent(ev)
-	return m, tea.Batch(wsWaitEvent(m.eng), m.startTick(), m.prAfterEvent(ev), autoCmd)
+	m, coordCmd := m.coordAfterEvent(ev)
+	return m, tea.Batch(wsWaitEvent(m.eng), m.startTick(), m.prAfterEvent(ev), autoCmd, coordCmd)
 }
 
 // wsMaxOutputBytes caps the stored output of one node.
@@ -1586,6 +1625,10 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		m.showHelp = true
 		return m, nil
+	case "y", "n":
+		if m.pendingReview() >= 0 && m.focus != wsFocusPrompt {
+			return m.reviewResolve(k == "y")
+		}
 	case "q":
 		return m.requestQuit(false)
 	case "i":
@@ -1661,7 +1704,11 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	n := m.selNode()
 	switch k {
 	case " ", "space":
-		if !m.showGraph && n != nil {
+		switch {
+		case !m.showGraph && strings.HasPrefix(m.sel, reviewKeyPrefix):
+			m.feedExpanded[m.sel] = !m.feedExpanded[m.sel]
+			m = m.feedReveal(m.sel)
+		case !m.showGraph && n != nil:
 			m.feedExpanded[n.ID] = !m.feedExpanded[n.ID]
 			m = m.feedReveal(n.ID)
 		}
@@ -2349,6 +2396,15 @@ func (m workspaceModel) guidanceParts() (short, long string, isErr bool) {
 			return fmt.Sprintf("! %s failed: %s", n.ID, truncateOneLine(oneLine(n.Error), 50)), fmt.Sprintf("%sselect it: r retries, a changes the agent", via), true
 		}
 	}
+	for _, n := range g.Nodes {
+		if n.Status != workspace.StatusWaiting {
+			continue
+		}
+		if n.Report != nil && n.Report.Status == workspace.ReportBlocked {
+			return fmt.Sprintf("◇ %s is blocked", n.ID), fmt.Sprintf("%sselect it: m replies", via), false
+		}
+		return fmt.Sprintf("◇ %s asks a question", n.ID), fmt.Sprintf("%sselect it: m replies", via), false
+	}
 	if running > 0 {
 		return fmt.Sprintf("%d running", running), fmt.Sprintf("%so shows output, s stops the selected node", via), false
 	}
@@ -2442,6 +2498,9 @@ func (m workspaceModel) chatStrip(rows int) []string {
 // graphHints returns the context-sensitive footer hints for graph focus.
 func (m workspaceModel) graphHints() []keyHint {
 	var hs []keyHint
+	if m.pendingReview() >= 0 {
+		hs = append(hs, keyHint{"y", "apply review"}, keyHint{"n", "reject"})
+	}
 	if n := m.selNode(); n != nil && m.g != nil {
 		switch {
 		case n.Status == workspace.StatusRunning:
@@ -2450,6 +2509,11 @@ func (m workspaceModel) graphHints() []keyHint {
 			hs = append(hs, keyHint{"f", "add fix"}, keyHint{"r", "retry"})
 		case n.Status == workspace.StatusFailed:
 			hs = append(hs, keyHint{"r", "retry"}, keyHint{"a", "reassign"})
+		case n.Status == workspace.StatusWaiting:
+			hs = append(hs, keyHint{"m", "reply"}, keyHint{"o", "output"})
+			if hasDiff(n) {
+				hs = append(hs, keyHint{"d", "diff"})
+			}
 		case n.Status == workspace.StatusDone:
 			hs = append(hs, keyHint{"o", "output"})
 			if hasDiff(n) {
@@ -2484,7 +2548,7 @@ func (m workspaceModel) graphHints() []keyHint {
 		}
 		hs = append(hs, keyHint{"↑↓", "move"}, keyHint{"Tab", "main"}, close)
 	case m.feedMode():
-		if n := m.selNode(); n != nil {
+		if n := m.selNode(); n != nil || strings.HasPrefix(m.sel, reviewKeyPrefix) {
 			hs = append(hs, keyHint{"Space", "expand"})
 		}
 		hs = append(hs, keyHint{"↑↓", "cards"}, keyHint{"PgUp/PgDn", "scroll"}, keyHint{"g", "graph"}, keyHint{"Tab", "prompt"})
@@ -2500,6 +2564,8 @@ func (m workspaceModel) hintLine() string {
 	switch {
 	case m.splitting:
 		hs = []keyHint{{"Esc", "cancel"}, {"Ctrl+C", "quit"}}
+	case m.reviewing && m.focus == wsFocusPrompt:
+		hs = []keyHint{{"Esc", "cancel review"}, {"Tab", "main"}, {"Ctrl+C", "quit"}}
 	case m.focus != wsFocusPrompt:
 		hs = m.graphHints()
 	case m.paletteOpen():
@@ -2538,6 +2604,9 @@ func (m workspaceModel) progressStats() string {
 		stats = fmt.Sprintf("%d/%d done", done, len(g.Nodes))
 		if running > 0 {
 			stats += fmt.Sprintf(" · %d running", running)
+		}
+		if w := g.CountWaiting(); w > 0 {
+			stats += fmt.Sprintf(" · %d waiting", w)
 		}
 		if failed > 0 {
 			stats += fmt.Sprintf(" · %d failed", failed)

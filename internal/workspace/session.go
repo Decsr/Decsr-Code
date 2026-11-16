@@ -51,6 +51,10 @@ type Session struct {
 	Notes      []DiffNote `json:"notes,omitempty"`         // review notes on node diffs, not sent yet
 	Autonomy   int        `json:"autonomy,omitempty"`      // /autonomy override of workspace.autonomy; 0 = use the config
 	AutoFixes  int        `json:"auto_fixes,omitempty"`    // fix nodes added automatically after a failed Build & test
+	// Coordinator is the /coordinator override of workspace.coordinator; nil = use the config.
+	Coordinator *bool `json:"coordinator,omitempty"`
+	// Reviews are the lead's batch reviews, oldest first, at most MaxReviews.
+	Reviews []Review `json:"reviews,omitempty"`
 }
 
 // DiffNote is a review note on one line of a node's diff. Side is "new" for an
@@ -69,6 +73,7 @@ type SessionInfo struct {
 	ID, Title                   string
 	UpdatedAt                   time.Time
 	Todo, Running, Done, Failed int
+	Waiting                     int
 	Path                        string
 }
 
@@ -220,6 +225,7 @@ func ListSessions(projectRoot string) []SessionInfo {
 		info := SessionInfo{ID: s.ID, Title: s.Title, UpdatedAt: s.UpdatedAt, Path: filepath.Join(SessionsDir(projectRoot), name)}
 		if s.Graph != nil {
 			info.Todo, info.Running, info.Done, info.Failed = s.Graph.Counts()
+			info.Waiting = s.Graph.CountWaiting()
 		}
 		out = append(out, info)
 	}

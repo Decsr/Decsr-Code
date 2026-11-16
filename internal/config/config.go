@@ -82,6 +82,11 @@ type WorkspaceConfig struct {
 	// Build & test per session; 0 = 2.
 	Autonomy     int `yaml:"autonomy,omitempty"`
 	MaxAutoFixes int `yaml:"max_auto_fixes,omitempty"`
+
+	// Coordinator turns on the lead's review after each batch of nodes: it
+	// proposes adding, changing or cancelling nodes. Off by default; the
+	// session's /coordinator overrides it.
+	Coordinator bool `yaml:"coordinator,omitempty"`
 }
 
 // UIConfig holds presentation settings.
@@ -585,6 +590,9 @@ func merge(dst *Config, src Config) {
 	}
 	if src.Workspace.MaxAutoFixes > 0 {
 		dst.Workspace.MaxAutoFixes = src.Workspace.MaxAutoFixes
+	}
+	if src.Workspace.Coordinator {
+		dst.Workspace.Coordinator = true
 	}
 	if len(src.Pricing) > 0 {
 		if dst.Pricing == nil {

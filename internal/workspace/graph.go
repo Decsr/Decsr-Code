@@ -9,7 +9,18 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Decsr/Decsr-Code/internal/agent"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+)
+
+// Report is the structured end of a worker's reply (see agent.Report).
+type Report = agent.Report
+
+// Report statuses.
+const (
+	ReportDone     = agent.ReportDone
+	ReportBlocked  = agent.ReportBlocked
+	ReportQuestion = agent.ReportQuestion
 )
 
 // Status is the lifecycle state of a node.
@@ -20,6 +31,9 @@ const (
 	StatusRunning Status = "running"
 	StatusDone    Status = "done"
 	StatusFailed  Status = "failed"
+	// StatusWaiting is a node that ended with a question or a blocked report:
+	// its changes are merged, but it is not done. A reply starts its next attempt.
+	StatusWaiting Status = "waiting"
 )
 
 // Kind distinguishes LLM work nodes from the build/test check node.
@@ -45,6 +59,7 @@ type Node struct {
 	Status        Status     `json:"status"`
 	Commands      []string   `json:"commands,omitempty"` // check nodes
 	Summary       string     `json:"summary,omitempty"`
+	Report        *Report    `json:"report,omitempty"` // the worker's closing report, set when the node ends
 	Files         []string   `json:"files,omitempty"`
 	Observed      []string   `json:"observed,omitempty"`   // changed on disk by the agent's own tools
 	FileStats     []FileStat `json:"file_stats,omitempty"` // lines added and removed per file, set when the node ran in a worktree
@@ -99,6 +114,7 @@ type Attempt struct {
 	StartedAt       time.Time         `json:"started_at,omitempty"`
 	EndedAt         time.Time         `json:"ended_at,omitempty"`
 	Summary         string            `json:"summary,omitempty"`
+	Report          *Report           `json:"report,omitempty"`
 	Error           string            `json:"error,omitempty"`
 	FileStats       []FileStat        `json:"file_stats,omitempty"`
 	Commit          string            `json:"commit,omitempty"`
@@ -118,9 +134,18 @@ func (n *Node) AttemptNumber() int {
 }
 
 func (a Attempt) clone() Attempt {
+	a.Report = cloneReport(a.Report)
 	a.FileStats = append([]FileStat(nil), a.FileStats...)
 	a.Activity = append([]runner.Activity(nil), a.Activity...)
 	return a
+}
+
+func cloneReport(r *Report) *Report {
+	if r == nil {
+		return nil
+	}
+	c := *r
+	return &c
 }
 
 func cloneAttempts(in []Attempt) []Attempt {
@@ -201,6 +226,12 @@ type Graph struct {
 	// SplitWarnings are the notes of the split that produced the graph (an
 	// unusable skill or plugin dropped). Not saved.
 	SplitWarnings []string `json:"-"`
+	// ReviewRounds is the number of lead reviews of the current task; a new
+	// task, issue or import resets it (Append).
+	ReviewRounds int `json:"review_rounds,omitempty"`
+	// RemovedCostUSD is the priced cost of nodes that Compact folded or a lead
+	// proposal cancelled, so removing a node never lowers the money spent.
+	RemovedCostUSD float64 `json:"removed_cost_usd,omitempty"`
 }
 
 // PendingPlugins returns the plugin requests nobody answered yet.
@@ -382,6 +413,17 @@ func (g *Graph) Counts() (todo, running, done, failed int) {
 	return
 }
 
+// CountWaiting returns how many nodes are waiting for a reply.
+func (g *Graph) CountWaiting() int {
+	k := 0
+	for _, n := range g.Nodes {
+		if n.Status == StatusWaiting {
+			k++
+		}
+	}
+	return k
+}
+
 // Clone returns a deep copy.
 func (g *Graph) Clone() *Graph {
 	c := *g
@@ -397,6 +439,7 @@ func (g *Graph) Clone() *Graph {
 		nn.Skills = append([]string(nil), n.Skills...)
 		nn.Activity = append([]runner.Activity(nil), n.Activity...)
 		nn.Attempts = cloneAttempts(n.Attempts)
+		nn.Report = cloneReport(n.Report)
 		if n.Spec != nil {
 			sr := *n.Spec
 			nn.Spec = &sr
@@ -597,8 +640,10 @@ func (g *Graph) Append(add *Graph, nextID int) (newNext int, idMap map[string]st
 		c.Skills = append([]string(nil), n.Skills...)
 		c.Activity = append([]runner.Activity(nil), n.Activity...)
 		c.Attempts = cloneAttempts(n.Attempts)
+		c.Report = cloneReport(n.Report)
 		g.Nodes = append(g.Nodes, &c)
 	}
+	g.ReviewRounds = 0
 	if g.Task == "" {
 		g.Task = add.Task
 	}
@@ -689,6 +734,7 @@ func (g *Graph) Compact() (folded []*Node) {
 	for _, n := range g.Nodes {
 		if gone[n.ID] {
 			folded = append(folded, n)
+			g.RemovedCostUSD += n.CostUSD
 			continue
 		}
 		var deps []string
@@ -732,6 +778,12 @@ func CompactSummary(prev string, folded []*Node) string {
 		}
 		lines = append(lines, sb.String())
 	}
+	return trimSummary(lines)
+}
+
+// trimSummary joins lines, dropping the oldest while the result exceeds
+// maxSummaryChars.
+func trimSummary(lines []string) string {
 	total := func() int {
 		t := 0
 		for _, l := range lines {

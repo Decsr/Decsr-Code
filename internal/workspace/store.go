@@ -81,7 +81,7 @@ func (g *Graph) prepare(src string) error {
 			return fmt.Errorf("load %s: node %d is null", src, i)
 		}
 		switch n.Status {
-		case StatusTodo, StatusRunning, StatusDone, StatusFailed:
+		case StatusTodo, StatusRunning, StatusDone, StatusFailed, StatusWaiting:
 		default:
 			return fmt.Errorf("load %s: node %q has unknown status %q", src, n.ID, n.Status)
 		}

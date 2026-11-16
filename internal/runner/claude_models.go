@@ -1,11 +1,34 @@
 package runner
 
-import (
-	"encoding/json"
-	"os"
-	"path/filepath"
-	"strings"
+import "strings"
+
+// ClaudeDefaultModel and ClaudeDefaultEffort are what the claude runner uses
+// when a role sets no model or effort.
+const (
+	ClaudeDefaultModel  = "claude-opus-5-5"
+	ClaudeDefaultEffort = "high"
 )
+
+// EffectiveModel is the model the runner really uses: for claude an empty model
+// becomes ClaudeDefaultModel; other runners keep their value unchanged.
+func EffectiveModel(runnerName, model string) string {
+	if runnerName == "claude" && strings.TrimSpace(model) == "" {
+		return ClaudeDefaultModel
+	}
+	return model
+}
+
+// EffectiveEffort is the effort the runner really uses: for claude an empty or
+// "default" effort becomes ClaudeDefaultEffort; other runners keep their value.
+func EffectiveEffort(runnerName, effort string) string {
+	if runnerName == "claude" {
+		if e := NormalizeEffort(effort); e != "" {
+			return e
+		}
+		return ClaudeDefaultEffort
+	}
+	return effort
+}
 
 // ClaudeModels lists the values the Claude CLI --model flag is offered with:
 // the aliases for the latest model of each family first, then full model
@@ -34,30 +57,4 @@ func ClaudeModelHint(model string) string {
 		return "latest " + strings.ToUpper(model[:1]) + model[1:]
 	}
 	return ""
-}
-
-// ClaudeSettingsModel returns the "model" value of the user's Claude settings
-// file ($HOME/.claude/settings.json) and whether one is set.
-func ClaudeSettingsModel() (string, bool) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", false
-	}
-	return ClaudeSettingsModelIn(home)
-}
-
-// ClaudeSettingsModelIn is ClaudeSettingsModel for an explicit home directory.
-func ClaudeSettingsModelIn(home string) (string, bool) {
-	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
-	if err != nil {
-		return "", false
-	}
-	var cfg struct {
-		Model string `json:"model"`
-	}
-	if json.Unmarshal(data, &cfg) != nil {
-		return "", false
-	}
-	model := strings.TrimSpace(cfg.Model)
-	return model, model != ""
 }

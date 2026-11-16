@@ -41,7 +41,10 @@ type WorkerResult struct {
 	Output, Summary string
 	Files           []string
 	Skipped         []string // file blocks that could not be written, each "path: reason"
-	Usage           runner.TokenUsage
+	// Report is the worker's closing REPORT block. Without one it is done with
+	// the extracted summary.
+	Report Report
+	Usage  runner.TokenUsage
 }
 
 // IsBinaryContent reports whether data looks like binary (non-text) content.
@@ -51,9 +54,9 @@ const workerSummaryMarker = "===SUMMARY==="
 
 const (
 	// workerTail ends the text-mode prompts.
-	workerTail = "\n\nFiles shown under \"Current files\" in the project context are the latest versions on disk,\nincluding changes made by earlier agents. When you change one of them, output the\nCOMPLETE updated file and keep everything unrelated to your sub-task intact. Never\nre-create a file from memory.\n\nEnd your answer with:\n\n===SUMMARY===\n1 to 5 lines: what you did and anything the next agent must know."
+	workerTail = "\n\nFiles shown under \"Current files\" in the project context are the latest versions on disk,\nincluding changes made by earlier agents. When you change one of them, output the\nCOMPLETE updated file and keep everything unrelated to your sub-task intact. Never\nre-create a file from memory.\n\nEnd your answer with:\n\n===SUMMARY===\n1 to 5 lines: what you did and anything the next agent must know." + reportInstruction
 	// workerAgentTail ends the agent-mode prompts.
-	workerAgentTail = "\n\nEnd your answer with:\n\n===SUMMARY===\n1 to 5 lines: what you changed (or found) and anything the next agent must know."
+	workerAgentTail = "\n\nEnd your answer with:\n\n===SUMMARY===\n1 to 5 lines: what you changed (or found) and anything the next agent must know." + reportInstruction
 
 	workerModeWrite    = "To create or change a file, write its path in bold on its own line, followed by a fenced\ncode block with the COMPLETE file content:\n\n**internal/example/example.go**\n```go\npackage example\n// complete file content\n```\n\nEvery code block MUST be preceded by the file path in bold on its own line, otherwise\nthe file is not saved. Never output partial files or placeholders.\n\nIf your role reviews or analyses (no files to change), write a report instead and do not\noutput file blocks." + workerTail
 	workerModeReadOnly = "You are in read-only mode: you MUST NOT change any files. Anything you output as a file block\nis discarded. Only report: write your findings as plain text (you may quote code in\nfenced blocks, but do not put a file path in bold before them)." + workerTail
@@ -157,7 +160,16 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		return res, errors.New("worker: empty response")
 	}
 
-	res.Summary = workerSummary(res.Output)
+	rep, body, found := ParseReport(res.Output)
+	res.Summary = workerSummary(body)
+	if found {
+		res.Report = rep
+		if res.Summary == "" {
+			res.Summary = rep.Summary
+		}
+	} else {
+		res.Report = Report{Status: ReportDone, Summary: res.Summary}
+	}
 	// Agent mode: the runner changed the files itself, so any fenced block is
 	// just text. The caller finds the changes by snapshot or worktree commit.
 	if req.ReadOnly || agentMode {

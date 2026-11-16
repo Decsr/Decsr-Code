@@ -57,7 +57,7 @@ func TestSetupModel_EffortDefaultsAndOverrides(t *testing.T) {
 	}
 
 	choices := effortChoices([]string{"low", "medium", "high"})
-	if got := effortLabels(choices); got[0] != "(provider default)" {
+	if got := effortLabels(choices, false); got[0] != "(provider default)" {
 		t.Fatalf("default label = %q", got[0])
 	}
 	if idx, found := effortChoiceIndex(choices, "medium"); !found || idx != 2 {

@@ -70,6 +70,12 @@ func (m workspaceModel) notifyEvent(ev workspace.Event) {
 			}
 			m.notifyNote(notify.Done, body)
 		}
+	case workspace.EventWaiting:
+		if n != nil && n.Report != nil && n.Report.Status == workspace.ReportBlocked {
+			m.notifyNote(notify.NeedsYou, ev.NodeID+" is blocked: "+wsShort(ev.Text))
+		} else {
+			m.notifyNote(notify.NeedsYou, ev.NodeID+" asks: "+wsShort(ev.Text))
+		}
 	case workspace.EventFailed:
 		if ev.Text == "stopped" {
 			return
@@ -83,7 +89,11 @@ func (m workspaceModel) notifyEvent(ev workspace.Event) {
 		return
 	}
 	if _, running, done, failed := m.g.Counts(); running == 0 && len(m.g.Runnable()) == 0 {
-		m.notifyNote(notify.Done, fmt.Sprintf("Run finished: %d done, %d failed", done, failed))
+		body := fmt.Sprintf("Run finished: %d done, %d failed", done, failed)
+		if w := m.g.CountWaiting(); w > 0 {
+			body += fmt.Sprintf(", %d waiting", w)
+		}
+		m.notifyNote(notify.Done, body)
 	}
 }
 

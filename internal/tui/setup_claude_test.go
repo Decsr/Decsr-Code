@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,7 +12,6 @@ func claudeSetup(t *testing.T, model string) SetupModel {
 	t.Helper()
 	m := prep(globalSetupFor(t, "claude", model, nil))
 	m.claudeModelsLoading = false
-	m.claudeDefault = "opus"
 	m.section = sectionModel
 	return m
 }
@@ -151,45 +148,40 @@ func TestClaudeSavedUnknownIdShowsCustom(t *testing.T) {
 
 func TestClaudeDefaultLine(t *testing.T) {
 	m := claudeSetup(t, "")
-	if got := m.claudeDefaultLine(true); got != "default → opus (from ~/.claude/settings.json)" {
+	const want = "default → claude-opus-5-5 · high effort"
+	if got := m.claudeDefaultLine(true); got != want {
 		t.Errorf("line = %q", got)
 	}
-	if !strings.Contains(ansi.Strip(m.renderContent()), "default → opus (from ~/.claude/settings.json)") {
+	if !strings.Contains(ansi.Strip(m.renderContent()), want) {
 		t.Error("default line not rendered for an empty model")
 	}
 	if claudeSetup(t, "sonnet").claudeDefaultLine(false) != "" {
 		t.Error("default line shown with a model set")
 	}
-	m.claudeDefault = ""
-	if got := m.claudeDefaultLine(true); got != "default → Claude Code's own default" {
-		t.Errorf("line = %q", got)
+}
+
+func TestClaudeUnsetModelCursorAndHint(t *testing.T) {
+	m := claudeSetup(t, "")
+	rows := m.claudeRows()
+	if rows[m.modelIdx] != "claude-opus-5-5" {
+		t.Fatalf("cursor on %q", rows[m.modelIdx])
+	}
+	_, hints := m.claudeLabels()
+	if hints[m.modelIdx] != "default" {
+		t.Errorf("hint = %q", hints[m.modelIdx])
+	}
+	if m := claudeSetup(t, "haiku"); m.claudeRows()[m.modelIdx] != "haiku" {
+		t.Error("explicit model lost its cursor")
 	}
 }
 
-func TestClaudeDefaultFromSettingsFile(t *testing.T) {
-	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
+func TestClaudeEffortDefaultLabel(t *testing.T) {
+	choices := effortChoices([]string{"low", "high"})
+	if got := effortLabels(choices, true)[0]; got != "default (high)" {
+		t.Errorf("claude label = %q", got)
 	}
-	write := func(s string) {
-		if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(s), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(`{"model":"opus"}`)
-	t.Setenv("HOME", home)
-	if m := NewSetupModel("claude", "", "", nil); m.claudeDefault != "opus" {
-		t.Errorf("present: %q", m.claudeDefault)
-	}
-	write(`{broken`)
-	if m := NewSetupModel("claude", "", "", nil); m.claudeDefault != "" {
-		t.Errorf("malformed: %q", m.claudeDefault)
-	}
-	if err := os.Remove(filepath.Join(home, ".claude", "settings.json")); err != nil {
-		t.Fatal(err)
-	}
-	if m := NewSetupModel("claude", "", "", nil); m.claudeDefault != "" {
-		t.Errorf("missing: %q", m.claudeDefault)
+	if got := effortLabels(choices, false)[0]; got != "(provider default)" {
+		t.Errorf("other label = %q", got)
 	}
 }
 
@@ -198,16 +190,15 @@ func TestClaudeAgentStepShowsDefaultLine(t *testing.T) {
 	m := NewSetupModelWithOverrides("claude", "sonnet", "default", "go", "proj", nil)
 	m.width, m.height = 140, 40
 	m.claudeModelsLoading = false
-	m.claudeDefault = "opus"
 	m.agentRoles = []string{"coder"}
 	m.section = sectionAgentSetup
 	m.agentEditing, m.agentEditStep, m.agentEditProv = true, 1, providerClaude
-	if !strings.Contains(ansi.Strip(m.renderContent()), "default → opus (from ~/.claude/settings.json)") {
+	if !strings.Contains(ansi.Strip(m.renderContent()), "default → claude-opus-5-5 · high effort") {
 		t.Error("agent step lacks the default line")
 	}
 	m.agentEditing = false
 	m.agentOverrides["coder"] = agentSetupOverride{runner: "claude"}
-	if !strings.Contains(ansi.Strip(m.renderContent()), "claude / default → opus (from ~/.claude/settings.json)") {
+	if !strings.Contains(ansi.Strip(m.renderContent()), "claude / default → claude-opus-5-5 · high") {
 		t.Error("agent list lacks the default text for a claude role without a model")
 	}
 	m.agentEditing = true
@@ -221,6 +212,22 @@ func TestClaudeSetupViewWidths(t *testing.T) {
 	for _, w := range []int{100, 140} {
 		for _, typing := range []bool{false, true} {
 			m := claudeSetup(t, "claude-opus-4-8")
+			m.width, m.height = w, 40
+			m.syncViewport()
+			m.claudeTyping = typing
+			for i, line := range strings.Split(m.View(), "\n") {
+				if lw := ansi.StringWidth(line); lw > w {
+					t.Fatalf("width %d typing %v: line %d is %d wide: %q", w, typing, i, lw, ansi.Strip(line))
+				}
+			}
+		}
+	}
+}
+
+func TestClaudeSetupViewWidthsUnsetModel(t *testing.T) {
+	for _, w := range []int{100, 140} {
+		for _, typing := range []bool{false, true} {
+			m := claudeSetup(t, "")
 			m.width, m.height = w, 40
 			m.syncViewport()
 			m.claudeTyping = typing

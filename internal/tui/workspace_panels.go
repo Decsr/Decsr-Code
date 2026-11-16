@@ -16,10 +16,11 @@ import (
 // ── Inspector ────────────────────────────────────────────────────────────────
 
 const (
-	inspFilesLines = 5  // Files rows, the last one "+N more" when there are more
-	inspTextLines  = 6  // rows of Summary, Warnings, Error and the Output maximum
-	inspOutputMin  = 4  // Output rows kept under height pressure
-	inspCompactH   = 12 // below this height the inspector drops blank lines and hints
+	inspFilesLines  = 5  // Files rows, the last one "+N more" when there are more
+	inspReportLines = 3  // rows of a report question or summary
+	inspTextLines   = 6  // rows of Summary, Warnings, Error and the Output maximum
+	inspOutputMin   = 4  // Output rows kept under height pressure
+	inspCompactH    = 12 // below this height the inspector drops blank lines and hints
 )
 
 // renderInspector draws the detail panel of one node in at most h lines of at
@@ -92,6 +93,35 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 	}
 	if n.PendingReply != "" {
 		add(dim.Render("Queued  " + firstLine(workspace.SanitizeText(n.PendingReply))))
+	}
+	if r := n.Report; r != nil {
+		gold := lipgloss.NewStyle().Foreground(colWarn)
+		switch {
+		case n.Status == workspace.StatusWaiting && r.Status == workspace.ReportQuestion:
+			add(gold.Render("Report  question"))
+			for i, l := range wrapText(workspace.SanitizeText(r.Ask()), w) {
+				if i >= inspReportLines {
+					break
+				}
+				add(gold.Render(l))
+			}
+		case n.Status == workspace.StatusWaiting:
+			add(gold.Render("Report  blocked"))
+			for i, l := range wrapText(workspace.SanitizeText(r.Summary), w) {
+				if i >= inspReportLines {
+					break
+				}
+				add(gold.Render(l))
+			}
+		case n.Status == workspace.StatusDone && strings.TrimSpace(r.Summary) != "" && strings.TrimSpace(r.Summary) != strings.TrimSpace(n.Summary):
+			add(dim.Render("Report  done"))
+			for i, l := range wrapText(workspace.SanitizeText(r.Summary), w) {
+				if i >= inspReportLines {
+					break
+				}
+				add(dim.Render(l))
+			}
+		}
 	}
 	gap()
 
@@ -801,7 +831,8 @@ func workspaceHelp(cmds []wsCommand) []helpSection {
 			{"r / R", "run the node / run every assigned node"},
 			{"s / S", "stop the node / stop all nodes"},
 			{"f", "add a fix node after a failed Build & test"},
-			{"m", "reply to the node (fills the prompt with @T3)"},
+			{"m", "reply to the node (fills the prompt with @T3); a waiting node (◇) needs it"},
+			{"y / n", "apply or reject the lead review that waits (coordinator mode, level 1)"},
 			{"!", "open a shell in the node's worktree (a tmux split under tmux)"},
 			{"q", "quit (asks first while nodes run)"},
 		}},

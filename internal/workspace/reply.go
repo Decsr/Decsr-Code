@@ -40,7 +40,7 @@ func joinReply(prev, msg string) string {
 
 // Reply sends msg to a work or fix node. A node that is running gets the reply
 // queued: it starts the next attempt as soon as the run ends, however it ends
-// (a stop keeps the reply). A node that is done or failed keeps its history as
+// (a stop keeps the reply). A node that is done, failed or waiting keeps its history as
 // an earlier attempt and starts attempt N+1 now, or waits when its
 // dependencies, role, the parallel limit or the budget do not allow it yet. A
 // node that never ran keeps msg as the user's message for its first run. A
@@ -115,7 +115,7 @@ func (e *Engine) applyReplyLocked(n *Node, msg string) (ReplyResult, *started, [
 	n.Reply = msg
 	n.Status = StatusTodo
 	n.EndedAt = time.Time{}
-	n.Error, n.Summary = "", ""
+	n.Error, n.Summary, n.Report = "", "", nil
 	n.Files, n.Observed, n.FileStats, n.Commit, n.Warnings = nil, nil, nil, "", nil
 	n.Activity, n.ActivityDropped = nil, 0
 	n.ContextTokens, n.ContextLimit = 0, 0
@@ -138,7 +138,7 @@ func (e *Engine) archiveLocked(n *Node) {
 	cur := n.AttemptNumber()
 	n.Attempts = append(n.Attempts, Attempt{
 		N: cur, Reply: n.Reply, Status: n.Status, StartedAt: n.StartedAt, EndedAt: n.EndedAt,
-		Summary: n.Summary, Error: n.Error,
+		Summary: n.Summary, Report: cloneReport(n.Report), Error: n.Error,
 		FileStats: append([]FileStat(nil), n.FileStats...), Commit: n.Commit,
 		Activity: append(n.Activity[:0:0], n.Activity...), ActivityDropped: n.ActivityDropped,
 	})

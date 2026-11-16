@@ -117,6 +117,8 @@ func nodeStatusGlyph(g *workspace.Graph, n *workspace.Node) (glyph, label string
 		return "✓", "done"
 	case workspace.StatusFailed:
 		return "!", "failed"
+	case workspace.StatusWaiting:
+		return "◇", "waiting"
 	case workspace.StatusRunning:
 		return "▖", "running"
 	}
@@ -281,6 +283,8 @@ func statusLabelColor(g *workspace.Graph, n *workspace.Node) lipgloss.Color {
 		return colOK
 	case workspace.StatusFailed:
 		return colFail
+	case workspace.StatusWaiting:
+		return colWarn
 	case workspace.StatusRunning:
 		return colAccent
 	}

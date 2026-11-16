@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Coordinator mode in the Workspace (`workspace.coordinator`, default off;
+  `/coordinator on|off` per session). After a batch of nodes finishes the lead
+  reviews the graph, with the node reports and a budgeted excerpt of the
+  failures, and proposes adding, changing or cancelling nodes. At autonomy
+  level 1 a Lead review card waits for `y` or `n`; at level 2 and 3 the valid
+  proposals apply at once with `auto › lead:` lines and the new nodes run. At
+  most 5 reviews run by themselves per task, then a notification asks you to
+  `/review`, which runs one review on demand. Reviews are kept in the session.
+- Workspace nodes end with a structured `REPORT` (`status: done | blocked |
+  question`, a summary and, for a question, the question). A node that asks a
+  question or is blocked ends in the new `◇ waiting` state: its changes are
+  merged, its dependents stay blocked, you get a notification (`T3 asks: ...`)
+  and a reply (`m`) starts the next attempt with the question in its context. A
+  missing report counts as done.
 - Per-role `mode: text | agent` in the workspace. In agent mode Claude,
   OpenCode and Codex change files in the node's worktree with their own tools
   and DECSR ignores file blocks; Claude only gets `Read`, `Edit`, `Write`,
@@ -144,6 +158,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HOMEBREW_TAP_GITHUB_TOKEN` secret is set (skipped otherwise).
 
 ### Changed
+- Claude roles without a model now use claude-opus-5-5 with high effort.
 - Codex runs with `--sandbox read-only` (text) or `--sandbox workspace-write`
   (agent) instead of `--full-auto`, which current Codex versions reject.
 - The `/compact` suggestion at level 1 now appears from 10 done nodes (was 6).

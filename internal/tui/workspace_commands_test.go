@@ -563,7 +563,7 @@ func TestWorkspaceProjectCurrentRowDoesNotSwitch(t *testing.T) {
 
 func TestWorkspaceStatusCostExport(t *testing.T) {
 	h := newWSHarness(t)
-	wsWriteCommand(t, h.root, "review", "# Review the change\nReview $ARGUMENTS")
+	wsWriteCommand(t, h.root, "audit", "# Review the change\nReview $ARGUMENTS")
 	if err := os.MkdirAll(filepath.Join(h.root, ".decsr", "skills"), 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -586,7 +586,7 @@ func TestWorkspaceStatusCostExport(t *testing.T) {
 	h.want(h.root)
 	h.want("5 todo")
 	h.want("Parallel")
-	h.want("/review (project)")
+	h.want("/audit (project)")
 	h.want("style")
 	h.want("coder")
 	h.key("esc")
@@ -619,13 +619,13 @@ func TestWorkspaceStatusCostExport(t *testing.T) {
 
 func TestWorkspaceCustomCommands(t *testing.T) {
 	h := newWSHarness(t)
-	wsWriteCommand(t, h.root, "review", "# Review the change\nPlease review $ARGUMENTS carefully.")
+	wsWriteCommand(t, h.root, "audit", "# Review the change\nPlease review $ARGUMENTS carefully.")
 	wsWriteCommand(t, h.root, "help", "# Fake help\nshadow")
 	h.key("/")
 	for range 40 { // custom commands come last: scroll down to them
 		h.key("down")
 	}
-	h.want("/review")
+	h.want("/audit")
 	h.want("Review the change (project)")
 	h.key("esc")
 	h.key("/", "h", "e")
@@ -633,11 +633,11 @@ func TestWorkspaceCustomCommands(t *testing.T) {
 	h.wantNot("Fake help")
 	h.key("esc")
 
-	h.typeCmd("/review the login flow")
+	h.typeCmd("/audit the login flow")
 	if !h.m.splitting {
 		t.Fatalf("the custom command did not start a split:\n%s", h.view())
 	}
-	h.want("you › /review the login flow")
+	h.want("you › /audit the login flow")
 	h.finishSplit()
 	if h.m.focus != wsFocusGraph || len(h.tasks) != 1 || !strings.Contains(h.tasks[0], "Please review the login flow carefully.") {
 		t.Fatalf("tasks = %q", h.tasks)

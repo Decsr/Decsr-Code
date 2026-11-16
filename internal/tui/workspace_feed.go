@@ -17,8 +17,9 @@ import (
 type feedKind int
 
 const (
-	feedMsg  feedKind = iota // a transcript line
-	feedNode                 // the card of a node that has started
+	feedMsg    feedKind = iota // a transcript line
+	feedNode                   // the card of a node that has started
+	feedReview                 // the card of a lead review
 )
 
 // feedItem is one entry of the activity feed.
@@ -28,12 +29,19 @@ type feedItem struct {
 	Who  string // feedMsg: you | lead | system | error
 	Text string // feedMsg
 	Node string // feedNode: the node ID
+	Rev  int    // feedReview: index into the session's reviews
 }
 
 // buildFeed merges the transcript and the nodes that have started into one
 // list ordered by time. A node is listed once, at its start; nodes that never
 // started are left out. Items with the same time keep the transcript first.
 func buildFeed(lines []workspace.Line, g *workspace.Graph) []feedItem {
+	return buildFeedWith(lines, g, nil)
+}
+
+// buildFeedWith is buildFeed with the lead reviews of the session, each at its
+// own time.
+func buildFeedWith(lines []workspace.Line, g *workspace.Graph, reviews []workspace.Review) []feedItem {
 	items := make([]feedItem, 0, len(lines)+8)
 	for _, l := range lines {
 		items = append(items, feedItem{Kind: feedMsg, At: l.At, Who: l.Who, Text: l.Text})
@@ -45,8 +53,28 @@ func buildFeed(lines []workspace.Line, g *workspace.Graph) []feedItem {
 			}
 		}
 	}
+	for i, r := range reviews {
+		items = append(items, feedItem{Kind: feedReview, At: r.At, Rev: i})
+	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].At.Before(items[j].At) })
 	return items
+}
+
+// feedSelectable is the IDs the arrow keys visit in the feed: nodes and review
+// cards, in feed order.
+func feedSelectable(items []feedItem, reviews []workspace.Review) []string {
+	var ids []string
+	for _, it := range items {
+		switch it.Kind {
+		case feedNode:
+			ids = append(ids, it.Node)
+		case feedReview:
+			if it.Rev < len(reviews) {
+				ids = append(ids, reviewKey(reviews[it.Rev]))
+			}
+		}
+	}
+	return ids
 }
 
 // feedNodeOrder is the IDs of the nodes in the feed, in feed order.
@@ -177,6 +205,7 @@ func renderFeedMsg(who, text string, at time.Time, w int) []string {
 
 const (
 	cardSummaryLines = 3
+	cardWaitingLines = 4
 	cardFileRows     = 5
 	cardErrorLines   = 3
 	cardOutputLines  = 15
@@ -397,6 +426,19 @@ func cardBody(o cardOpts, iw int) []string {
 		if check && o.iso {
 			rows = append(rows, dim.Render("/merge to apply"))
 		}
+	case workspace.StatusWaiting:
+		line := ""
+		if d := took(); d >= 0 {
+			line = " · Worked for " + feedDuration(d)
+		}
+		rows = append(rows, lipgloss.NewStyle().Foreground(colWarn).Render("◇ waiting")+dim.Render(line+cardMeta(n)+arrow))
+		rows = append(rows, waitingRows(n, iw)...)
+		rows = append(rows, cardFiles(n, iw)...)
+		hint := "m reply"
+		if hasDiff(n) {
+			hint += " · d diff"
+		}
+		rows = append(rows, dim.Render(hint))
 	case workspace.StatusFailed:
 		word := "Failed after "
 		if n.Error == "stopped" {
@@ -453,6 +495,35 @@ func cardBody(o cardOpts, iw int) []string {
 		rows = append(rows, attemptRows(n, o.now, iw)...)
 	}
 	return rows
+}
+
+// waitingRows is what a waiting node needs from the user, in the warning
+// colour: "? question" or "blocked: summary", wrapped to at most
+// cardWaitingLines rows.
+func waitingRows(n *workspace.Node, iw int) []string {
+	text := workspace.SanitizeText(n.Summary)
+	prefix := "blocked: "
+	if r := n.Report; r != nil {
+		if r.Status == workspace.ReportQuestion {
+			prefix = "? "
+			text = r.Ask()
+		} else if s := strings.TrimSpace(r.Summary); s != "" {
+			text = s
+		}
+		text = workspace.SanitizeText(text)
+	}
+	text = strings.TrimSpace(text)
+	lines := hardWrap(oneLine(prefix+text), iw)
+	if len(lines) > cardWaitingLines {
+		lines = lines[:cardWaitingLines]
+		lines[cardWaitingLines-1] = truncateOneLine(lines[cardWaitingLines-1]+" …", iw)
+	}
+	st := lipgloss.NewStyle().Foreground(colWarn)
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = st.Render(l)
+	}
+	return out
 }
 
 // summaryRows is the node summary in the text colour, wrapped to at most
@@ -524,13 +595,15 @@ func (m workspaceModel) roleLooks() (models, runners map[string]string) {
 func (m workspaceModel) feedLayout(pw int) (lines []string, spans map[string][2]int) {
 	cw := feedWidth(pw)
 	spans = map[string][2]int{}
-	items := buildFeed(m.sess.snapshot().Transcript, m.g)
+	snap := m.sess.snapshot()
+	items := buildFeedWith(snap.Transcript, m.g, snap.Reviews)
 	models, runners := m.roleLooks()
 	spin := pixelSpinner.Frames[m.spin%len(pixelSpinner.Frames)]
 	pad := strings.Repeat(" ", feedIndent)
 	prevSystem := false
 	for i, it := range items {
 		var body []string
+		revKey := ""
 		isSystem := false
 		switch it.Kind {
 		case feedMsg:
@@ -549,13 +622,20 @@ func (m workspaceModel) feedLayout(pw int) (lines []string, spans map[string][2]
 			o := cardOpts{g: m.g, n: n, width: cw, selected: n.ID == m.sel, expanded: m.feedExpanded[n.ID],
 				now: m.now(), spin: spin, icons: m.cfg.UI.Icons, iso: m.iso != nil,
 				runner: runners[n.Role], model: models[n.Role]}
-			if n.Status == workspace.StatusRunning || o.expanded || n.Status == workspace.StatusDone || n.Status == workspace.StatusFailed {
+			if n.Status == workspace.StatusRunning || o.expanded || n.Status == workspace.StatusDone || n.Status == workspace.StatusFailed || n.Status == workspace.StatusWaiting {
 				o.out = m.outputs[n.ID]
 				if p := cleanOutputLine(m.partial[n.ID]); p != "" && n.Status == workspace.StatusRunning {
 					o.out = append(append([]string(nil), o.out...), p)
 				}
 			}
 			body = renderNodeCard(o)
+		case feedReview:
+			if it.Rev >= len(snap.Reviews) {
+				continue
+			}
+			rv := snap.Reviews[it.Rev]
+			revKey = reviewKey(rv)
+			body = renderReviewCard(rv, cw, revKey == m.sel, m.feedExpanded[revKey])
 		}
 		if i > 0 && (!prevSystem || !isSystem) && len(lines) > 0 {
 			lines = append(lines, "")
@@ -566,6 +646,9 @@ func (m workspaceModel) feedLayout(pw int) (lines []string, spans map[string][2]
 		}
 		if it.Kind == feedNode {
 			spans[it.Node] = [2]int{start, len(lines)}
+		}
+		if revKey != "" {
+			spans[revKey] = [2]int{start, len(lines)}
 		}
 		prevSystem = isSystem
 	}
@@ -581,6 +664,14 @@ func (m workspaceModel) feedLayout(pw int) (lines []string, spans map[string][2]
 				lines = append(lines, pad+"  "+lipgloss.NewStyle().Foreground(colMuted).Render(truncateOneLine(last, cw-2)))
 			}
 		}
+	}
+	if m.reviewing {
+		spin := pixelSpinner.Frames[m.spin%len(pixelSpinner.Frames)]
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, pad+lipgloss.NewStyle().Foreground(colAccent).Bold(true).Render("Lead")+"  "+
+			lipgloss.NewStyle().Foreground(colText).Render(spin+" reviewing the batch…  (Esc cancels)"))
 	}
 	return lines, spans
 }
@@ -653,7 +744,8 @@ func (m workspaceModel) feedReveal(id string) workspaceModel {
 // feedSelect moves the selection to the previous (dir < 0) or next card of the
 // feed and scrolls it into view.
 func (m workspaceModel) feedSelect(dir int) workspaceModel {
-	ids := feedNodeOrder(buildFeed(m.sess.snapshot().Transcript, m.g))
+	snap := m.sess.snapshot()
+	ids := feedSelectable(buildFeedWith(snap.Transcript, m.g, snap.Reviews), snap.Reviews)
 	if len(ids) == 0 {
 		return m
 	}

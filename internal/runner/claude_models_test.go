@@ -26,34 +26,7 @@ func TestClaudeModelHint(t *testing.T) {
 	}
 }
 
-func writeClaudeSettings(t *testing.T, content string) string {
-	t.Helper()
-	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return home
-}
-
-func TestClaudeSettingsModelIn(t *testing.T) {
-	if m, ok := ClaudeSettingsModelIn(writeClaudeSettings(t, `{"model":"opus","x":1}`)); !ok || m != "opus" {
-		t.Errorf("present: %q %v", m, ok)
-	}
-	if m, ok := ClaudeSettingsModelIn(t.TempDir()); ok || m != "" {
-		t.Errorf("missing: %q %v", m, ok)
-	}
-	if m, ok := ClaudeSettingsModelIn(writeClaudeSettings(t, `{not json`)); ok || m != "" {
-		t.Errorf("malformed: %q %v", m, ok)
-	}
-	if _, ok := ClaudeSettingsModelIn(writeClaudeSettings(t, `{"theme":"dark"}`)); ok {
-		t.Error("no model key reported as set")
-	}
-}
-
-func TestClaudeRunnerModelArgv(t *testing.T) {
+func TestClaudeRunnerDefaultsArgv(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "args.txt")
 	bin := filepath.Join(dir, "fakeclaude")
@@ -61,10 +34,11 @@ func TestClaudeRunnerModelArgv(t *testing.T) {
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	run := func(model string) []string {
+	flag := func(model, effort, name string) string {
 		ch, err := ClaudeRunner{Binary: bin, Model: model}.Complete(context.Background(), CompletionRequest{
 			Messages: []ConvMessage{{Role: "user", Content: "hi"}},
 			Dir:      dir,
+			Effort:   effort,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -75,24 +49,36 @@ func TestClaudeRunnerModelArgv(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return strings.Split(strings.TrimSpace(string(data)), "\n")
-	}
-	has := func(args []string, model string) bool {
+		args := strings.Split(strings.TrimSpace(string(data)), "\n")
 		for i, a := range args {
-			if a == "--model" && i+1 < len(args) && args[i+1] == model {
-				return true
+			if a == name && i+1 < len(args) {
+				return args[i+1]
 			}
 		}
-		return false
+		return ""
 	}
-	for _, model := range []string{"fable", "claude-opus-5-5"} {
-		if args := run(model); !has(args, model) {
-			t.Errorf("model %q not passed unchanged: %v", model, args)
+	cases := []struct{ model, effort, wantModel, wantEffort string }{
+		{"", "", "claude-opus-5-5", "high"},
+		{"", "default", "claude-opus-5-5", "high"},
+		{"fable", "low", "fable", "low"},
+		{"claude-sonnet-5-5", "max", "claude-sonnet-5-5", "max"},
+		{"", "xhigh", "claude-opus-5-5", "xhigh"},
+	}
+	for _, c := range cases {
+		if got := flag(c.model, c.effort, "--model"); got != c.wantModel {
+			t.Errorf("model %q effort %q: --model = %q, want %q", c.model, c.effort, got, c.wantModel)
+		}
+		if got := flag(c.model, c.effort, "--effort"); got != c.wantEffort {
+			t.Errorf("model %q effort %q: --effort = %q, want %q", c.model, c.effort, got, c.wantEffort)
 		}
 	}
-	for _, a := range run("") {
-		if a == "--model" {
-			t.Error("--model passed for an empty model")
-		}
+}
+
+func TestEffectiveModelAndEffort(t *testing.T) {
+	if EffectiveModel("claude", "") != ClaudeDefaultModel || EffectiveModel("claude", "haiku") != "haiku" || EffectiveModel("codex", "") != "" {
+		t.Error("EffectiveModel")
+	}
+	if EffectiveEffort("claude", "default") != "high" || EffectiveEffort("claude", "") != "high" || EffectiveEffort("claude", "low") != "low" || EffectiveEffort("codex", "") != "" {
+		t.Error("EffectiveEffort")
 	}
 }

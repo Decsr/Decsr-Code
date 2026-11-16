@@ -353,6 +353,20 @@ func PRBody(s Session) string {
 	if len(sum) > 0 {
 		b.WriteString("\n## Changes\n\n" + strings.Join(sum, "\n") + "\n")
 	}
+	var open []string
+	for _, n := range s.Graph.Nodes {
+		if n.Status != StatusWaiting {
+			continue
+		}
+		what := n.Summary
+		if n.Report != nil && n.Report.Ask() != "" {
+			what = n.Report.Ask()
+		}
+		open = append(open, fmt.Sprintf("- %s: %s", n.ID, cell(truncRunes(what, 300))))
+	}
+	if len(open) > 0 {
+		b.WriteString("\n## Waiting for an answer\n\n" + strings.Join(open, "\n") + "\n")
+	}
 	b.WriteString("\n## Build & test\n\n")
 	switch {
 	case check == nil:

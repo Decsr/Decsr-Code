@@ -132,7 +132,7 @@ func TestWorkspacePaletteEnterRule(t *testing.T) {
 	h := newWSHarness(t)
 	typeOnly(h, "/co")
 	h.key("enter")
-	h.want("! /co matches several commands: /compact, /config, /connect, /cost — keep typing or press Tab")
+	h.want("! /co matches several commands: /compact, /config, /connect, /coordinator, /cost — keep typing or press Tab")
 
 	// Exact name runs.
 	h = newWSHarness(t)

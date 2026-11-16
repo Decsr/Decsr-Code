@@ -15,21 +15,23 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/notify"
 	"github.com/Decsr/Decsr-Code/internal/pricing"
+	"github.com/Decsr/Decsr-Code/internal/runner"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
 // ── Cost and budget ──────────────────────────────────────────────────────────
 
 // effectiveModel is the model an agent runs: its own, else the lead's when it
-// uses the same runner. "" when it is the runner's own default.
+// uses the same runner. For claude an unset model is the runner's default
+// (runner.EffectiveModel); "" for other runners' own default.
 func effectiveModel(c config.Config, ac config.AgentConfig) string {
-	if ac.Model != "" {
-		return ac.Model
+	model := ac.Model
+	if model == "" {
+		if pm := c.Agents["pm"]; pm.Model != "" && pm.Runner == ac.Runner {
+			model = pm.Model
+		}
 	}
-	if pm := c.Agents["pm"]; pm.Model != "" && pm.Runner == ac.Runner {
-		return pm.Model
-	}
-	return ""
+	return runner.EffectiveModel(ac.Runner, model)
 }
 
 // liveCfg is the current config for pricing: the dependency's, else the model's.
@@ -146,6 +148,12 @@ func (m workspaceModel) use() sessionUse {
 	usd, known := leadCost(c, s)
 	u.add(pm.Runner, effectiveModel(c, pm), s.In+s.Out, usd, known)
 	if m.g != nil {
+		// Folded and cancelled nodes keep counting in the total; they have no
+		// runner row of their own.
+		if m.g.RemovedCostUSD > 0 {
+			u.spent += m.g.RemovedCostUSD
+			u.priced = true
+		}
 		for _, n := range m.g.Nodes {
 			role, ok := workspace.FindRole(c, n.Role)
 			if !ok {
@@ -396,6 +404,9 @@ func (m workspaceModel) promptChips() string {
 	}
 	if chip := m.autoChip(); chip != "" {
 		chips = append(chips, chip)
+	}
+	if m.coordinatorOn() {
+		chips = append(chips, "coord")
 	}
 	pm := c.Agents["pm"]
 	model := shortModel(pm.Runner, effectiveModel(c, pm))

@@ -82,6 +82,10 @@ activity feed with one card per node (`g` switches to the graph); see
 
 **Reply to a node:** `@T3 <message>` in the prompt (`@` completes node IDs) or `m` on a node starts a new attempt of that node with your message, keeps the earlier attempts, and queues the reply while the node runs (see [`doc/workspace.md`](doc/workspace.md#reply-to-a-node)).
 
+**Node reports:** every workspace node ends with a `REPORT` (`status: done | blocked | question`); a node that asks a question or is blocked ends `◇ waiting` until you reply to it (see [`doc/workspace.md`](doc/workspace.md#node-reports-and-waiting-nodes)).
+
+**Coordinator mode:** `workspace.coordinator: true` or `/coordinator on` makes the lead review each finished batch and propose adding, changing or cancelling nodes: a card with `y`/`n` at level 1, applied with `auto ›` lines at level 2 and 3, at most 5 reviews per task (see [`doc/workspace.md`](doc/workspace.md#coordinator-mode)).
+
 **Cost and budget:** add `pricing:` to the config and set `workspace.budget_usd`; the Workspace shows cost in a bottom bar, warns at 80% and stops starting nodes at the budget; `/budget` shows the spending (see [`doc/workspace.md`](doc/workspace.md#cost-and-budget)).
 
 **Autonomy levels:** `workspace.autonomy` or `/autonomy 1|2|3` lets the Workspace accept roles, run, add fix nodes after a failed Build & test (level 2) and open and watch the pull request (level 3, needs a budget); it never merges (see [`doc/workspace.md`](doc/workspace.md#autonomy-levels)).
@@ -124,7 +128,7 @@ Supports multiple runners out of the box:
 **CLI runners** (drive an external coding-agent CLI):
 
 - **OpenCode** (default)
-- **Claude CLI** (pick an alias such as `fable` or `opus`, a full model name, or type a model id; with no model set, Claude uses the `model` of your `~/.claude/settings.json`)
+- **Claude CLI** (pick an alias such as `fable` or `opus`, a full model name, or type a model id; with no model set, `claude-opus-5-5` with high effort is used)
 - **Codex CLI**
 - **GitHub Copilot CLI**
 

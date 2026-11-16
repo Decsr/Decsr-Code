@@ -47,9 +47,10 @@ type costBase struct {
 	unpriced bool // an earlier attempt used tokens without a known price
 }
 
-// SpentUSD is the priced cost of the nodes of g, all attempts added up.
+// SpentUSD is the priced cost of the nodes of g, all attempts added up, plus
+// the cost of the nodes that were removed (RemovedCostUSD).
 func (g *Graph) SpentUSD() float64 {
-	var sum float64
+	sum := g.RemovedCostUSD
 	for _, n := range g.Nodes {
 		sum += n.CostUSD
 	}

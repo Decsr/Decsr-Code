@@ -112,6 +112,30 @@ func (e *Engine) Snapshot() *Graph {
 	return e.g.Clone()
 }
 
+// Waiting returns a snapshot of the nodes that wait for a reply, in Nodes
+// order. Each node's Report holds the question or the blocked summary.
+func (e *Engine) Waiting() []*Node {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var out []*Node
+	for _, n := range e.g.Clone().Nodes {
+		if n.Status == StatusWaiting {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// waitingText is what a waiting node asks: its question, else its summary.
+func waitingText(n *Node) string {
+	if n.Report != nil {
+		if s := n.Report.Ask(); s != "" {
+			return s
+		}
+	}
+	return n.Summary
+}
+
 // Auto reports whether auto mode is on.
 func (e *Engine) Auto() bool {
 	e.mu.Lock()
@@ -348,6 +372,9 @@ func (e *Engine) Run(ctx context.Context, id string) error {
 	case n.Status == StatusDone:
 		e.mu.Unlock()
 		return fmt.Errorf("node %s is already done", id)
+	case n.Status == StatusWaiting:
+		e.mu.Unlock()
+		return fmt.Errorf("node %s is waiting for your reply: answer it with m", id)
 	case !e.g.Assigned(n):
 		e.mu.Unlock()
 		return fmt.Errorf("node %s has no role assigned", id)
@@ -440,6 +467,7 @@ func (e *Engine) startLocked(parent context.Context, n *Node) started {
 	n.EndedAt = time.Time{}
 	n.Error = ""
 	n.Summary = ""
+	n.Report = nil
 	n.Files = nil
 	n.Observed = nil
 	n.FileStats = nil
@@ -565,12 +593,22 @@ func (e *Engine) runNode(s started) {
 	} else {
 		n.Status = StatusDone
 		n.Summary = res.Summary
+		if res.Report.Status != "" {
+			rep := res.Report
+			n.Report = &rep
+			if n.Kind == KindWork && rep.Waits() {
+				n.Status = StatusWaiting
+			}
+		}
 		n.Files = append([]string(nil), res.Files...)
 		n.Observed = append([]string(nil), res.Observed...)
 		n.FileStats = append([]FileStat(nil), res.FileStats...)
 		n.Commit = res.Commit
 		n.Warnings = append([]string(nil), res.Warnings...)
 		fin = Event{NodeID: id, Type: EventDone, Text: n.Summary}
+		if n.Status == StatusWaiting {
+			fin = Event{NodeID: id, Type: EventWaiting, Text: waitingText(n)}
+		}
 		overlaps = e.markOverlapsLocked(n)
 	}
 	e.checkBudgetLocked()

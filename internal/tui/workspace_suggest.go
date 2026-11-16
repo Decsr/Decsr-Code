@@ -74,7 +74,7 @@ func hasOpenFixNode(g *workspace.Graph, check *workspace.Node) bool {
 // or accepted one stays hidden until the state changes.
 func (m workspaceModel) suggestionKey(text string) string {
 	todo, running, done, failed := m.g.Counts()
-	return fmt.Sprintf("%s|%d|%d,%d,%d,%d|%d", text, len(m.g.Nodes), todo, running, done, failed, m.nSaved)
+	return fmt.Sprintf("%s|%d|%d,%d,%d,%d,%d|%d", text, len(m.g.Nodes), todo, running, done, failed, m.g.CountWaiting(), m.nSaved)
 }
 
 // dismissSuggestion hides the current suggestion until the state changes.
