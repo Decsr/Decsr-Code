@@ -28,6 +28,10 @@ const (
 	EventUsage   EventType = "usage"
 	EventDone    EventType = "done"
 	EventFailed  EventType = "failed"
+	// EventBudgetWarn and EventBudgetReached are engine-level (NodeID "");
+	// Text is the message to show.
+	EventBudgetWarn    EventType = "budget_warn"
+	EventBudgetReached EventType = "budget_reached"
 )
 
 // Event is a progress notification for one node. NodeID "" is used for
@@ -39,6 +43,9 @@ type Event struct {
 	// EventUsage: cumulative for the node.
 	In, Out   int
 	Estimated bool
+	// Runner and Model of the agent that used the tokens (EventUsage), to
+	// price them.
+	Runner, Model string
 }
 
 // Result is the outcome of a successful node run.
@@ -179,7 +186,8 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 		ReadOnly:    role.ReadOnly,
 	}, func(s string) { emit(Event{NodeID: n.ID, Type: EventOutput, Text: s}) })
 	if res.Usage.InputTokens > 0 || res.Usage.OutputTokens > 0 {
-		emit(Event{NodeID: n.ID, Type: EventUsage, In: res.Usage.InputTokens, Out: res.Usage.OutputTokens, Estimated: res.Usage.Estimated})
+		emit(Event{NodeID: n.ID, Type: EventUsage, In: res.Usage.InputTokens, Out: res.Usage.OutputTokens, Estimated: res.Usage.Estimated,
+			Runner: role.Agent.Runner, Model: role.Agent.Model})
 	}
 	if err != nil {
 		return Result{}, err

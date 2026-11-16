@@ -88,7 +88,7 @@ func TestWorkspaceHeaderAndPromptLook(t *testing.T) {
 	h.toGraph()
 	v := ansi.Strip(h.view())
 	lines := strings.Split(v, "\n")
-	if !strings.Contains(lines[0], "◆ decsr") || !strings.Contains(lines[0], "done") || !strings.Contains(lines[0], "tok") {
+	if !strings.Contains(lines[0], "◆ decsr") || !strings.Contains(lines[0], "done") || strings.Contains(lines[0], "tok") {
 		t.Fatalf("header line: %q", lines[0])
 	}
 	for _, label := range []string{"ROLE", "DESCRIPTION", "FILES", "SUMMARY", "TOKENS", "GRAPH"} {

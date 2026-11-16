@@ -33,6 +33,10 @@ type Config struct {
 	Workspace      WorkspaceConfig        `yaml:"workspace,omitempty"`
 	UI             UIConfig               `yaml:"ui,omitempty"`
 
+	// Pricing is the USD price per million tokens, keyed by a model id or a
+	// glob (path.Match) such as "deepseek-*". There are no built-in prices.
+	Pricing map[string]ModelPrice `yaml:"pricing,omitempty"`
+
 	// PluginAgents are the roles loaded from plugins, keyed "<plugin>:<agent>".
 	// They are filled in at run time and never written to a config file.
 	PluginAgents map[string]PluginAgent `yaml:"-"`
@@ -43,6 +47,12 @@ type PluginAgent struct {
 	Description string // one line
 	Prompt      string // the role prompt (the agent file body)
 	ReadOnly    bool
+}
+
+// ModelPrice is the price of one model in USD per million tokens.
+type ModelPrice struct {
+	InputPerMTok  float64 `yaml:"input_per_mtok"`
+	OutputPerMTok float64 `yaml:"output_per_mtok"`
 }
 
 // WorkspaceConfig controls the node workspace.
@@ -59,6 +69,12 @@ type WorkspaceConfig struct {
 	PRPollSeconds int    `yaml:"pr_poll_seconds,omitempty"` // 0 = 60; at least 15
 	MaxCIFixes    int    `yaml:"max_ci_fixes,omitempty"`    // 0 = 3
 	PRAutoFix     bool   `yaml:"pr_auto_fix,omitempty"`     // run the fix nodes of /pr watch without asking
+
+	// BudgetUSD stops new nodes from starting once the known cost of a
+	// session reaches it; 0 = no budget. BudgetWarnPct is the share of the
+	// budget that raises a warning; 0 = 80.
+	BudgetUSD     float64 `yaml:"budget_usd,omitempty"`
+	BudgetWarnPct int     `yaml:"budget_warn_pct,omitempty"`
 }
 
 // UIConfig holds presentation settings.
@@ -528,6 +544,20 @@ func merge(dst *Config, src Config) {
 	}
 	if src.Workspace.PRAutoFix {
 		dst.Workspace.PRAutoFix = true
+	}
+	if src.Workspace.BudgetUSD > 0 {
+		dst.Workspace.BudgetUSD = src.Workspace.BudgetUSD
+	}
+	if src.Workspace.BudgetWarnPct > 0 {
+		dst.Workspace.BudgetWarnPct = src.Workspace.BudgetWarnPct
+	}
+	if len(src.Pricing) > 0 {
+		if dst.Pricing == nil {
+			dst.Pricing = make(map[string]ModelPrice, len(src.Pricing))
+		}
+		for k, v := range src.Pricing {
+			dst.Pricing[k] = v
+		}
 	}
 
 	if src.Agents != nil {

@@ -52,6 +52,8 @@ type Node struct {
 	InputTokens   int        `json:"input_tokens,omitempty"`
 	OutputTokens  int        `json:"output_tokens,omitempty"`
 	Estimated     bool       `json:"estimated,omitempty"`
+	CostUSD       float64    `json:"cost_usd,omitempty"`   // priced from the configured prices, added up over every attempt; 0 when unknown
+	CostKnown     bool       `json:"cost_known,omitempty"` // a price was found for the node's model
 	StartedAt     time.Time  `json:"started_at,omitempty"`
 	EndedAt       time.Time  `json:"ended_at,omitempty"`
 }

@@ -90,6 +90,25 @@ shows the other one (`Activity · g graph`, `Graph · g activity`).
 - **Graph** is the node graph below, with the conversation under it and the
   inspector beside it when there is room (the main pane is at least 100 columns).
 
+
+A card and a sidebar row always show the runner glyph and the model the node
+runs. A role without a model of its own uses the lead's model when both use the
+same runner; if none is known, the runner name is shown instead (`⬡ opencode`).
+The card header ends with `⬡ model · 17:01 ↗`.
+
+**Bottom bar.** One dim line under the key hints: the tokens used per runner
+(`⬡ opencode 44.4k  ◆ deepseek 12.1k`), then the cost (`$0.38 / $5.00`, or
+`$0.38` without a budget, or `tokens only` when no price is configured), and on
+the right the session branch and pull request (`⎇ decsr/… · PR #12 ● checks
+passing`). On a narrow terminal the runners, then the branch, drop out first.
+The cost turns yellow at the warn share of the budget and red at 100%.
+
+**Prompt chips.** The last row inside the prompt box shows dim chips:
+`⚠ worktree` or `shared` (the isolation of the session), the lead's runner and
+model (`◆ deepseek-v4-flash`) and, when a budget is set, `$0.38/$5`. The chips
+are display only; change the lead's model in `/config`. They are hidden when
+the terminal is too short for a two-line prompt (under 24 rows).
+
 In Activity mode there is no inspector pane; `i` opens it as a box for the
 selected node. One node is selected at a time, shared by the sidebar, the feed
 and the graph.
@@ -267,6 +286,7 @@ prompt and lands there.
 | `/compact` | Fold finished nodes into the session summary (see [Compact](#compact)) |
 | `/merge` | Merge the session's branch into your current branch (see [Isolation](#isolation)) |
 | `/pr` | Push the session branch and open (or update) a pull request; `/pr watch` also turns failing CI and review comments into fix nodes, `/pr stop` ends it (see [Pull requests](#pull-requests)) |
+| `/issue <N\|URL\|bead-id> [--force]` | Fetch a GitHub issue or a bead and send it to the lead as the task (see [Start from an issue](#start-from-an-issue)) |
 | `/resume` | Pick a saved session of this project |
 | `/project` | Switch to another project (see [Switching project](#switching-project)) |
 | `/profile` | Save or apply a profile of role settings (see [Profiles](#profiles)) |
@@ -274,6 +294,7 @@ prompt and lands there.
 | `/plugin` (`/plugins`) | List plugins; `/plugin available`, `/plugin install <name>`, `/plugin enable <name>`, `/plugin disable <name>` and `/plugin reload` (see [Plugins](#plugins)) |
 | `/status` | Project path, language, profile, session, node counts, roles with runner/model/effort, parallel limit, custom commands and skills found |
 | `/cost` | Tokens in and out per node and per role, the lead's usage, and the total |
+| `/budget [amount\|off]` | Spending per runner and the models without a price; `/budget 10` sets this session's budget, `/budget off` removes that override (see [Cost and budget](#cost-and-budget)) |
 | `/export` | Write the session to `.decsr/exports/<session id>.md` (title, transcript, summary, each node with role, status, files and summary) |
 | `/config` (`/menu`) | Leave for the classic menu: settings, project setup, classic pipeline |
 | `/quit` (`/exit`) | Leave the Workspace (asks first while nodes run) |
@@ -599,6 +620,49 @@ written from file blocks as "by the agent's own tools" in the inspector. They
 also count as the node's files for the context of later nodes. Because nodes can
 run in parallel, a file changed by another running node may be listed too.
 
+## Cost and budget
+
+DECSR knows tokens, not prices. To see money, give it prices in
+`.decsr/project.yaml` or `~/.decsr/config.yaml`. There are no built-in prices,
+because they go stale. The key is a model id or a glob (`path.Match` syntax);
+the value is USD per million tokens. Later layers override per key.
+
+```yaml
+pricing:
+  "deepseek-*":     {input_per_mtok: 0.27, output_per_mtok: 1.10}
+  "*/gpt-5*":       {input_per_mtok: 1.25, output_per_mtok: 10.00}
+  "claude-sonnet-*": {input_per_mtok: 3.00, output_per_mtok: 15.00}
+workspace:
+  budget_usd: 5        # 0 = no budget
+  budget_warn_pct: 80  # default 80
+```
+
+An exact key beats a glob; among globs the longest matching pattern wins. Local
+runners (`ollama`, `lmstudio`, `mlx`) always cost $0. Runners that bill through
+a subscription CLI (`claude`, `codex`, `copilot`, `opencode`) are priced only
+when you configured a price for their model. A node's cost is stored in the
+session (`cost_usd`, `cost_known`); the session total is the nodes plus the
+lead's tokens, priced with the `pm` model.
+
+**Unknown prices.** A model without a price has an unknown cost. The status bar
+then shows `≥ $1.23` (at least), and `/budget` lists the runners and models that
+have no price. The budget counts only the known cost.
+
+**Budget.** Before it starts any node (`r`, auto mode, a fix or a follow-up)
+the engine compares the known cost of the session with the budget. At the warn
+share (`budget_warn_pct`) it prints a message once and sends a needs-you
+notification. When the cost reaches the budget it prints `Budget reached: $5.02
+of $5.00 — raise workspace.budget_usd or /budget <amount> to continue` and
+sends the notification; no new node starts and ready nodes stay ready. Nodes
+that are already running are not stopped, so the final cost can pass the budget.
+`/budget 10` sets the budget of this session only (saved in the session as
+`budget_usd`); `/budget off` removes that override; `/budget` alone shows the
+spending per runner. The cost of a node adds up over its attempts: a retried node
+keeps the cost of the earlier runs, so they stay in the total and in the budget
+check. The tokens shown for the node are those of its latest run. If any attempt
+had no price, the node's cost is unknown (the status bar shows `≥`) and only
+the priced attempts are counted.
+
 ## Parallel runs
 
 ```yaml
@@ -680,6 +744,32 @@ passes, the Workspace reminds you of `/merge`.
 branches). Quitting leaves them, so `/resume` continues where you stopped.
 Read-only roles run in a worktree too, but whatever they change is dropped.
 The classic pipeline does not use worktrees.
+
+## Start from an issue
+
+`/issue <ref>` turns an issue into the task of the session:
+
+```
+/issue 42                                  # GitHub issue of this repository ("#42" works too)
+/issue https://github.com/o/r/issues/42    # a full URL, also of another repository
+/issue decsr-ab1                           # a bead of this project (bd)
+/issue 42 --force                          # also start a closed issue
+```
+
+The Workspace fetches the issue (`gh issue view`, or `bd show <id> --json`),
+shows `Issue #42: Fix flaky login test` in the conversation and sends the lead
+`Issue #42: <title>`, the body (cut at 8 KB) and `Labels: …`, exactly as if you
+had typed it. The session remembers the issue (`issue` in the session file).
+Digits, `#N` and a GitHub issue URL mean GitHub, anything else is a bead id.
+`/issue` is refused while nodes run, and for a closed issue unless you add
+`--force`. `gh` must be logged in; `bd` must be on PATH for beads.
+
+From the shell, `decsr issue <ref> [--force]` (or `decsr --issue <ref>`) opens
+the Workspace with a fresh session and runs the same steps after it starts.
+
+The pull request of that session links the issue: `Closes #42` on its own line
+(`Closes owner/repo#42` for another repository), or `Refs <bead-id>` for a bead.
+DECSR does not change the bead's status.
 
 ## Pull requests
 

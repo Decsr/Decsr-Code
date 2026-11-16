@@ -16,9 +16,10 @@ import (
 // ── Inspector ────────────────────────────────────────────────────────────────
 
 const (
-	inspFilesLines = 5 // Files rows, the last one "+N more" when there are more
-	inspTextLines  = 6 // rows of Summary, Warnings, Error and the Output maximum
-	inspOutputMin  = 4 // Output rows kept under height pressure
+	inspFilesLines = 5  // Files rows, the last one "+N more" when there are more
+	inspTextLines  = 6  // rows of Summary, Warnings, Error and the Output maximum
+	inspOutputMin  = 4  // Output rows kept under height pressure
+	inspCompactH   = 12 // below this height the inspector drops blank lines and hints
 )
 
 // renderInspector draws the detail panel of one node in at most h lines of at
@@ -37,6 +38,18 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 	var lines []string
 	add := func(s string) { lines = append(lines, ansi.Truncate(s, w, "…")) }
 	section := func(title string) { add(head.Render(title)) }
+	// On a short pane the blank separator lines and the hint lines go, so the
+	// sections that matter (Description first) still fit.
+	compact := h < inspCompactH
+	gap := func() {
+		if !compact {
+			add("")
+		}
+	}
+	gapN := 1
+	if compact {
+		gapN = 0
+	}
 
 	if n == nil {
 		add(dim.Render("No node selected."))
@@ -71,9 +84,10 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 		}
 	}
 	add(statusLine)
-	add("")
+	gap()
 
 	// Role.
+	roleAt := len(lines)
 	section("Role")
 	switch {
 	case n.Kind == workspace.KindCheck:
@@ -81,7 +95,7 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 		for _, c := range n.Commands {
 			add(dim.Render("$ " + c))
 		}
-		if len(n.Commands) == 0 && n.Status == workspace.StatusTodo {
+		if len(n.Commands) == 0 && n.Status == workspace.StatusTodo && !compact {
 			add(dim.Render("commands are resolved when it runs"))
 		}
 	case n.Role != "":
@@ -110,11 +124,17 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 			s += " (not defined yet)"
 		}
 		add(lipgloss.NewStyle().Foreground(colWarn).Render(s))
-		add(dim.Render("press a to assign"))
+		if !compact {
+			add(dim.Render("press a to assign"))
+		}
 	default:
 		add(lipgloss.NewStyle().Foreground(colWarn).Render("unassigned — press a to assign"))
 	}
-	add("")
+	if compact && len(lines) > roleAt+1 { // "Role" and its first line share a row
+		lines[roleAt] += " " + lines[roleAt+1]
+		lines = append(lines[:roleAt+1], lines[roleAt+2:]...)
+	}
+	gap()
 
 	// Skills.
 	if n.Kind == workspace.KindWork {
@@ -123,7 +143,7 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 			for _, r := range rows {
 				add(r)
 			}
-			add("")
+			gap()
 		}
 	}
 
@@ -139,7 +159,7 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 			dg, _ := nodeStatusGlyph(g, d)
 			add(dg + " " + id + " " + dim.Render(d.Title))
 		}
-		add("")
+		gap()
 	}
 
 	// The variable sections are built as blocks (header + body, no trailing
@@ -243,15 +263,18 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 		return mk(head, "Output", body)
 	}
 
-	avail := h - len(lines) + 1 // the last block needs no trailing blank line
+	avail := h - len(lines) + gapN // the last block needs no trailing blank line
 	cost := func(b []string) int {
 		if len(b) == 0 {
 			return 0
 		}
-		return len(b) + 1
+		return len(b) + gapN
 	}
 	outMax := inspTextLines
 	descMin := min(4, len(desc))
+	if compact {
+		descMin = min(2, len(desc))
+	}
 	// Drop order under pressure: TOKENS, OUTPUT (when not running), FILES, SUMMARY.
 	dropped := map[string]bool{}
 	layout := func() (rest int, blocks []block) {
@@ -271,7 +294,7 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 	need := func() int {
 		d := 0
 		if len(desc) > 0 {
-			d = len(descBlock(descMin)) + 1
+			d = len(descBlock(descMin)) + gapN
 		}
 		return rest + d
 	}
@@ -292,8 +315,11 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 	if len(desc) > 0 {
 		if need() > avail {
 			descMin = min(3, len(desc))
+			if compact {
+				descMin = min(1, len(desc))
+			}
 		}
-		body := max(avail-rest-2, descMin) // header and trailing blank
+		body := max(avail-rest-1-gapN, descMin) // header and trailing blank
 		lines = append(lines, descBlock(body)...)
 		lines = append(lines, "")
 	}
@@ -304,7 +330,7 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 		for _, l := range b.lines {
 			add(l)
 		}
-		add("")
+		gap()
 	}
 	for len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
@@ -638,12 +664,16 @@ func renderRoleForm(nameView, descView string, focus int, canChange bool, inheri
 // renderCmdList draws the command rows (one line each, exactly width cells),
 // at most maxRows of them, scrolled so the selected row stays visible.
 func renderCmdList(cmds []wsCommand, idx, width, maxRows int) []string {
-	start := 0
-	if maxRows > 0 && idx >= maxRows {
-		start = idx - maxRows + 1
+	start, end := 0, len(cmds)
+	if maxRows > 0 && len(cmds) > maxRows {
+		start, end = cmdWindow(len(cmds), idx, maxRows)
 	}
+	dim := lipgloss.NewStyle().Foreground(colMuted)
 	var out []string
-	for i := start; i < len(cmds) && (maxRows <= 0 || len(out) < maxRows); i++ {
+	if start > 0 && maxRows >= 3 {
+		out = append(out, dim.Render(fmt.Sprintf("  ↑ %d more", start)))
+	}
+	for i := start; i < end; i++ {
 		c := cmds[i]
 		sel := i == idx
 		nameSt := lipgloss.NewStyle().Foreground(colText).Bold(true)
@@ -672,7 +702,30 @@ func renderCmdList(cmds []wsCommand, idx, width, maxRows int) []string {
 		}
 		out = append(out, row)
 	}
+	if end < len(cmds) && maxRows >= 3 {
+		out = append(out, dim.Render(fmt.Sprintf("  ↓ %d more", len(cmds)-end)))
+	}
 	return out
+}
+
+// cmdWindow picks the slice [start, end) of n commands shown in rows rows,
+// with the selected idx inside it. A row goes to each "more" marker that is
+// needed, so the list never exceeds rows lines.
+func cmdWindow(n, idx, rows int) (start, end int) {
+	if rows < 3 {
+		start = min(max(idx-rows+1, 0), n-rows)
+		return start, start + rows
+	}
+	items := rows - 2
+	start = max(idx-items+1, 0)
+	if start == 0 {
+		return 0, rows - 1
+	}
+	end = start + items
+	if end >= n {
+		return n - (rows - 1), n
+	}
+	return start, end
 }
 
 // ── Help ─────────────────────────────────────────────────────────────────────

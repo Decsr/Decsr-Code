@@ -64,6 +64,9 @@ func TestWorkspacePluginEmptyState(t *testing.T) {
 func TestWorkspacePluginCommandRuns(t *testing.T) {
 	h := newPluginHarness(t)
 	h.key("/")
+	for range 40 { // plugin commands come last: scroll down to them
+		h.key("down")
+	}
 	h.want("/tb:diff-review")
 	h.want("<ref>")
 	h.want("(plugin:tb)")

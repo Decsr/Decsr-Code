@@ -206,7 +206,8 @@ func TestWorkspacePaletteTouchesInput(t *testing.T) {
 		lines := strings.Split(h.view(), "\n")
 		last, box := -1, -1
 		for i, l := range lines {
-			if strings.HasPrefix(strings.TrimSpace(l), "▸ /") || strings.HasPrefix(strings.TrimSpace(l), "/") {
+			if strings.HasPrefix(strings.TrimSpace(l), "▸ /") || strings.HasPrefix(strings.TrimSpace(l), "/") ||
+				strings.HasPrefix(strings.TrimSpace(l), "↑ ") || strings.HasPrefix(strings.TrimSpace(l), "↓ ") {
 				last = i
 			}
 			if box < 0 && strings.HasPrefix(strings.TrimSpace(l), "╭") && i > 3 && last >= 0 {
@@ -446,4 +447,23 @@ func TestCanvasWideCharacters(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestWorkspacePaletteScrollsToLastCommand(t *testing.T) {
+	h := newWSHarness(t)
+	h.size(80, 24)
+	h.key("/")
+	h.want("↓ 14 more")
+	h.wantNot("↑ 1")
+	cmds := h.m.cmdMatches("/")
+	last := cmds[len(cmds)-1].name
+	h.wantNot(last + " ")
+	for range len(cmds) - 1 {
+		h.key("down")
+	}
+	h.want("▸ " + last)
+	h.want("↑ 14 more")
+	h.wantNot("more\n")
+	h.key("up")
+	h.want("▸ " + cmds[len(cmds)-2].name)
 }

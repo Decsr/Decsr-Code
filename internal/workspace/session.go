@@ -46,6 +46,8 @@ type Session struct {
 	In         int       `json:"input_tokens,omitempty"`  // lead usage for the session
 	Out        int       `json:"output_tokens,omitempty"` // lead usage for the session
 	PR         *PRState  `json:"pr,omitempty"`            // pull request of the session branch
+	BudgetUSD  float64   `json:"budget_usd,omitempty"`    // /budget override of workspace.budget_usd; 0 = use the config
+	Issue      *IssueRef `json:"issue,omitempty"`         // issue the session was started from
 }
 
 // SessionInfo is the listing entry of a saved session.

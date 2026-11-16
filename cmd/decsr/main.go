@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -40,6 +41,16 @@ func main() {
 		return
 	}
 
+	if strings.HasPrefix(os.Args[1], "--issue=") {
+		opts, err := issueWorkspaceOptions(os.Args[1], os.Args[2:])
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		runCmdWith(nil, opts)
+		return
+	}
+
 	switch os.Args[1] {
 	case "run":
 		runCmd(os.Args[2:])
@@ -50,6 +61,13 @@ func main() {
 	case "resume":
 		opts, _ := subcommandWorkspaceOptions("resume")
 		runCmdWith(os.Args[2:], opts)
+	case "issue", "--issue", "-issue":
+		opts, err := issueWorkspaceOptions(os.Args[1], os.Args[2:])
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		runCmdWith(nil, opts)
 	case "report":
 		reportCmd(os.Args[2:])
 	case "monitor":
@@ -81,6 +99,7 @@ func usage() {
 	  task --from-file task.md            Read task description from a file
 	  (both task and run accept --no-context-pack to skip the context pack phase)
 	  resume                              Open the Workspace with this project's saved sessions listed
+	  issue <N|URL|bead-id> [--force]     Open the Workspace and start a run from a GitHub issue or bead (also: --issue)
 	  doctor                              Check git, config, runners and optional tools
 	  report                              Summarize last run artifacts
 	  monitor                             Open the control TUI against a running bus
@@ -118,6 +137,34 @@ func subcommandWorkspaceOptions(sub string) (tui.WorkspaceOptions, bool) {
 		return tui.WorkspaceOptions{Resume: true}, true
 	}
 	return tui.WorkspaceOptions{}, false
+}
+
+// issueWorkspaceOptions parses `decsr issue <ref> [--force]` and
+// `decsr --issue <ref> [--force]` (also --issue=<ref>). The ref is a GitHub
+// issue number, #N or URL, or a bead id.
+func issueWorkspaceOptions(cmd string, args []string) (tui.WorkspaceOptions, error) {
+	usage := errors.New("usage: decsr issue <number|URL|bead-id> [--force]   (or: decsr --issue <number|URL|bead-id>)")
+	ref, force := "", false
+	if _, v, ok := strings.Cut(cmd, "="); ok {
+		ref = v
+	}
+	for _, a := range args {
+		switch {
+		case a == "--force" || a == "-force":
+			force = true
+		case ref == "" && !strings.HasPrefix(a, "-"):
+			ref = a
+		default:
+			return tui.WorkspaceOptions{}, usage
+		}
+	}
+	if strings.TrimSpace(ref) == "" {
+		return tui.WorkspaceOptions{}, usage
+	}
+	if force {
+		ref += " --force"
+	}
+	return tui.WorkspaceOptions{Issue: ref}, nil
 }
 
 func runCmd(args []string) { runCmdWith(args, tui.WorkspaceOptions{}) }

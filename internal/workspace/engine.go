@@ -29,7 +29,15 @@ type Engine struct {
 	autoCtx context.Context
 	cancels map[string]context.CancelFunc // running nodes
 	stopped map[string]bool               // nodes whose stop was requested
-	wg      sync.WaitGroup
+	// costBase is what a node's earlier attempts cost when its current run began.
+	costBase map[string]costBase
+	wg       sync.WaitGroup
+
+	cost    CostFunc
+	budget  func() Budget
+	pending []Event // engine events queued under the lock, sent by flush
+	warned  bool    // the warn threshold was announced
+	reached bool    // the budget-reached message was sent
 
 	stopping  atomic.Bool // set once StopAll begins; event sends never block after that
 	stopCh    chan struct{}
@@ -63,15 +71,16 @@ func NewEngineWithSave(g *Graph, ex Executor, maxParallel int, save func(*Graph)
 		maxParallel = 1
 	}
 	return &Engine{
-		g:       g,
-		ex:      ex,
-		max:     maxParallel,
-		save:    save,
-		events:  make(chan Event, eventBuffer),
-		cancels: make(map[string]context.CancelFunc),
-		stopped: make(map[string]bool),
-		stopCh:  make(chan struct{}),
-		done:    make(chan struct{}),
+		g:        g,
+		ex:       ex,
+		max:      maxParallel,
+		save:     save,
+		events:   make(chan Event, eventBuffer),
+		cancels:  make(map[string]context.CancelFunc),
+		costBase: make(map[string]costBase),
+		stopped:  make(map[string]bool),
+		stopCh:   make(chan struct{}),
+		done:     make(chan struct{}),
 	}
 }
 
@@ -303,6 +312,10 @@ func (e *Engine) Run(ctx context.Context, id string) error {
 		e.mu.Unlock()
 		return fmt.Errorf("parallel limit reached (%d running)", running)
 	}
+	if msg, blocked := e.budgetBlockedLocked(); blocked {
+		e.mu.Unlock()
+		return errors.New(msg)
+	}
 	s := e.startLocked(ctx, n)
 	err := e.saveLocked()
 	e.mu.Unlock()
@@ -321,6 +334,7 @@ func (e *Engine) RunAll(ctx context.Context) {
 	err := e.saveLocked()
 	e.mu.Unlock()
 	e.reportSave(err)
+	e.flush()
 	for _, s := range starts {
 		e.launch(s)
 	}
@@ -374,6 +388,9 @@ func (e *Engine) startLocked(parent context.Context, n *Node) started {
 	n.Observed = nil
 	n.FileStats = nil
 	n.Warnings = nil
+	// The cost adds up over the attempts: this run is priced on top of what the
+	// earlier ones cost, and an unpriced earlier attempt keeps CostKnown false.
+	e.costBase[n.ID] = costBase{usd: n.CostUSD, unpriced: (n.InputTokens > 0 || n.OutputTokens > 0) && !n.CostKnown}
 	n.InputTokens, n.OutputTokens, n.Estimated = 0, 0, false
 	e.cancels[n.ID] = cancel
 	e.wg.Add(1)
@@ -392,7 +409,15 @@ func (e *Engine) pickLocked() []started {
 		return nil
 	}
 	var out []started
-	for _, n := range e.g.Runnable() {
+	runnable := e.g.Runnable()
+	if msg, blocked := e.budgetBlockedLocked(); blocked {
+		if len(runnable) > 0 && !e.reached {
+			e.reached = true
+			e.pending = append(e.pending, Event{Type: EventBudgetReached, Text: msg})
+		}
+		runnable = nil
+	}
+	for _, n := range runnable {
 		if len(e.cancels) >= e.max {
 			break
 		}
@@ -421,9 +446,19 @@ func (e *Engine) runNode(s started) {
 			e.mu.Lock()
 			if n := e.g.Node(id); n != nil {
 				n.InputTokens, n.OutputTokens, n.Estimated = ev.In, ev.Out, ev.Estimated
+				if e.cost != nil {
+					usd, known := e.cost(ev.Runner, ev.Model, ev.In, ev.Out)
+					base := e.costBase[id]
+					n.CostUSD, n.CostKnown = base.usd, !base.unpriced && known
+					if known {
+						n.CostUSD += usd
+					}
+				}
 			}
+			e.checkBudgetLocked()
 			e.mu.Unlock()
 			e.emit(ev)
+			e.flush()
 		}
 	}
 	res, err := e.ex.Run(s.ctx, s.g, s.n, forward)
@@ -454,10 +489,12 @@ func (e *Engine) runNode(s started) {
 		overlaps = e.markOverlapsLocked(n)
 	}
 	serr := e.saveLocked()
+	e.checkBudgetLocked()
 	next := e.pickLocked()
 	e.mu.Unlock()
 
 	e.reportSave(serr)
+	e.flush()
 	for _, ev := range overlaps {
 		e.emitOutput(ev)
 	}

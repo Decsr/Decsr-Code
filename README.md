@@ -72,6 +72,10 @@ From 100 columns a sidebar lists the nodes and saved sessions beside an
 activity feed with one card per node (`g` switches to the graph); see
 [`doc/workspace.md`](doc/workspace.md#layout).
 
+**Start from an issue:** `/issue <N|URL|bead-id>` (or `decsr issue <ref>`) sends a GitHub issue or a bead to the lead as the task; the pull request then says `Closes #N` (see [`doc/workspace.md`](doc/workspace.md#start-from-an-issue)).
+
+**Cost and budget:** add `pricing:` to the config and set `workspace.budget_usd`; the Workspace shows cost in a bottom bar, warns at 80% and stops starting nodes at the budget; `/budget` shows the spending (see [`doc/workspace.md`](doc/workspace.md#cost-and-budget)).
+
 **Pull requests:** `/pr` pushes the session branch and opens a pull request with `gh`; `/pr watch` turns failing CI and review comments into fix nodes (see [`doc/workspace.md`](doc/workspace.md#pull-requests)).
 
 **Needs-you notifications:** when a split waits for roles, a node or Build &

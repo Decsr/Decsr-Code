@@ -297,7 +297,7 @@ func cardHeader(o cardOpts, iw int) string {
 	if o.runner != "" || o.model != "" {
 		badge := runnerBadge(o.runner, o.icons)
 		if o.model != "" {
-			cands = append(cands, badge+dim.Render(" "+o.model+"  "+clock))
+			cands = append(cands, badge+dim.Render(" "+o.model+" · "+clock))
 		}
 		cands = append(cands, badge+dim.Render(" "+clock))
 	}
@@ -488,8 +488,11 @@ func feedWidth(pw int) int { return max(pw-feedIndent-2, 12) }
 func (m workspaceModel) roleLooks() (models, runners map[string]string) {
 	models, runners = map[string]string{}, map[string]string{}
 	for _, r := range workspace.Roles(m.cfg) {
-		models[r.Name] = shortModel(r.Agent.Runner, r.Agent.Model)
-		runners[r.Name] = r.Agent.Runner
+		runners[r.Name] = runnerKey(r.Agent.Runner)
+		models[r.Name] = shortModel(r.Agent.Runner, effectiveModel(m.cfg, r.Agent))
+		if models[r.Name] == "" {
+			models[r.Name] = runners[r.Name]
+		}
 	}
 	return models, runners
 }

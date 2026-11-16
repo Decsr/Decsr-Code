@@ -51,7 +51,8 @@ type WorkspaceResult struct {
 
 // WorkspaceOptions configures how the Workspace opens.
 type WorkspaceOptions struct {
-	Resume bool // open with the session picker showing
+	Resume bool   // open with the session picker showing
+	Issue  string // /issue arguments to run after start ("42", "<URL> --force")
 }
 
 // wsDeps are the seams between the model and the outside world. The optional
@@ -82,6 +83,9 @@ type wsDeps struct {
 	ghRun workspace.CmdRunner
 	// notify sends a "needs you" note; nil sends nothing.
 	notify wsNotifyFunc
+	// cfg returns the live config for pricing and the budget; nil uses the
+	// config the engine was attached with.
+	cfg func() config.Config
 }
 
 func (d *wsDeps) fillDefaults(root string) {
@@ -202,6 +206,7 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 	var engines []*workspace.Engine
 	deps := wsDeps{
 		notify: wsSendNote,
+		cfg:    getCfg,
 		split: func(ctx context.Context, task, earlier string, existing []string, next int, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error) {
 			c := getCfg()
 			agents := make(map[string]config.AgentConfig, len(c.Agents))
@@ -515,6 +520,7 @@ type workspaceModel struct {
 	cmdIdx       int
 	cmdPicked    bool // the highlight was moved with the arrows
 	splitting    bool
+	startIssue   string // /issue arguments to run at start
 	splitGen     int
 	splitTask    string
 	cancelSplit  context.CancelFunc
@@ -644,13 +650,16 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...Work
 	m.plug = deps.loadPlugins()
 	m.cfg = m.withPluginAgents(m.cfg)
 	m.refreshSaved()
+	if len(opts) > 0 {
+		m.startIssue = opts[0].Issue
+	}
 	if len(opts) > 0 && opts[0].Resume {
 		m = m.openSessions()
 	}
 	return m
 }
 
-func (m workspaceModel) Init() tea.Cmd { return nil }
+func (m workspaceModel) Init() tea.Cmd { return m.startIssueCmd() }
 
 func (m workspaceModel) project() string {
 	if m.cfg.Project.Name != "" {
@@ -791,6 +800,8 @@ func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onInstalled(msg)
 	case wsPRMsg:
 		return m.onPRMsg(msg)
+	case wsIssueMsg:
+		return m.onIssueMsg(msg)
 	case wsStoppedMsg:
 		if m.eng != nil {
 			m.g = m.eng.Snapshot()
@@ -1269,6 +1280,7 @@ func (m workspaceModel) attachGraph(g *workspace.Graph, fresh bool) (workspaceMo
 		m.iso = m.deps.isolator(sess.snapshot().ID)
 	}
 	m.eng = m.deps.newEngine(g, sess.saveGraph, func() string { return sess.snapshot().Summary }, m.iso)
+	m.wireBudget(sess)
 	m.g = m.eng.Snapshot()
 	m.sel = ""
 	if len(m.g.Nodes) > 0 {
@@ -1343,6 +1355,8 @@ func (m workspaceModel) onEvent(msg wsEventMsg) (tea.Model, tea.Cmd) {
 		if n := m.g.Node(ev.NodeID); m.iso != nil && n != nil && n.Kind == workspace.KindCheck {
 			m.say("system", "Build & test passed. Use /merge to bring the result into your checkout.")
 		}
+	case workspace.EventBudgetWarn, workspace.EventBudgetReached:
+		m.onBudgetEvent(ev)
 	case workspace.EventFailed:
 		if ev.Text == "stopped" {
 			m.setNotice(ev.NodeID+" stopped", false)
@@ -2343,14 +2357,11 @@ func (m workspaceModel) hintLine() string {
 	return wsHintBar(w, fitHints(w, hs))
 }
 
-// progressStats is the dim "2/5 done · 1 failed · 44.4k tok" text.
+// progressStats is the dim "2/5 done · 1 failed" text.
 func (m workspaceModel) progressStats() string {
 	g := m.g
-	s := m.sess.snapshot()
-	tokens := s.In + s.Out
 	warns := 0
 	for _, n := range g.Nodes {
-		tokens += n.InputTokens + n.OutputTokens
 		warns += len(n.Warnings)
 	}
 	var stats string
@@ -2372,11 +2383,11 @@ func (m workspaceModel) progressStats() string {
 			stats += fmt.Sprintf(" · %d warnings", warns)
 		}
 	}
-	return stats + " · " + formatTokensCompact(tokens) + " tok"
+	return stats
 }
 
-// headerLine is the calm top line: the product mark, project and branch on the
-// left, the progress stats dim on the right.
+// headerLine is the calm top line: the product mark and project on the left,
+// the progress stats dim on the right. The branch is in the bottom bar.
 func (m workspaceModel) headerLine() string {
 	w := m.width
 	dim := lipgloss.NewStyle().Foreground(colMuted)
@@ -2396,12 +2407,6 @@ func (m workspaceModel) headerLine() string {
 	left := "  " + lipgloss.NewStyle().Foreground(colAccent).Bold(true).Render("◆ decsr")
 	if p := m.project(); p != "" {
 		left += dim.Render(" · ") + lipgloss.NewStyle().Foreground(colText).Render(truncateOneLine(p, max(w/4, 8)))
-	}
-	if m.iso != nil {
-		// The branch gives way before the progress stats do.
-		if room := w - ansi.StringWidth(left) - ansi.StringWidth(right) - 3; room >= 8 {
-			left += dim.Render(" · " + truncateOneLine(m.iso.Branch(), room))
-		}
 	}
 	if ansi.StringWidth(left)+ansi.StringWidth(right) > w {
 		right = ""
@@ -2579,7 +2584,11 @@ func (m workspaceModel) promptBox() []string {
 			in.Blur()
 		}
 	}
-	return strings.Split(boxStyle.Render(in.View()), "\n")
+	body := in.View()
+	if chips := m.promptChips(); chips != "" {
+		body += "\n" + chips
+	}
+	return strings.Split(boxStyle.Render(body), "\n")
 }
 
 // paletteLines is the "/" command list drawn right above the prompt box, at
@@ -2611,7 +2620,7 @@ func (m workspaceModel) mainLayout(box []string) (chatRows, fixed int) {
 	if !m.feedMode() {
 		chatRows = m.chatRows()
 	}
-	fixed = 1 + 1 + chatRows + len(box) + 1 // header, status, chat, prompt, hints
+	fixed = 1 + 1 + chatRows + len(box) + 1 + 1 // header, status, chat, prompt, hints, status bar
 	if !m.sidebarInline() {
 		fixed++ // the title line; the sidebar carries it otherwise
 	}
@@ -2671,7 +2680,7 @@ func (m workspaceModel) mainView() string {
 	}
 	parts = append(parts, pal...) // directly above the prompt box
 	parts = append(parts, box...)
-	parts = append(parts, m.hintLine())
+	parts = append(parts, m.hintLine(), m.statusBar())
 	return strings.Join(parts, "\n")
 }
 

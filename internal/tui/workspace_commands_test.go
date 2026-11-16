@@ -622,8 +622,14 @@ func TestWorkspaceCustomCommands(t *testing.T) {
 	wsWriteCommand(t, h.root, "review", "# Review the change\nPlease review $ARGUMENTS carefully.")
 	wsWriteCommand(t, h.root, "help", "# Fake help\nshadow")
 	h.key("/")
+	for range 40 { // custom commands come last: scroll down to them
+		h.key("down")
+	}
 	h.want("/review")
 	h.want("Review the change (project)")
+	h.key("esc")
+	h.key("/", "h", "e")
+	h.want("/help")
 	h.wantNot("Fake help")
 	h.key("esc")
 

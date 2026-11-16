@@ -326,6 +326,9 @@ func PRBody(s Session) string {
 	if t := sessionTask(s); t != "" {
 		b.WriteString("## Task\n\n" + truncRunes(t, maxPRTaskRunes) + "\n\n")
 	}
+	if l := issueClosesLine(s.Issue); l != "" {
+		b.WriteString(l + "\n\n")
+	}
 	if s.Graph == nil {
 		return b.String()
 	}

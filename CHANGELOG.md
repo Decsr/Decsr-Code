@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Money budgets in the Workspace: `pricing:` (USD per million tokens per model
+  id or glob; no built-in prices) prices every node, `workspace.budget_usd`
+  and `budget_warn_pct` stop new nodes from starting once the known cost
+  reaches the budget (running nodes are not killed) and warn once with a
+  needs-you notification. `/budget` shows the spending per runner and the
+  models without a price; `/budget 10` sets the budget of the session. See
+  `doc/workspace.md`.
+- A bottom status bar with the tokens per runner, the cost against the budget,
+  the session branch and the pull request, and prompt chips for the isolation
+  mode, the lead's runner and model and the budget.
+- `/issue <number|URL|bead-id> [--force]` starts a Workspace run from a GitHub
+  issue (`gh issue view`) or a bead (`bd show`): the issue becomes the lead's
+  task, the session remembers it and its pull request gets `Closes #N`
+  (`Closes owner/repo#N` for another repository, `Refs <id>` for a bead).
+  `decsr issue <ref>` and `decsr --issue <ref>` open the Workspace and run it.
+  See `doc/workspace.md`.
 - Workspace layout: a left sidebar (from 100 columns; `b` shows it as a box on
   narrow terminals) with the session title, one two-row entry per node (status,
   runner, model, age) and the other saved sessions, and an activity feed as the
@@ -58,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HOMEBREW_TAP_GITHUB_TOKEN` secret is set (skipped otherwise).
 
 ### Changed
+- The token total moved from the Workspace header to the bottom status bar.
+- Node cards and sidebar rows show the runner glyph and the effective model
+  also when the node's model is the runner's default; the card header reads
+  `⬡ model · 17:01 ↗`.
 - A calmer Workspace look: no double borders (panes share one divider, rounded
   borders only on node cards, overlays and the prompt), dim title-case labels
   instead of all-caps ones, bold titles with dim metadata, a runner glyph and

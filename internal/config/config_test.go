@@ -741,3 +741,50 @@ func TestMerge_UIIcons(t *testing.T) {
 		t.Errorf("later layer should override: %q", dst.UI.Icons)
 	}
 }
+
+func TestLoad_PricingAndBudgetMerge(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	globalDir := filepath.Join(home, GlobalDir)
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	global := `
+pricing:
+  "deepseek-*": {input_per_mtok: 0.27, output_per_mtok: 1.1}
+  "gpt-5": {input_per_mtok: 1.25, output_per_mtok: 10}
+workspace:
+  budget_usd: 5
+  budget_warn_pct: 70
+`
+	if err := os.WriteFile(filepath.Join(globalDir, GlobalFilename), []byte(global), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectDir := t.TempDir()
+	wsDir := filepath.Join(projectDir, GlobalDir)
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	project := `
+pricing:
+  "gpt-5": {input_per_mtok: 2, output_per_mtok: 20}
+workspace:
+  budget_usd: 12.5
+`
+	if err := os.WriteFile(filepath.Join(wsDir, ProjectFilename), []byte(project), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(projectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Pricing["gpt-5"]; got.InputPerMTok != 2 || got.OutputPerMTok != 20 {
+		t.Errorf("project must override per key, got %+v", got)
+	}
+	if got := cfg.Pricing["deepseek-*"]; got.OutputPerMTok != 1.1 {
+		t.Errorf("global key must survive, got %+v", got)
+	}
+	if cfg.Workspace.BudgetUSD != 12.5 || cfg.Workspace.BudgetWarnPct != 70 {
+		t.Errorf("budget %v warn %v", cfg.Workspace.BudgetUSD, cfg.Workspace.BudgetWarnPct)
+	}
+}

@@ -43,6 +43,7 @@ func (m workspaceModel) commandList() []wsCommand {
 		{name: "/compact", desc: "fold finished nodes into the session summary", run: workspaceModel.cmdCompact},
 		{name: "/merge", desc: "merge this session's worktree branch into your branch", run: workspaceModel.cmdMerge},
 		{name: "/pr", args: "[watch|stop]", desc: "push the session branch and open a pull request; watch fixes CI and review comments", run: workspaceModel.cmdPR},
+		{name: "/issue", args: "<number|URL|bead-id> [--force]", desc: "start a task from a GitHub issue or a bead", run: workspaceModel.cmdIssue},
 		{name: "/resume", desc: "continue a saved session of this project", run: workspaceModel.cmdResume},
 		{name: "/project", desc: "switch to another project", run: workspaceModel.cmdProject},
 		{name: "/profile", desc: "save or apply a set of role settings", run: workspaceModel.cmdProfile},
@@ -55,6 +56,7 @@ func (m workspaceModel) commandList() []wsCommand {
 		{name: "/plugin", aliases: []string{"/plugins"}, args: "[available|install <name>|enable|disable <name>|reload]", desc: "list plugins, see or install catalog plugins, enable, disable or reload", run: workspaceModel.cmdPlugin},
 		{name: "/status", desc: "project, session, roles and limits", run: workspaceModel.cmdStatus},
 		{name: "/cost", desc: "tokens per node and per role", run: workspaceModel.cmdCost},
+		{name: "/budget", args: "[amount|off]", desc: "spending per runner; set this session's budget", run: workspaceModel.cmdBudget},
 		{name: "/export", desc: "write this session to a markdown file", run: workspaceModel.cmdExport},
 		{name: "/config", aliases: []string{"/menu"}, desc: "settings, project setup, classic pipeline", run: func(m workspaceModel, _ string) (tea.Model, tea.Cmd) {
 			return m.requestQuit(true)
