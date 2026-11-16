@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `openai` runner for any OpenAI-compatible chat completions API and a
+  `deepseek` preset (text mode, no tools). Set `base_url` and `api_key_env`
+  per agent; the key is read from that environment variable and never stored.
+  DeepSeek is also selectable in the setup screen.
+
 ## [0.6.0] - 2026-11-13
 
 ### Added

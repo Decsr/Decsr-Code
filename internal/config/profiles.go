@@ -24,7 +24,7 @@ var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 // It is kept here because the runner package imports config.
 var knownRunners = map[string]bool{
 	"": true, "opencode": true, "claude": true, "ollama": true, "mlx": true,
-	"codex": true, "copilot": true, "lmstudio": true,
+	"codex": true, "copilot": true, "lmstudio": true, "openai": true, "deepseek": true,
 }
 
 // KnownRunner reports whether name is a runner the factory accepts.
@@ -74,6 +74,7 @@ func ListProfiles() []string {
 func profileAgent(ac AgentConfig) AgentConfig {
 	return AgentConfig{
 		Runner: ac.Runner, Model: ac.Model, Effort: ac.Effort,
+		BaseURL: ac.BaseURL, APIKeyEnv: ac.APIKeyEnv,
 		Description: ac.Description, ReadOnly: ac.ReadOnly, UserSkills: ac.UserSkills,
 	}
 }
@@ -110,7 +111,7 @@ func LoadProfile(name string) (Profile, error) {
 	return p, nil
 }
 
-// SaveProfile stores agents as profile name. Only runner, model, effort,
+// SaveProfile stores agents as profile name. Only runner, model, effort, base_url, api_key_env,
 // description, read_only and skills are kept; roles with none of them set are
 // left out.
 func SaveProfile(name string, agents map[string]AgentConfig) error {
@@ -121,7 +122,7 @@ func SaveProfile(name string, agents map[string]AgentConfig) error {
 	p := Profile{Agents: make(map[string]AgentConfig, len(agents))}
 	for role, ac := range agents {
 		ac = profileAgent(ac)
-		if ac.Runner == "" && ac.Model == "" && ac.Effort == "" && ac.Description == "" && !ac.ReadOnly && len(ac.UserSkills) == 0 {
+		if ac.Runner == "" && ac.Model == "" && ac.Effort == "" && ac.BaseURL == "" && ac.APIKeyEnv == "" && ac.Description == "" && !ac.ReadOnly && len(ac.UserSkills) == 0 {
 			continue
 		}
 		p.Agents[role] = ac
@@ -184,6 +185,7 @@ func ApplyProfile(root, name string) error {
 		}{
 			{&existing.Runner, pa.Runner}, {&existing.Model, pa.Model},
 			{&existing.Effort, pa.Effort}, {&existing.Description, pa.Description},
+			{&existing.BaseURL, pa.BaseURL}, {&existing.APIKeyEnv, pa.APIKeyEnv},
 		} {
 			if f.src != "" {
 				*f.dst = f.src

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -33,6 +34,12 @@ func Ping(provider, model string) error {
 		return pingMLX(ctx, model)
 	case "lmstudio":
 		return pingHTTP(ctx, lmStudioBaseURL+"/v1/models", "lmstudio")
+	case "deepseek":
+		return pingAPI(ctx, "deepseek", deepSeekBaseURL, deepSeekKeyEnv)
+	case "openai":
+		// The generic runner's base_url and key variable live in the agent
+		// config, which Ping does not receive, so it cannot be checked here.
+		return nil
 	default:
 		return fmt.Errorf("unknown provider %q", provider)
 	}
@@ -62,6 +69,12 @@ func ProviderReachable(provider string) error {
 		return pingHTTP(ctx, mlxBaseURL+"/v1/models", "omlx")
 	case "lmstudio":
 		return pingHTTP(ctx, lmStudioBaseURL+"/v1/models", "lmstudio")
+	case "deepseek":
+		return pingAPI(ctx, "deepseek", deepSeekBaseURL, deepSeekKeyEnv)
+	case "openai":
+		// The generic runner's base_url and key variable live in the agent
+		// config, which Ping does not receive, so it cannot be checked here.
+		return nil
 	default:
 		return fmt.Errorf("unknown provider %q", provider)
 	}
@@ -168,6 +181,33 @@ func pingHTTP(ctx context.Context, url, label string) error {
 		return fmt.Errorf("%s returned HTTP %d", label, resp.StatusCode)
 	}
 	return nil
+}
+
+// pingAPI checks a hosted OpenAI-compatible API: the key env var must be set
+// and GET <base>/models must answer 200.
+func pingAPI(ctx context.Context, label, baseURL, keyEnv string) error {
+	key, err := apiKeyFromEnv(label, keyEnv)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/models", nil)
+	if err != nil {
+		return fmt.Errorf("%s: %w", label, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("%s not reachable at %s", label, baseURL)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("%s: API key rejected (HTTP %d)", label, resp.StatusCode)
+	default:
+		return fmt.Errorf("%s returned HTTP %d", label, resp.StatusCode)
+	}
 }
 
 func truncate(s string, maxLen int) string {

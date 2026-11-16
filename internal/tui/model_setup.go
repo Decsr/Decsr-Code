@@ -39,9 +39,11 @@ func applyProjectSetupWithError(root string, msg setupDoneMsg) (config.Config, e
 			ac.Description = old.Description
 			ac.ReadOnly = old.ReadOnly
 			ac.UserSkills = old.UserSkills
+			ac.BaseURL = old.BaseURL
+			ac.APIKeyEnv = old.APIKeyEnv
 			projectAgents[role] = ac
-		} else if (!config.IsBuiltinRole(role) && role != "pr") || old.Description != "" || old.ReadOnly || len(old.UserSkills) > 0 {
-			projectAgents[role] = config.AgentConfig{Description: old.Description, ReadOnly: old.ReadOnly, UserSkills: old.UserSkills}
+		} else if (!config.IsBuiltinRole(role) && role != "pr") || old.Description != "" || old.ReadOnly || len(old.UserSkills) > 0 || old.BaseURL != "" || old.APIKeyEnv != "" {
+			projectAgents[role] = config.AgentConfig{Description: old.Description, ReadOnly: old.ReadOnly, UserSkills: old.UserSkills, BaseURL: old.BaseURL, APIKeyEnv: old.APIKeyEnv}
 		}
 	}
 	if len(projectAgents) > 0 {

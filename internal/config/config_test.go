@@ -656,3 +656,39 @@ func TestSaveProjectRoleBrokenFileUntouched(t *testing.T) {
 		t.Errorf("file was modified: %q", got)
 	}
 }
+
+func TestMerge_AgentAPIFields(t *testing.T) {
+	dst := Config{Agents: map[string]AgentConfig{"coder": {Runner: "openai", BaseURL: "http://a", APIKeyEnv: "KEY_A"}}}
+	merge(&dst, Config{Agents: map[string]AgentConfig{"coder": {Model: "m"}}})
+	ac := dst.Agents["coder"]
+	if ac.BaseURL != "http://a" || ac.APIKeyEnv != "KEY_A" || ac.Model != "m" {
+		t.Fatalf("empty layer must keep values: %+v", ac)
+	}
+	merge(&dst, Config{Agents: map[string]AgentConfig{"coder": {BaseURL: "http://b", APIKeyEnv: "KEY_B"}}})
+	ac = dst.Agents["coder"]
+	if ac.BaseURL != "http://b" || ac.APIKeyEnv != "KEY_B" {
+		t.Fatalf("override failed: %+v", ac)
+	}
+}
+
+func TestProfileKeepsAPIFields(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	agents := map[string]AgentConfig{"coder": {Runner: "openai", Model: "m", BaseURL: "https://openrouter.ai/api/v1", APIKeyEnv: "OPENROUTER_API_KEY"}}
+	if err := SaveProfile("api", agents); err != nil {
+		t.Fatal(err)
+	}
+	p, err := LoadProfile("api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ac := p.Agents["coder"]; ac.BaseURL != "https://openrouter.ai/api/v1" || ac.APIKeyEnv != "OPENROUTER_API_KEY" {
+		t.Fatalf("profile lost api fields: %+v", ac)
+	}
+	root := t.TempDir()
+	if err := ApplyProfile(root, "api"); err != nil {
+		t.Fatal(err)
+	}
+	if ac := LoadProject(root).Agents["coder"]; ac.BaseURL == "" || ac.APIKeyEnv == "" || ac.Runner != "openai" {
+		t.Fatalf("project lost api fields: %+v", ac)
+	}
+}

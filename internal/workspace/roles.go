@@ -54,6 +54,12 @@ func Roles(cfg config.Config) []Role {
 		ac := cfg.Agents[name]
 		if ac.Runner == "" {
 			ac.Runner = pm.Runner
+			if ac.BaseURL == "" {
+				ac.BaseURL = pm.BaseURL
+			}
+			if ac.APIKeyEnv == "" {
+				ac.APIKeyEnv = pm.APIKeyEnv
+			}
 		}
 		if ac.Model == "" {
 			ac.Model = pm.Model
@@ -74,7 +80,7 @@ func Roles(cfg config.Config) []Role {
 	sort.Strings(plug)
 	for _, name := range plug {
 		pa := cfg.PluginAgents[name]
-		ac := config.AgentConfig{Runner: pm.Runner, Model: pm.Model, Effort: pm.Effort, ReadOnly: pa.ReadOnly}
+		ac := config.AgentConfig{Runner: pm.Runner, Model: pm.Model, Effort: pm.Effort, BaseURL: pm.BaseURL, APIKeyEnv: pm.APIKeyEnv, ReadOnly: pa.ReadOnly}
 		out = append(out, Role{Name: name, Description: Sanitize(pa.Description), ReadOnly: pa.ReadOnly, Agent: ac, Plugin: true, Prompt: pa.Prompt})
 	}
 	return out

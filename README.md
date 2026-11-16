@@ -108,6 +108,25 @@ Supports multiple runners out of the box:
 - **LM Studio** (`http://127.0.0.1:1234`)
 - **oMLX** (Apple Silicon, `http://127.0.0.1:8000`)
 
+**API runners** (OpenAI-compatible HTTP APIs, text mode: plain chat completion, no tools):
+
+- **DeepSeek** (`deepseek`) — preset of the generic runner, defaults to `https://api.deepseek.com` and `DEEPSEEK_API_KEY`
+- **OpenAI-compatible** (`openai`) — any provider with a chat completions API (OpenAI, OpenRouter, Together, a self-hosted gateway); configured in yaml only, it is not offered in the setup screen
+
+```yaml
+agents:
+  coder:
+    runner: deepseek
+    model: deepseek-v4-flash   # optional, this is the default
+  qa:
+    runner: openai
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    model: deepseek/deepseek-chat
+```
+
+The API key is read only from the environment variable named in `api_key_env` and is never written to the config. `base_url` and `model` are required for `openai`; `deepseek` fills in missing values with its defaults.
+
 Each agent can use a different runner and model — configure globally (`~/.decsr/config.yaml`) or per-project (`.decsr/project.yaml`).
 
 ### Human Approval Gates

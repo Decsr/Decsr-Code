@@ -174,6 +174,8 @@ type AgentConfig struct {
 	Model            string   `yaml:"model,omitempty"`
 	Description      string   `yaml:"description,omitempty"`        // role description (custom workspace roles)
 	Effort           string   `yaml:"effort,omitempty"`             // "" = unset, "default" = provider default
+	BaseURL          string   `yaml:"base_url,omitempty"`           // API runners (openai, deepseek): endpoint base, e.g. https://openrouter.ai/api/v1
+	APIKeyEnv        string   `yaml:"api_key_env,omitempty"`        // API runners: NAME of the env var holding the key; the key is never stored
 	MaxContextTokens int      `yaml:"max_context_tokens,omitempty"` // 0 = no limit (for local models)
 	ReadOnly         bool     `yaml:"read_only,omitempty"`          // workspace role that reports only and never writes files
 	Skills           []string `yaml:"-"`                            // always from defaults, never persisted
@@ -489,6 +491,12 @@ func merge(dst *Config, src Config) {
 			}
 			if ac.Effort != "" {
 				existing.Effort = ac.Effort
+			}
+			if ac.BaseURL != "" {
+				existing.BaseURL = ac.BaseURL
+			}
+			if ac.APIKeyEnv != "" {
+				existing.APIKeyEnv = ac.APIKeyEnv
 			}
 			if ac.Description != "" {
 				existing.Description = ac.Description

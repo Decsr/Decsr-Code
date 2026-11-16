@@ -40,8 +40,24 @@ func New(cfg config.AgentConfig, skillLoader *skills.Loader, promptLanguage stri
 	case "lmstudio":
 		base = NewLMStudioRunner(cfg.Model)
 
+	case "openai":
+		base = &OpenAIRunner{Provider: "openai", Model: cfg.Model, BaseURL: cfg.BaseURL, APIKeyEnv: cfg.APIKeyEnv}
+
+	case "deepseek":
+		d := &OpenAIRunner{Provider: "deepseek", Model: cfg.Model, BaseURL: cfg.BaseURL, APIKeyEnv: cfg.APIKeyEnv}
+		if d.BaseURL == "" {
+			d.BaseURL = deepSeekBaseURL
+		}
+		if d.APIKeyEnv == "" {
+			d.APIKeyEnv = deepSeekKeyEnv
+		}
+		if d.Model == "" {
+			d.Model = deepSeekModel
+		}
+		base = d
+
 	default:
-		return nil, fmt.Errorf("runner: unknown runner %q (supported: opencode, claude, ollama, mlx, codex, copilot, lmstudio)", cfg.Runner)
+		return nil, fmt.Errorf("runner: unknown runner %q (supported: opencode, claude, ollama, mlx, codex, copilot, lmstudio, openai, deepseek)", cfg.Runner)
 	}
 
 	if skillLoader != nil {

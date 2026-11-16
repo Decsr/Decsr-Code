@@ -33,9 +33,10 @@ const (
 	providerCodex
 	providerCopilot
 	providerLMStudio
+	providerDeepSeek
 )
 
-var providerLabels = []string{"OpenCode", "Claude", "Ollama", "oMLX", "Codex", "Copilot", "LM Studio"}
+var providerLabels = []string{"OpenCode", "Claude", "Ollama", "oMLX", "Codex", "Copilot", "LM Studio", "DeepSeek"}
 
 func providerFromString(s string) providerKind {
 	switch s {
@@ -51,6 +52,8 @@ func providerFromString(s string) providerKind {
 		return providerCopilot
 	case "lmstudio":
 		return providerLMStudio
+	case "deepseek":
+		return providerDeepSeek
 	default:
 		return providerOpenCode
 	}
@@ -70,6 +73,8 @@ func providerToString(p providerKind) string {
 		return "copilot"
 	case providerLMStudio:
 		return "lmstudio"
+	case providerDeepSeek:
+		return "deepseek"
 	default:
 		return "opencode"
 	}
@@ -158,6 +163,11 @@ type lmstudioModelsListMsg struct {
 	err    error
 }
 
+type deepseekModelsListMsg struct {
+	models []string
+	err    error
+}
+
 // pingResultMsg carries the result of an async model reachability test.
 type pingResultMsg struct {
 	err error
@@ -205,6 +215,9 @@ type SetupModel struct {
 
 	lmstudioModels        []string
 	lmstudioModelsLoading bool
+
+	deepseekModels        []string
+	deepseekModelsLoading bool
 
 	// Programming language selection.
 	progLanguages []string
@@ -298,6 +311,8 @@ func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs 
 		copilotModelsLoading:  true,
 		lmstudioModels:        nil,
 		lmstudioModelsLoading: true,
+		deepseekModels:        runner.DeepSeekFallbackModels(),
+		deepseekModelsLoading: true,
 		providerAvailability:  make(map[providerKind]error),
 		progLanguages:         append([]string{progLangAuto}, config.SupportedProgrammingLanguages...),
 		projectNameInput:      nameInput,
@@ -428,6 +443,8 @@ func (m SetupModel) modelsForProvider(p providerKind) []string {
 		return m.copilotModels
 	case providerLMStudio:
 		return m.lmstudioModels
+	case providerDeepSeek:
+		return m.deepseekModels
 	default:
 		return m.models
 	}
@@ -548,7 +565,7 @@ func (m SetupModel) selectedEffort() string {
 }
 
 func (m SetupModel) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, fetchOpenCodeModels(), fetchOllamaModels(), fetchMLXModels(), fetchCodexModels(), fetchClaudeModels(), fetchCopilotModels(), fetchLMStudioModels(), checkProviderAvailability())
+	return tea.Batch(m.spinner.Tick, fetchOpenCodeModels(), fetchOllamaModels(), fetchMLXModels(), fetchCodexModels(), fetchClaudeModels(), fetchCopilotModels(), fetchLMStudioModels(), fetchDeepSeekModels(), checkProviderAvailability())
 }
 
 // ── Update ────────────────────────────────────────────────────────────────────
@@ -769,6 +786,24 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 			m.lmstudioModels = msg.models
 			if m.provider == providerLMStudio {
 				m.modelIdx = findModelIndex(m.lmstudioModels, prevModel)
+			}
+		}
+		if m.ready {
+			m.viewport.SetContent(m.renderContent())
+		}
+
+	case deepseekModelsListMsg:
+		m.deepseekModelsLoading = false
+		// The runner returns its static list alongside any error, so the list
+		// is always usable.
+		if len(msg.models) > 0 {
+			prevModel := ""
+			if m.provider == providerDeepSeek && m.modelIdx < len(m.deepseekModels) {
+				prevModel = m.deepseekModels[m.modelIdx]
+			}
+			m.deepseekModels = msg.models
+			if m.provider == providerDeepSeek {
+				m.modelIdx = findModelIndex(m.deepseekModels, prevModel)
 			}
 		}
 		if m.ready {
@@ -1534,6 +1569,9 @@ func (m SetupModel) renderModelCard(contentWidth int, label, focusLabel, active,
 	case providerLMStudio:
 		modelLines = append(modelLines, dim.Render("  LM Studio local models (OpenAI-compatible API on :1234)"))
 		modelLines = append(modelLines, m.viewLMStudioModels(active, inactive, dim)...)
+	case providerDeepSeek:
+		modelLines = append(modelLines, dim.Render("  DeepSeek API (key from DEEPSEEK_API_KEY)"))
+		modelLines = append(modelLines, m.viewDeepSeekModels(active, inactive, dim)...)
 	}
 
 	// Model validation status.
@@ -1913,6 +1951,13 @@ func (m SetupModel) viewLMStudioModels(active, inactive, dim lipgloss.Style) []s
 	return lines
 }
 
+func (m SetupModel) viewDeepSeekModels(active, inactive, dim lipgloss.Style) []string {
+	if m.deepseekModelsLoading {
+		return []string{dim.Render("  loading models…")}
+	}
+	return renderWindowedList(m.deepseekModels, m.modelIdx, m.section == sectionModel, active, inactive, dim)
+}
+
 // ── Footer ───────────────────────────────────────────────────────────────────
 
 func (m SetupModel) renderFooter() string {
@@ -2063,6 +2108,13 @@ func fetchLMStudioModels() tea.Cmd {
 	}
 }
 
+func fetchDeepSeekModels() tea.Cmd {
+	return func() tea.Msg {
+		models, err := runner.DeepSeekListModels()
+		return deepseekModelsListMsg{models: models, err: err}
+	}
+}
+
 // checkProviderAvailability emits one providerAvailabilityMsg per provider
 // once each backend has been probed. Slow providers (HTTP timeouts) do not
 // block the others — each runs in its own goroutine via tea.Batch.
@@ -2095,7 +2147,7 @@ func findModelIndex(models []string, name string) int {
 
 // isLoadingModels returns true if any model list is still being fetched.
 func (m SetupModel) isLoadingModels() bool {
-	return m.modelsLoading || m.claudeModelsLoading || m.ollamaModelsLoading || m.mlxModelsLoading || m.codexModelsLoading || m.copilotModelsLoading || m.lmstudioModelsLoading
+	return m.modelsLoading || m.claudeModelsLoading || m.ollamaModelsLoading || m.mlxModelsLoading || m.codexModelsLoading || m.copilotModelsLoading || m.lmstudioModelsLoading || m.deepseekModelsLoading
 }
 
 // ensureSectionVisible scrolls the viewport so the focused section is visible.
