@@ -63,7 +63,7 @@ Other options:
 - **Prebuilt binaries** for Linux, macOS and Windows (amd64/arm64) on the [Releases page](https://github.com/Decsr/Decsr-Code/releases). Unpack and put `decsr` on your `PATH`.
   On Windows, verify commands run through `sh` when Git for Windows or MSYS2 provides one, otherwise through `cmd.exe`. tmux features are unavailable; WSL2 also works.
 - **go install** (Go 1.26+): `go install github.com/Decsr/Decsr-Code/cmd/decsr@latest`
-- **From source**: `git clone https://github.com/Decsr/Decsr-Code.git && cd Decsr-Code && make build install`
+- **From source**: see [Build from source](#build-from-source).
 
 You need a git repository to work in and at least one backend (see [Backends](#backends)). [bd (beads)](https://github.com/gastownhall/beads) is recommended for the classic pipeline only.
 
@@ -332,6 +332,38 @@ decsr memory add "Use sqlc for typed queries"
 - [`doc/memory.md`](doc/memory.md) — project memory
 - [`doc/context-pack.md`](doc/context-pack.md) — context pack format and configuration
 - [`doc/roadmap.md`](doc/roadmap.md) — what was built, phase by phase
+
+## Build from source
+
+You need Go 1.26+, `git` and `make`, plus at least one backend (see [Backends](#backends)).
+
+```bash
+git clone https://github.com/Decsr/Decsr-Code.git
+cd Decsr-Code
+make build          # builds ./bin/decsr
+```
+
+Run it from the repository you want agents to work on:
+
+```bash
+cd /path/to/your-repo
+/path/to/Decsr-Code/bin/decsr
+```
+
+Or install it so `decsr` works from anywhere:
+
+```bash
+make install                              # installs to $(go env GOPATH)/bin, usually ~/go/bin
+export PATH="$PATH:$(go env GOPATH)/bin"  # if that directory is not on PATH yet
+decsr doctor                              # check git, config, runners and keys
+decsr
+```
+
+To update, pull and install again. Pulling alone does not change the installed binary:
+
+```bash
+git pull && make install
+```
 
 ## Development
 

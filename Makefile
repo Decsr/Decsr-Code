@@ -2,8 +2,9 @@ BINARY      := decsr
 CMD         := ./cmd/decsr
 INSTALL_DIR := $(shell go env GOPATH)/bin
 
-# Version: prefer .Version file, fall back to git describe, then "dev".
-VERSION     := $(shell cat .Version 2>/dev/null || git describe --tags --always --dirty 2>/dev/null || echo "dev")
+# Version: prefer the latest git tag (git describe, leading "v" dropped), fall back
+# to the .Version file, then "dev".
+VERSION     := $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' | grep . || cat .Version 2>/dev/null || echo "dev")
 LDFLAGS     := -ldflags "-X main.version=$(VERSION)"
 
 .PHONY: all build run test test-race lint vet demo clean install uninstall help bump-patch bump-minor bump-major release
