@@ -55,7 +55,7 @@ Nothing runs until you say so. You can mix Claude, Codex, OpenCode, Copilot, dsh
 curl -fsSL https://raw.githubusercontent.com/Decsr/Decsr-Code/main/scripts/install.sh | sh
 ```
 
-The script installs the latest release to `~/.local/bin` (no sudo) after checking its checksum. Set `DECSR_VERSION=v0.7.0` to pin a release or `DECSR_INSTALL_DIR` to change the directory.
+The script installs the latest release to `~/.local/bin` (no sudo) after checking its checksum. Set `DECSR_VERSION=v0.7.1` to pin a release or `DECSR_INSTALL_DIR` to change the directory.
 
 Other options:
 
