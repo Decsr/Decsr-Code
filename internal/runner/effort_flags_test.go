@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,9 @@ func writeArgCaptureScript(t *testing.T, stdout string) (bin, argsFile string) {
 	dir := t.TempDir()
 	bin = filepath.Join(dir, "fake-cli")
 	argsFile = filepath.Join(dir, "args.txt")
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
 	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\nprintf '%%s' %q\n", argsFile, stdout)
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -14,6 +15,9 @@ func fakeBD(t *testing.T, stdout string) (argvFile string) {
 	t.Helper()
 	dir := t.TempDir()
 	argvFile = filepath.Join(dir, "argv")
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
 	script := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> " + argvFile + "; done\nprintf '%s' '" + stdout + "'\n"
 	if err := os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)

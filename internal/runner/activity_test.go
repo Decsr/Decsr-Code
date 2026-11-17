@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,9 @@ func fakeCLI(t *testing.T, name, fixture string) (bin, argsFile string) {
 	abs, err := filepath.Abs(filepath.Join("testdata", fixture))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
 	}
 	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\ncat %q\n", argsFile, abs)
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
@@ -212,6 +216,9 @@ func TestOpenCodeStreamsBeforeExit(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "opencode")
 	marker := filepath.Join(dir, "finished")
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
 	script := "#!/bin/sh\n" +
 		`echo '{"type":"tool_use","part":{"id":"p1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"x"}}}'` + "\n" +
 		`echo '{"type":"text","part":{"text":"live"}}'` + "\n" +
@@ -334,6 +341,9 @@ func TestCodexExecActivities(t *testing.T) {
 func TestCodexPlainOutputStillWorks(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "codex")
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'plain reply'\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}

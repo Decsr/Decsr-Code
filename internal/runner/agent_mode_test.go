@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,9 @@ func argvOf(t *testing.T, name string, run func(bin string) error) []string {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, name)
 	argsFile := filepath.Join(dir, "args.txt")
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
 	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\necho '{\"type\":\"result\",\"result\":\"ok\"}'\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -68,6 +72,9 @@ func TestClaudeRunSetsNonessentialTrafficEnv(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "claude")
 	out := filepath.Join(dir, "env.txt")
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
 	script := "#!/bin/sh\nprintf '%s' \"$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC\" > " + out + "\necho '{\"type\":\"result\",\"result\":\"ok\"}'\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)

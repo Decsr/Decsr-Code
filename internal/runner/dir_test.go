@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -13,6 +14,9 @@ func TestCLIRunnersUseRequestDir(t *testing.T) {
 	bins := t.TempDir()
 	work := t.TempDir()
 	out := filepath.Join(t.TempDir(), "pwd.txt")
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
 	script := "#!/bin/sh\npwd > " + out + "\n"
 
 	cases := map[string]func(bin string) LLMRunner{

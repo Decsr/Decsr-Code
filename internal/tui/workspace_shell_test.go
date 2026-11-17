@@ -2,6 +2,7 @@ package tui
 
 import (
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -29,8 +30,18 @@ func TestShellCommandUsesShellEnvAndDir(t *testing.T) {
 		t.Errorf("cmd = %v dir %q", cmd.Args, cmd.Dir)
 	}
 	cmd = shellCommand("/work/t1", func(string) string { return "" })
-	if cmd.Args[0] != "/bin/sh" {
-		t.Errorf("fallback args = %v", cmd.Args)
+	want := "/bin/sh"
+	if runtime.GOOS == "windows" {
+		want = "cmd.exe"
+	}
+	if cmd.Args[0] != want {
+		t.Errorf("fallback args = %v, want %s", cmd.Args, want)
+	}
+	if runtime.GOOS == "windows" {
+		cmd = shellCommand("/work/t1", func(k string) string { return map[string]string{"COMSPEC": `C:\Windows\System32\cmd.exe`}[k] })
+		if cmd.Args[0] != `C:\Windows\System32\cmd.exe` {
+			t.Errorf("COMSPEC args = %v", cmd.Args)
+		}
 	}
 }
 

@@ -32,7 +32,8 @@ type Result struct {
 }
 
 // Runner executes shell commands scoped to a specific project root directory.
-// Commands are always run with sh -c inside the configured root.
+// Commands are run through the platform shell (sh -c, or cmd.exe /C on
+// Windows without sh) inside the configured root.
 type Runner struct {
 	root    string
 	timeout time.Duration
@@ -66,7 +67,8 @@ func (r *Runner) RunContext(parent context.Context, command string) Result {
 	ctx, cancel := context.WithTimeout(parent, r.timeout)
 	defer cancel()
 
-	cmd := CommandContext(ctx, "sh", "-c", command)
+	name, args := shellArgs(command)
+	cmd := CommandContext(ctx, name, args...)
 	cmd.Dir = r.root
 	killProcessGroup(cmd)
 	cmd.WaitDelay = killWaitDelay
@@ -106,7 +108,8 @@ func (r *Runner) RunUnchecked(command string) Result {
 	ctx, cancel := context.WithTimeout(context.Background(), r.timeout)
 	defer cancel()
 
-	cmd := CommandContext(ctx, "sh", "-c", command)
+	name, args := shellArgs(command)
+	cmd := CommandContext(ctx, name, args...)
 	cmd.Dir = r.root
 	killProcessGroup(cmd)
 	cmd.WaitDelay = killWaitDelay

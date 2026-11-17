@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -14,11 +15,17 @@ import (
 // wsShellDoneMsg reports the end of a shell opened with "!".
 type wsShellDoneMsg struct{ err error }
 
-// shellCommand is the user's shell ($SHELL, else /bin/sh) started in dir.
+// shellCommand is the user's shell ($SHELL, else /bin/sh, or %COMSPEC% on
+// Windows) started in dir.
 func shellCommand(dir string, getenv func(string) string) *exec.Cmd {
 	sh := getenv("SHELL")
 	if sh == "" {
 		sh = "/bin/sh"
+		if runtime.GOOS == "windows" {
+			if sh = getenv("COMSPEC"); sh == "" {
+				sh = "cmd.exe"
+			}
+		}
 	}
 	cmd := exec.Command(sh)
 	cmd.Dir = dir

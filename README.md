@@ -61,6 +61,7 @@ Other options:
 
 - **Homebrew** (once the tap is published): `brew install decsr/tap/decsr`
 - **Prebuilt binaries** for Linux, macOS and Windows (amd64/arm64) on the [Releases page](https://github.com/Decsr/Decsr-Code/releases). Unpack and put `decsr` on your `PATH`.
+  On Windows, verify commands run through `sh` when Git for Windows or MSYS2 provides one, otherwise through `cmd.exe`. tmux features are unavailable; WSL2 also works.
 - **go install** (Go 1.26+): `go install github.com/Decsr/Decsr-Code/cmd/decsr@latest`
 - **From source**: `git clone https://github.com/Decsr/Decsr-Code.git && cd Decsr-Code && make build install`
 

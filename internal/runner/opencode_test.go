@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -57,6 +58,9 @@ func writeFakeOpenCode(t *testing.T, stdout string) string {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(dir, "opencode")
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
 	script := "#!/bin/sh\ncat \"" + filepath.Join(dir, "out.ndjson") + "\"\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -88,6 +92,9 @@ func TestOpenCodeRunRaw_AppliesEffortVariant(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "opencode")
 	argsFile := filepath.Join(dir, "args.txt")
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
 	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\n", argsFile)
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -109,6 +116,9 @@ func TestOpenCodeRunRaw_LocalModelSkipsEffortVariant(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "opencode")
 	argsFile := filepath.Join(dir, "args.txt")
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
 	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\n", argsFile)
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)

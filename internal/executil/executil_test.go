@@ -3,6 +3,7 @@ package executil
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +62,9 @@ func TestRunner_Run(t *testing.T) {
 }
 
 func TestRunner_RunInProjectRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs POSIX utilities")
+	}
 	dir := t.TempDir()
 
 	// Create a marker file to verify the command runs in the correct directory.
@@ -81,6 +85,9 @@ func TestRunner_RunInProjectRoot(t *testing.T) {
 }
 
 func TestRunner_RunFailingCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs POSIX utilities")
+	}
 	r := NewRunner(t.TempDir())
 	res := r.Run("false")
 
@@ -102,6 +109,9 @@ func TestRunner_RunRejectsBadCommand(t *testing.T) {
 }
 
 func TestRunner_TimeoutKillsGrandchildren(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs POSIX utilities")
+	}
 	marker := filepath.Join(t.TempDir(), "survived")
 	// Background grandchild would write the marker after 1.5s if it survived.
 	cmd := "(sleep 1.5; touch " + marker + ") & sleep 30; wait"

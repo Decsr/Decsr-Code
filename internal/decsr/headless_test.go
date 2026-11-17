@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -33,6 +34,9 @@ func TestWaitArtifact_NonInteractiveAutoApproves(t *testing.T) {
 func TestNextBead_EmptyTaskBeadIDNeverRunsUnscopedReady(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "called")
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
 	script := "#!/bin/sh\necho \"$@\" >> " + marker + "\necho '[]'\n"
 	if err := os.WriteFile(filepath.Join(dir, "bd"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)

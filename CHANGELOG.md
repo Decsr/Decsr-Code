@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Native Windows support: commands run through `sh` when available (Git for
+  Windows, MSYS2) else `cmd.exe`, and cancelling a command kills its whole
+  process tree.
+
 ## [0.7.0] - 2026-11-17
 
 ### Added

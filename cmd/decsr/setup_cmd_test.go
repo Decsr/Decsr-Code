@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/Decsr/Decsr-Code/internal/tui"
@@ -39,6 +40,9 @@ func TestRunnerUsableFollowsDoctorBackend(t *testing.T) {
 	root := t.TempDir()
 	if runnerUsable(root) {
 		t.Fatal("empty PATH: no runner should be usable")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
 	}
 	script := "#!/bin/sh\necho 1.0\n"
 	if err := os.WriteFile(filepath.Join(bin, "opencode"), []byte(script), 0o700); err != nil { // #nosec G306 -- test stub

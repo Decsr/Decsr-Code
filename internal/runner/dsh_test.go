@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -182,6 +183,9 @@ func fakeDsh(t *testing.T, stdout string) (bin, dir string) {
 	fixture := filepath.Join(dir, "out.ndjson")
 	if err := os.WriteFile(fixture, []byte(stdout), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
 	}
 	script := `#!/bin/sh
 printf '%s\n' "$@" > "` + dir + `/args.txt"

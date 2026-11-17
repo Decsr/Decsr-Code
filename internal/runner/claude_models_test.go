@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -30,6 +31,9 @@ func TestClaudeRunnerDefaultsArgv(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "args.txt")
 	bin := filepath.Join(dir, "fakeclaude")
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
 	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + out + "'\ncat >/dev/null\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
