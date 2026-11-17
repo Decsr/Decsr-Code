@@ -7,7 +7,18 @@ import (
 	"github.com/alecthomas/chroma/v2/formatters"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
+
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
+
+// chromaStyle is the syntax-highlighting palette for the active theme: a light
+// one on a light terminal so the code stays readable.
+func chromaStyle() *chroma.Style {
+	if ui.IsDark() {
+		return styles.Get("github-dark")
+	}
+	return styles.Get("github")
+}
 
 // highlighter applies syntax highlighting to code blocks in agent output.
 type highlighter struct {
@@ -19,7 +30,7 @@ type highlighter struct {
 func newHighlighter(language string) *highlighter {
 	return &highlighter{
 		language: normalizeLanguage(language),
-		style:    styles.Get("dracula"),
+		style:    chromaStyle(),
 	}
 }
 
@@ -109,7 +120,7 @@ func highlightCode(code, language string, style *chroma.Style) string {
 	}
 
 	if style == nil {
-		style = styles.Get("dracula")
+		style = chromaStyle()
 	}
 
 	iterator, err := lexer.Tokenise(nil, code)

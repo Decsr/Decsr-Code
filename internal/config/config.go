@@ -99,7 +99,12 @@ type UIConfig struct {
 	// Theme picks the colour theme: "auto" (default, asks the terminal and
 	// falls back to dark), "dark" or "light". "" = auto.
 	Theme string `yaml:"theme,omitempty"`
+	// Markdown renders agent and lead messages as Markdown. nil = on.
+	Markdown *bool `yaml:"markdown,omitempty"`
 }
+
+// MarkdownOn reports whether messages are rendered as Markdown.
+func (u UIConfig) MarkdownOn() bool { return u.Markdown == nil || *u.Markdown }
 
 // NotifyConfig controls external notifications (e.g. cmux alerts on approval
 // gates, completion, and errors). Notifications are enabled by default and only
@@ -563,6 +568,9 @@ func merge(dst *Config, src Config) {
 	}
 	if src.UI.Theme != "" {
 		dst.UI.Theme = src.UI.Theme
+	}
+	if src.UI.Markdown != nil {
+		dst.UI.Markdown = src.UI.Markdown
 	}
 
 	if src.Workspace.MaxParallel > 0 {

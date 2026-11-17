@@ -95,7 +95,7 @@ func (m *FilePreviewModel) load(relPath string) {
 
 	lang := languageForPath(relPath)
 	h := newHighlighter(lang)
-	h.style = codeStyle()
+	h.style = chromaStyle()
 	lines := strings.Split(strings.ReplaceAll(string(data), "\t", "    "), "\n")
 	// Wrap each source line in a fence so the highlighter colours the whole
 	// file, then strip the synthetic fence lines from the result.

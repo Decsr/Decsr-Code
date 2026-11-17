@@ -179,6 +179,12 @@ func renderFeedMsg(who, text string, at time.Time, w int) []string {
 			label, col = "Lead", ui.Accent
 		}
 		out = append(out, lipgloss.NewStyle().Foreground(col).Bold(true).Render(label)+clock)
+		if md, ok := renderMarkdown(text, w-2); ok {
+			for _, l := range md {
+				out = append(out, "  "+l)
+			}
+			break
+		}
 		for _, l := range hardWrap(text, w-2) {
 			out = append(out, "  "+lipgloss.NewStyle().Foreground(ui.Text).Render(l))
 		}
@@ -518,6 +524,20 @@ func waitingRows(n *workspace.Node, iw int) []string {
 		text = workspace.SanitizeText(text)
 	}
 	text = strings.TrimSpace(text)
+	if prefix == "? " {
+		if md, ok := renderMarkdown(text, iw-2); ok {
+			md = clampMarkdownRows(md, cardWaitingLines, iw-2)
+			q := lipgloss.NewStyle().Foreground(ui.Warn).Render("? ")
+			for i, l := range md {
+				p := "  "
+				if i == 0 {
+					p = q
+				}
+				md[i] = p + l
+			}
+			return md
+		}
+	}
 	lines := hardWrap(oneLine(prefix+text), iw)
 	if len(lines) > cardWaitingLines {
 		lines = lines[:cardWaitingLines]
@@ -531,10 +551,30 @@ func waitingRows(n *workspace.Node, iw int) []string {
 	return out
 }
 
+// clampMarkdownRows drops the blank rows of rendered Markdown and keeps at most
+// n of the rest, the last ending in "…" when there is more.
+func clampMarkdownRows(lines []string, n, iw int) []string {
+	var rows []string
+	for _, l := range lines {
+		if strings.TrimSpace(ansi.Strip(l)) != "" {
+			rows = append(rows, l)
+		}
+	}
+	if len(rows) > n {
+		rows = rows[:n]
+		rows[n-1] = ansi.Truncate(rows[n-1], max(iw-2, 1), "") + lipgloss.NewStyle().Foreground(ui.Muted).Render(" …")
+	}
+	return rows
+}
+
 // summaryRows is the node summary in the text colour, wrapped to at most
 // cardSummaryLines lines, the last ending in "…" when there is more.
 func summaryRows(s string, iw int) []string {
-	s = oneLine(workspace.SanitizeText(s))
+	s = workspace.SanitizeText(s)
+	if md, ok := renderMarkdown(s, iw); ok {
+		return clampMarkdownRows(md, cardSummaryLines, iw)
+	}
+	s = oneLine(s)
 	if s == "" {
 		return nil
 	}
@@ -612,7 +652,7 @@ func (m workspaceModel) feedLayout(pw int) (lines []string, spans map[string][2]
 		isSystem := false
 		switch it.Kind {
 		case feedMsg:
-			key := fmt.Sprintf("%d|%s|%d|%s", cw, it.Who, it.At.UnixNano(), it.Text)
+			key := fmt.Sprintf("%d|%t|%t|%s|%d|%s", cw, ui.IsDark(), markdownActive(cw-2), it.Who, it.At.UnixNano(), it.Text)
 			var ok bool
 			if body, ok = m.feedCache.get(key); !ok {
 				body = renderFeedMsg(it.Who, it.Text, it.At, cw)

@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/Decsr/Decsr-Code/internal/runner"
 	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
@@ -91,7 +92,11 @@ func (m *workspaceModel) refreshTimeline() {
 			if strings.TrimSpace(detail) == "" {
 				lines = append(lines, dim.Render("      (no detail)"))
 			}
-			for _, l := range activityDetailLines(detail, w-2, outDetailLines) {
+			detailLines := activityDetailLines(detail, w-2, outDetailLines)
+			if a.Kind == runner.ActMessage {
+				detailLines = activityMessageLines(detail, w-2, outDetailLines, a.State == runner.ActRunning)
+			}
+			for _, l := range detailLines {
 				lines = append(lines, "  "+l)
 			}
 		}

@@ -40,6 +40,7 @@ type wsDiffView struct {
 	editing bool
 	input   textinput.Model
 	body    int // body height of the last render, for paging
+	hl      map[*workspace.DiffFile]*fileHL
 }
 
 func (v *wsDiffView) rowsOf() []diffRow {
@@ -745,6 +746,11 @@ func (v *wsDiffView) renderRow(f *workspace.DiffFile, r diffRow, cursor bool, w,
 		return fmt.Sprintf("%*d", nw, n)
 	}
 	nums := bg.Foreground(ui.Muted).Render(num(l.OldNo) + " " + num(l.NewNo) + " ")
+	if l.Kind != '\\' {
+		if hl := v.diffSegments(f); hl != nil && r.hunk < len(hl) && hl[r.hunk][r.line] != nil {
+			return mark + nums + renderCodeSegs(sign+" ", hl[r.hunk][r.line], v.hx, avail, bg, fg)
+		}
+	}
 	text := ansi.TruncateLeft(sanitizeCode(l.Text), v.hx, "")
 	body := sign + " " + text
 	body = padRight(ansi.Truncate(body, avail, "…"), avail)

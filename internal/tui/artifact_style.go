@@ -4,8 +4,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/alecthomas/chroma/v2"
-	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Decsr/Decsr-Code/internal/ui"
@@ -23,15 +21,6 @@ var (
 	mdBoldStyle   = lipgloss.NewStyle().Bold(true).Foreground(ui.Text)
 )
 
-// codeStyle is the syntax-highlighting palette for the active theme: a light
-// one on a light terminal so the code stays readable.
-func codeStyle() *chroma.Style {
-	if ui.IsDark() {
-		return styles.Get("dracula")
-	}
-	return styles.Get("github")
-}
-
 var (
 	mdBoldRe  = regexp.MustCompile(`\*\*(.+?)\*\*`)
 	mdLabelRe = regexp.MustCompile(`^([A-Z][A-Za-z][A-Za-z ]{0,18}):(\s.*)?$`)
@@ -43,7 +32,7 @@ var (
 // the wrap width math (which ignores ANSI) stays correct.
 func styleArtifactContent(filename, wrapped string) string {
 	if strings.HasSuffix(filename, ".json") {
-		return highlightCode(wrapped, "JSON", codeStyle())
+		return highlightCode(wrapped, "JSON", chromaStyle())
 	}
 	lines := strings.Split(wrapped, "\n")
 	for i, line := range lines {

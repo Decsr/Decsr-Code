@@ -280,6 +280,29 @@ func activityDetailLines(detail string, w, limit int) []string {
 	return out
 }
 
+// activityMessageLines is the detail of a finished message item as Markdown,
+// indented by four and cut to limit lines; it falls back to activityDetailLines
+// when Markdown is off or the text is still running.
+func activityMessageLines(detail string, w, limit int, running bool) []string {
+	detail = strings.TrimSpace(workspace.SanitizeText(detail))
+	if running || detail == "" {
+		return activityDetailLines(detail, w, limit)
+	}
+	md, ok := renderMarkdown(detail, w-4)
+	if !ok {
+		return activityDetailLines(detail, w, limit)
+	}
+	if limit > 0 && len(md) > limit {
+		md = md[:limit]
+		md[limit-1] = ansi.Truncate(md[limit-1], max(w-6, 1), "") + lipgloss.NewStyle().Foreground(ui.Muted).Render(" …")
+	}
+	out := make([]string, len(md))
+	for i, l := range md {
+		out[i] = "    " + l
+	}
+	return out
+}
+
 // currentAction is the item a node is busy with: the latest running one, else
 // the latest. ok is false for a node without activity.
 func currentAction(n *workspace.Node) (runner.Activity, bool) {

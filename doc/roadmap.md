@@ -314,8 +314,15 @@ connect`.
 
 **Done when**
 
-- [ ] Those places render Markdown, with the plain fallback.
-- [ ] The diff view highlights code by language.
+- [x] Those places render Markdown, with the plain fallback.
+- [x] The diff view highlights code by language.
+
+Approved details: the glamour style is built from the decsr theme tokens (no
+`#` on headings, `•` bullets, muted quotes); text stays plain while it is
+streaming, and `ui.markdown: false` turns Markdown off. Code uses chroma
+`github-dark` on a dark theme and `github` on a light one. The diff view lexes
+each hunk as an old and a new side, so multi-line comments colour right, and
+skips files with more than 2000 changed lines.
 
 **Builds on.** The feed, output view, diff view.
 
