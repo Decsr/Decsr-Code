@@ -219,6 +219,7 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 		Context:       wx.workContext(g, n),
 		ReadOnly:      role.ReadOnly,
 		Mode:          role.Agent.EffectiveMode(),
+		MCP:           role.Agent.MCP,
 		BuildCommands: buildCommands,
 		OnActivity:    func(a runner.Activity) { emit(Event{NodeID: n.ID, Type: EventActivity, Activity: &a}) },
 		OnContext: func(tokens int) {

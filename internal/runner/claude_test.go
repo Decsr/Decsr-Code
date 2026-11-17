@@ -138,3 +138,24 @@ func TestStreamClaudeOutput_ResultOnlyFallback(t *testing.T) {
 		t.Errorf("emitted text: want %q, got %q", want, got)
 	}
 }
+
+func TestParseClaudeStreamEvent_CachedTokensInPrompt(t *testing.T) {
+	line := []byte(`{"type":"result","result":"x","usage":{"input_tokens":2,"output_tokens":5,"cache_creation_input_tokens":68894,"cache_read_input_tokens":100}}`)
+	evt, err := parseClaudeStreamEvent(line)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := evt.Usage.promptTokens(); got != 68996 {
+		t.Errorf("promptTokens: want 68996, got %d", got)
+	}
+}
+
+func TestParseClaudeJSONResponse_CachedTokensInPrompt(t *testing.T) {
+	_, usage, err := parseClaudeJSONResponse([]byte(`{"result":"x","usage":{"input_tokens":2,"output_tokens":5,"cache_creation_input_tokens":68894,"cache_read_input_tokens":100}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.InputTokens != 68996 {
+		t.Errorf("InputTokens: want 68996, got %d", usage.InputTokens)
+	}
+}

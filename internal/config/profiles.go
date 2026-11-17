@@ -25,7 +25,7 @@ var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 var knownRunners = map[string]bool{
 	"": true, "opencode": true, "claude": true, "ollama": true, "mlx": true,
 	"codex": true, "copilot": true, "lmstudio": true, "openai": true, "deepseek": true,
-	"openrouter": true, "groq": true,
+	"openrouter": true, "groq": true, "dsh": true,
 }
 
 // KnownRunner reports whether name is a runner the factory accepts.

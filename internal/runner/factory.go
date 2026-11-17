@@ -37,6 +37,9 @@ func New(cfg config.AgentConfig, skillLoader *skills.Loader, promptLanguage stri
 	case "copilot":
 		base = CopilotRunner{Model: cfg.Model}
 
+	case "dsh":
+		base = DshRunner{Model: cfg.Model}
+
 	case "lmstudio":
 		base = NewLMStudioRunner(cfg.Model)
 
@@ -44,7 +47,7 @@ func New(cfg config.AgentConfig, skillLoader *skills.Loader, promptLanguage stri
 		base = newPresetRunner(cfg)
 
 	default:
-		return nil, fmt.Errorf("runner: unknown runner %q (supported: opencode, claude, ollama, mlx, codex, copilot, lmstudio, openai, deepseek, openrouter, groq)", cfg.Runner)
+		return nil, fmt.Errorf("runner: unknown runner %q (supported: opencode, claude, ollama, mlx, codex, copilot, dsh, lmstudio, openai, deepseek, openrouter, groq)", cfg.Runner)
 	}
 
 	if skillLoader != nil {

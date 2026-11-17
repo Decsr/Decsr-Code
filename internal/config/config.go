@@ -236,6 +236,7 @@ type AgentConfig struct {
 	MaxContextTokens int      `yaml:"max_context_tokens,omitempty"` // 0 = no limit (for local models)
 	ReadOnly         bool     `yaml:"read_only,omitempty"`          // workspace role that reports only and never writes files
 	Mode             string   `yaml:"mode,omitempty"`               // workspace roles: "" = by runner, "text" (decsr writes file blocks) or "agent" (the runner edits files with its own tools)
+	MCP              bool     `yaml:"mcp,omitempty"`                // claude runner: load the user's own MCP servers (default: none, for lean runs)
 	Skills           []string `yaml:"-"`                            // always from defaults, never persisted
 	UserSkills       []string `yaml:"skills,omitempty"`             // file-based skills (.decsr/skills/<name>.md)
 }
@@ -649,6 +650,9 @@ func merge(dst *Config, src Config) {
 			if ac.Mode != "" {
 				existing.Mode = ac.Mode
 			}
+			if ac.MCP {
+				existing.MCP = true
+			}
 			if len(ac.UserSkills) > 0 {
 				existing.UserSkills = ac.UserSkills
 			}
@@ -724,14 +728,14 @@ func (ac AgentConfig) modeRunner() string {
 	return ac.Runner
 }
 
-// EffectiveMode is the explicit mode, else "agent" for opencode and codex and
+// EffectiveMode is the explicit mode, else "agent" for opencode, codex and dsh and
 // "text" for every other runner.
 func (ac AgentConfig) EffectiveMode() string {
 	if ac.Mode != "" {
 		return ac.Mode
 	}
 	switch ac.modeRunner() {
-	case "opencode", "codex":
+	case "opencode", "codex", "dsh":
 		return ModeAgent
 	}
 	return ModeText
@@ -750,8 +754,8 @@ func (ac AgentConfig) ModeError() error {
 	r := ac.modeRunner()
 	switch ac.EffectiveMode() {
 	case ModeAgent:
-		if r != "claude" && r != "opencode" && r != "codex" {
-			return errors.New("agent mode needs claude, opencode or codex")
+		if r != "claude" && r != "opencode" && r != "codex" && r != "dsh" {
+			return errors.New("agent mode needs claude, opencode, codex or dsh")
 		}
 	case ModeText:
 		if r == "opencode" {

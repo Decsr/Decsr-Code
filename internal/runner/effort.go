@@ -18,6 +18,7 @@ var (
 	codexEfforts       = []string{"minimal", "low", "medium", "high"}
 	copilotEfforts     = []string{"low", "medium", "high", "xhigh", "max"}
 	openCodeFallbacks  = []string{"low", "medium", "high"}
+	dshEfforts         = []string{"low", "high", "max"}
 	lmStudioEfforts    = []string{"low", "medium", "high", "xhigh"}
 	mlxEfforts         = []string{"low", "medium", "high"}
 	effortHTTPTimeout  = 3 * time.Second
@@ -56,6 +57,8 @@ func EffortOptions(provider, model string) []string {
 			return filterEfforts(opts, copilotEfforts)
 		}
 		return append([]string(nil), copilotEfforts...)
+	case "dsh":
+		return append([]string(nil), dshEfforts...)
 	case "opencode", "":
 		return openCodeEfforts(model)
 	case "ollama":

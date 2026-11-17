@@ -45,9 +45,44 @@ func claudeArgv(t *testing.T, req CompletionRequest) []string {
 
 func TestClaudeTextModeKeepsToolsOff(t *testing.T) {
 	got := claudeArgv(t, CompletionRequest{})
-	want := []string{"--output-format", "stream-json", "--verbose", "--no-session-persistence", "--allowedTools", "", "--model", "claude-opus-5-5", "--effort", "high"}
+	want := []string{"--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--setting-sources", "project,local", "--allowedTools", "", "--model", "claude-opus-5-5", "--effort", "high"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %q, want %q", got, want)
+	}
+}
+
+func TestClaudeMCPRoleKeepsUserServers(t *testing.T) {
+	for _, agent := range []bool{false, true} {
+		got := claudeArgv(t, CompletionRequest{Agent: agent, MCP: true})
+		joined := strings.Join(got, " ")
+		if strings.Contains(joined, "--strict-mcp-config") || strings.Contains(joined, "--mcp-config") {
+			t.Errorf("agent=%v: mcp role still passes the MCP flags: %q", agent, got)
+		}
+		if !strings.Contains(joined, "--setting-sources project,local") {
+			t.Errorf("agent=%v: --setting-sources missing: %q", agent, got)
+		}
+	}
+}
+
+func TestClaudeRunSetsNonessentialTrafficEnv(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "claude")
+	out := filepath.Join(dir, "env.txt")
+	script := "#!/bin/sh\nprintf '%s' \"$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC\" > " + out + "\necho '{\"type\":\"result\",\"result\":\"ok\"}'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ch, err := ClaudeRunner{Binary: bin}.Complete(context.Background(), CompletionRequest{Messages: []ConvMessage{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain(t, ch)
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "1" {
+		t.Errorf("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = %q, want 1", data)
 	}
 }
 
@@ -61,6 +96,7 @@ func TestClaudeAgentModeAllowList(t *testing.T) {
 	}
 	got := claudeArgv(t, CompletionRequest{Agent: true, AllowedTools: tools})
 	want := []string{"--output-format", "stream-json", "--verbose", "--no-session-persistence",
+		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--setting-sources", "project,local",
 		"--tools", "Read,Edit,Write,Glob,Grep,Bash",
 		"--allowedTools", strings.Join(wantTools, ","),
 		"--permission-mode", "dontAsk",

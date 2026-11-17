@@ -245,7 +245,7 @@ func TestReviewPromptHasTableAndBudgetedExcerpt(t *testing.T) {
 		t.Error("only the first line of an error goes in the table")
 	}
 	start := strings.Index(p, "## What failed")
-	end := strings.Index(p, "## Rules")
+	end := len(p)
 	if got := utf8.RuneCountInString(p[start:end]); got > ReviewExcerptChars+100 {
 		t.Errorf("failure section is %d chars, budget %d", got, ReviewExcerptChars)
 	}

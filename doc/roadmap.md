@@ -255,28 +255,50 @@ first start easy.
 **Builds on.** Waiting nodes, reviews, limits, automations, notifications,
 `decsr connect`, `decsr doctor`.
 
-## Phase 7 — Split view and mouse
+## Phase 7 — Lean runners and dsh
 
-**Goal.** Watch the feed and a node's live work side by side, and use the mouse
-when you want to.
+**Goal.** Cheaper, more stable worker runs, and a runner for the DeepSeek
+Harness CLI.
 
 **Features**
 
-- Split view: `v` toggles it at 140 or more columns. The feed is on the left
-  and the selected node's live timeline on the right, following the selection.
-  On narrower terminals `v` shows a hint.
-- Mouse: click to select a node or card, scroll the feed, click a fold to
-  expand. Hit areas use the `bubblezone` library. `ui.mouse: false` turns the
-  mouse off so the terminal can select text. Keyboard use stays complete
-  without the mouse.
+- Lean Claude runs. Every `claude` run (text and agent mode) starts with
+  `--strict-mcp-config --mcp-config '{"mcpServers":{}}'`,
+  `--setting-sources project,local` and
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`. `--bare` is not used: it breaks
+  subscription logins. A role with `mcp: true` skips the two MCP flags, so the
+  user's own MCP servers load.
+- Prompt order for prefix caching. The worker prompt is now static intro,
+  output format, role, then project context; the sub-task is only the user
+  message. The split and review prompts put their static rules and output
+  format above the dynamic sections. The start of every prompt is the same from
+  call to call.
+- Better failure excerpts. When a failing command's output is cut, the end is
+  kept as before and lines of the cut part that mention an error, failure,
+  panic or exception are kept too, with 2 lines of context, in the same
+  character budget. Omission markers stay accurate.
+- The `dsh` runner. It runs `dsh --profile headless --json -` with the task on
+  stdin and reads the event stream: text, thinking, tool calls and results,
+  usage and the final reason. A run succeeds only when dsh exits 0 and the
+  final reason is `completed`. Agent mode uses the `workspace-write` preset
+  with the shared git directory granted; text mode and read-only roles use the
+  `read-only` preset. Approvals are never asked for. The model
+  (`provider/model`) and effort are set with a temporary patch file, which is
+  removed after the run. The DeepSeek key comes from the environment or the
+  key saved by `decsr connect deepseek`.
 
 **Done when**
 
-- [ ] `v` splits at 140 or more columns and shows a hint below that.
-- [ ] Clicks and scrolling work.
-- [ ] `ui.mouse: false` disables them.
+- [x] Claude runs carry the lean flags and the env variable, and `mcp: true`
+      removes only the MCP flags.
+- [x] The worker, split and review prompts keep their static part first.
+- [x] A cut command output keeps its error lines and the end within the
+      budget.
+- [x] `runner: dsh` works in text and agent mode, with model, effort, usage and
+      rate-limit detection.
 
-**Builds on.** The feed, output timeline, sidebar.
+**Builds on.** Agent mode, the runner factory, handoff excerpts, `decsr
+connect`.
 
 ## Phase 8 — Rendering
 

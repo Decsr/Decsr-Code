@@ -28,6 +28,8 @@ func Ping(provider, model string) error {
 		return pingBinary(ctx, "codex")
 	case "copilot":
 		return pingBinary(ctx, "copilot")
+	case "dsh":
+		return pingBinary(ctx, "dsh")
 	case "ollama":
 		return pingOllama(ctx, model)
 	case "mlx":
@@ -64,6 +66,8 @@ func ProviderReachable(provider string) error {
 		return pingBinary(ctx, "codex")
 	case "copilot":
 		return pingBinary(ctx, "copilot")
+	case "dsh":
+		return pingBinary(ctx, "dsh")
 	case "ollama":
 		return pingHTTP(ctx, ollamaBaseURL+"/api/tags", "ollama")
 	case "mlx":

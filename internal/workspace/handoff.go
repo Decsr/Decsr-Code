@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -24,7 +25,10 @@ func FixExcerpt(failed []*Node, maxChars int) string {
 // nodes, in this priority order until the budget is spent: failing commands
 // with the tail of their output, then other errors (error activities and the
 // node error), then the files touched as one line. Thinking and message items
-// are never included. Where text was cut it says "[… N characters omitted]".
+// are never included. Where text was cut it says "[… N characters omitted]". When
+// a command output is cut, the end is kept and lines of the cut part that
+// mention an error, failure, panic or exception are kept with two lines of
+// context, in the same budget (see cutKeepingErrors).
 // detail, when not nil, returns the full detail of an activity (kept in memory
 // only); the stored, shorter detail is the fallback.
 func FixExcerptWith(failed []*Node, maxChars int, detail func(nodeID, actID string) (string, bool)) string {
@@ -107,8 +111,7 @@ func fitParts(parts []string, maxChars int) string {
 		room := budget - used - sep - 40
 		omitted := size
 		if room > 40 {
-			r := []rune(p)
-			out = append(out, fmt.Sprintf("[… %d characters omitted]\n", size-room)+string(r[size-room:]))
+			out = append(out, cutKeepingErrors([]rune(p), room))
 			omitted = 0
 		}
 		rest := 0
@@ -125,6 +128,92 @@ func fitParts(parts []string, maxChars int) string {
 		res = string([]rune(res)[:maxChars])
 	}
 	return res
+}
+
+var errorLineRe = regexp.MustCompile(`(?i)error|fail|panic|exception`)
+
+const (
+	errorContextLines = 2  // lines kept before and after a matching line
+	gapMarkerReserve  = 36 // room for one "[… N characters omitted]\n" marker
+)
+
+// cutKeepingErrors cuts r to about room characters (plus the markers). The end
+// is kept first, as it is where a failure usually shows. When the head that is
+// cut away has lines matching error|fail|panic|exception (case-insensitive),
+// up to a third of room is spent on them, each with errorContextLines lines of
+// context before and after; overlapping windows are merged and the latest
+// windows win when they do not all fit. The pieces stay in original order and
+// every gap before a piece gets its own accurate omission marker.
+func cutKeepingErrors(r []rune, room int) string {
+	size := len(r)
+	// Line i is r[starts[i]:ends[i]], without its newline.
+	var starts, ends []int
+	from := 0
+	for i := 0; i <= size; i++ {
+		if i == size || r[i] == '\n' {
+			starts, ends = append(starts, from), append(ends, i)
+			from = i + 1
+		}
+	}
+	// Windows are looked for only in the lines wholly before the part of the
+	// end that is certainly kept (two thirds of room).
+	headEnd := size - room*2/3
+	var wins [][2]int // inclusive line ranges, merged
+	for i := range starts {
+		if ends[i] > headEnd {
+			break
+		}
+		if !errorLineRe.MatchString(string(r[starts[i]:ends[i]])) {
+			continue
+		}
+		lo, hi := max(i-errorContextLines, 0), i+errorContextLines
+		if n := len(wins); n > 0 && lo <= wins[n-1][1]+1 {
+			wins[n-1][1] = hi
+		} else {
+			wins = append(wins, [2]int{lo, hi})
+		}
+	}
+	type piece struct{ from, to int }
+	var kept []piece
+	used, winBudget := 0, room/3
+	for w := len(wins) - 1; w >= 0; w-- {
+		lo := starts[wins[w][0]]
+		hi := ends[min(wins[w][1], len(ends)-1)]
+		for hi > headEnd && wins[w][1] > wins[w][0] {
+			// Context past the head would overlap the end: shrink the window.
+			wins[w][1]--
+			hi = ends[wins[w][1]]
+		}
+		if hi > headEnd {
+			continue
+		}
+		if cost := hi - lo + 1 + gapMarkerReserve; used+cost <= winBudget {
+			used += cost
+			kept = append([]piece{{lo, hi}}, kept...)
+		}
+	}
+	tailStart := size - room + used
+	for len(kept) > 0 && kept[len(kept)-1].to >= tailStart {
+		kept = kept[:len(kept)-1]
+	}
+	kept = append(kept, piece{tailStart, size})
+	var sb strings.Builder
+	prev := 0
+	for i, k := range kept {
+		gap := k.from - prev
+		if i > 0 {
+			gap-- // the newline written between two pieces
+		}
+		if gap > 0 {
+			fmt.Fprintf(&sb, "[… %d characters omitted]\n", gap)
+		}
+		sb.WriteString(string(r[k.from:k.to]))
+		if i < len(kept)-1 {
+			sb.WriteString("\n")
+		}
+		prev = k.to
+	}
+	return sb.String()
 }
 
 func add(seen map[string]bool, list *[]string, p string) {

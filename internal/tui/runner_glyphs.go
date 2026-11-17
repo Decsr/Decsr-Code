@@ -23,6 +23,7 @@ var runnerGlyphs = map[string]runnerGlyphSet{
 	"codex":    {"◎", "[X]", ""},
 	"opencode": {"⬡", "[O]", ""},
 	"copilot":  {"◈", "[G]", ""},
+	"dsh":      {"◇", "[S]", ""},
 	"deepseek": {"◆", "[D]", ""},
 	"openai":   {"○", "[A]", ""},
 	"ollama":   {"●", "[L]", ""},

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -27,7 +28,7 @@ type ClaudeRunner struct {
 func (r ClaudeRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan Token, error) {
 	prompt := buildClaudePrompt(req.Messages)
 
-	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, prompt, req.SystemPrompt, NormalizeEffort(req.Effort), req.Dir, req.Agent, req.AllowedTools)
+	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, prompt, req.SystemPrompt, NormalizeEffort(req.Effort), req.Dir, req.Agent, req.MCP, req.AllowedTools)
 	if err != nil {
 		return nil, err
 	}
@@ -43,8 +44,17 @@ func (r ClaudeRunner) Complete(ctx context.Context, req CompletionRequest) (<-ch
 // tool off. Agent mode limits the built-in tools to the ones the allow list
 // names and uses dontAsk, so anything not on the list is denied instead of
 // prompting (and a user's own settings cannot widen it).
-func claudeBaseArgs(agent bool, allowed []string) []string {
+//
+// Every run is lean: no MCP servers (unless the role sets mcp, so the user's
+// own servers load) and only the project and local settings, so a worker does
+// not pay for the user's global setup. --bare is not used: it breaks
+// subscription logins.
+func claudeBaseArgs(agent, mcp bool, allowed []string) []string {
 	args := []string{"--output-format", "stream-json", "--verbose", "--no-session-persistence"}
+	if !mcp {
+		args = append(args, "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`)
+	}
+	args = append(args, "--setting-sources", "project,local")
 	if !agent {
 		return append(args, "--allowedTools", "")
 	}
@@ -103,13 +113,13 @@ func buildClaudePrompt(messages []ConvMessage) string {
 	return sb.String()
 }
 
-func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, effort, dir string, agent bool, allowed []string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
+func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, effort, dir string, agent, mcp bool, allowed []string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "claude"
 	}
 
-	args := claudeBaseArgs(agent, allowed)
+	args := claudeBaseArgs(agent, mcp, allowed)
 	args = append(args, "--model", EffectiveModel("claude", r.Model))
 	args = append(args, "--effort", mapClaudeEffort(EffectiveEffort("claude", effort)))
 	if systemPrompt != "" {
@@ -118,6 +128,7 @@ func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemP
 
 	cmd := executil.Command(bin, args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1")
 	cmd.Stdin = strings.NewReader(prompt)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -204,9 +215,9 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 					emitted.WriteString(delta)
 				}
 			}
-			if evt.Usage.InputTokens > 0 || evt.Usage.OutputTokens > 0 {
+			if in := evt.Usage.promptTokens(); in > 0 || evt.Usage.OutputTokens > 0 {
 				finalUsage = TokenUsage{
-					InputTokens:  evt.Usage.InputTokens,
+					InputTokens:  in,
 					OutputTokens: evt.Usage.OutputTokens,
 				}
 				gotUsage = true
@@ -288,8 +299,15 @@ type claudeStreamContent struct {
 }
 
 type claudeStreamUsageFields struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+}
+
+// promptTokens is the full prompt size: uncached input plus cache writes and reads.
+func (u claudeStreamUsageFields) promptTokens() int {
+	return u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
 }
 
 func parseClaudeStreamEvent(line []byte) (claudeStreamEvent, error) {
@@ -374,8 +392,10 @@ func truncateInline(s string, max int) string {
 type claudeJSONResult struct {
 	Result string `json:"result"`
 	Usage  struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	} `json:"usage"`
 	// Fallback top-level fields present in some CLI versions.
 	TotalInputTokens  int `json:"total_input_tokens"`
@@ -399,7 +419,7 @@ func parseClaudeJSONResponse(raw []byte) (text string, usage TokenUsage, err err
 	text = result.Result
 
 	// Prefer usage sub-object; fall back to top-level total fields.
-	inputTokens := result.Usage.InputTokens
+	inputTokens := result.Usage.InputTokens + result.Usage.CacheCreationInputTokens + result.Usage.CacheReadInputTokens
 	outputTokens := result.Usage.OutputTokens
 	if inputTokens == 0 {
 		inputTokens = result.TotalInputTokens

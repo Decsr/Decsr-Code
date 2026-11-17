@@ -128,3 +128,12 @@ func TestOpenCodeRunRaw_LocalModelSkipsEffortVariant(t *testing.T) {
 		t.Fatalf("local models must not get an effort variant, got:\n%s", args)
 	}
 }
+
+func TestOpenCodeParser_StepFinishIncludesCache(t *testing.T) {
+	p := newOpenCodeParser()
+	p.feed([]byte(`{"type":"step_finish","part":{"tokens":{"input":10,"output":4,"reasoning":0,"cache":{"read":100,"write":50}}}}`))
+	_, usage := p.finish(nil, "prompt")
+	if usage.InputTokens != 160 || usage.OutputTokens != 4 {
+		t.Errorf("usage = %+v, want in 160 out 4", usage)
+	}
+}

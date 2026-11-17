@@ -52,8 +52,15 @@ func TestRunWorkerWritesFiles(t *testing.T) {
 	if res.Usage.InputTokens != 7 {
 		t.Errorf("usage = %+v", res.Usage)
 	}
-	if !strings.Contains(f.got.SystemPrompt, "ROLEDESC") || !strings.Contains(f.got.SystemPrompt, "CTX") || !strings.Contains(f.got.SystemPrompt, "do it") {
-		t.Errorf("system prompt missing parts: %q", f.got.SystemPrompt)
+	if !strings.Contains(f.got.SystemPrompt, "ROLEDESC") || !strings.Contains(f.got.SystemPrompt, "CTX") || strings.Contains(f.got.SystemPrompt, "do it") {
+		t.Errorf("system prompt missing parts or holds the task: %q", f.got.SystemPrompt)
+	}
+	if !strings.Contains(f.got.Messages[0].Content, "do it") {
+		t.Errorf("user message lacks the task: %q", f.got.Messages[0].Content)
+	}
+	sp := f.got.SystemPrompt
+	if !(strings.Index(sp, "## Output format") < strings.Index(sp, "## Your role") && strings.Index(sp, "## Your role") < strings.Index(sp, "## Project context")) {
+		t.Errorf("sections out of order: %q", sp)
 	}
 	if len(f.got.Skills) != 1 || f.got.Model != "m" {
 		t.Errorf("request = %+v", f.got)
@@ -225,16 +232,19 @@ func TestRunWorkerDedupesFiles(t *testing.T) {
 func TestRunWorkerPlaceholderInRoleNotSubstituted(t *testing.T) {
 	f := &workerFake{chunks: []string{"done\n===SUMMARY===\nok\n"}}
 	_, err := RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(),
-		WorkerRequest{RolePrompt: "skill says {{TASK}} and {{CONTEXT}}", Title: "REALTASK", Context: "CTX"}, nil)
+		WorkerRequest{RolePrompt: "skill says {{MODE}} and {{CONTEXT}}", Title: "REALTASK", Context: "CTX"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	p := f.got.SystemPrompt
-	if !strings.Contains(p, "skill says {{TASK}} and {{CONTEXT}}") {
+	if !strings.Contains(p, "skill says {{MODE}} and {{CONTEXT}}") {
 		t.Errorf("placeholder in the role text was substituted:\n%s", p)
 	}
-	if strings.Count(p, "REALTASK") != 1 {
-		t.Errorf("task appears %d times", strings.Count(p, "REALTASK"))
+	if strings.Contains(p, "REALTASK") {
+		t.Errorf("task is in the system prompt, it belongs in the user message:\n%s", p)
+	}
+	if f.got.Messages[0].Content != "REALTASK" {
+		t.Errorf("user message = %q", f.got.Messages[0].Content)
 	}
 }
 

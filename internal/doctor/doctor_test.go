@@ -318,7 +318,7 @@ func TestAPIKeySourceAndCredsWarning(t *testing.T) {
 func TestModeLinePerInvalidRole(t *testing.T) {
 	d := baseDeps()
 	d.Agents = []Agent{
-		{Name: "coder", Runner: "ollama", ModeErr: "agent mode needs claude, opencode or codex"},
+		{Name: "coder", Runner: "ollama", ModeErr: "agent mode needs claude, opencode, codex or dsh"},
 		{Name: "qa", Runner: "claude"},
 		{Name: "docs", ModeErr: "invalid mode \"x\" (use text or agent)"},
 	}

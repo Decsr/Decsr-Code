@@ -19,7 +19,7 @@ import (
 //     background_wait and error; text/reasoning carry part.text, tool_use
 //     carries part.tool and part.state {status, input, output, title, error,
 //     metadata, time}, step_finish carries part.tokens {input, output,
-//     reasoning}, error carries error {type|name, message|data.message}).
+//     reasoning, cache {read, write}}, error carries error {type|name, message|data.message}).
 //   - packages/core/src/tool/plugin/{edit,write,read,shell,grep,glob,patch,
 //     webfetch,websearch,subagent}.ts (tool names and input keys).
 //
@@ -96,11 +96,15 @@ func (p *openCodeParser) feed(line []byte) []Token {
 				Tokens struct {
 					Input  int `json:"input"`
 					Output int `json:"output"`
+					Cache  struct {
+						Read  int `json:"read"`
+						Write int `json:"write"`
+					} `json:"cache"`
 				} `json:"tokens"`
 			} `json:"part"`
 		}
 		if json.Unmarshal(line, &sf) == nil {
-			p.stepIn += sf.Part.Tokens.Input
+			p.stepIn += sf.Part.Tokens.Input + sf.Part.Tokens.Cache.Read + sf.Part.Tokens.Cache.Write
 			p.stepOut += sf.Part.Tokens.Output
 		}
 	case "tool_use":

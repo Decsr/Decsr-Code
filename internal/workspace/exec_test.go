@@ -829,7 +829,7 @@ func TestExecRejectsUnsupportedMode(t *testing.T) {
 		ac   config.AgentConfig
 		want string
 	}{
-		{config.AgentConfig{Runner: "ollama", Mode: config.ModeAgent}, "agent mode needs claude, opencode or codex"},
+		{config.AgentConfig{Runner: "ollama", Mode: config.ModeAgent}, "agent mode needs claude, opencode, codex or dsh"},
 		{config.AgentConfig{Runner: "opencode", Mode: config.ModeText}, "text mode is not supported for opencode"},
 	} {
 		cfg := config.DefaultConfig()

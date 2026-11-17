@@ -31,8 +31,8 @@ func TestModeError(t *testing.T) {
 		{AgentConfig{Runner: "claude", Mode: ModeAgent}, ""},
 		{AgentConfig{Runner: "codex", Mode: ModeText}, ""},
 		{AgentConfig{Runner: "opencode"}, ""},
-		{AgentConfig{Runner: "ollama", Mode: ModeAgent}, "agent mode needs claude, opencode or codex"},
-		{AgentConfig{Runner: "openai", Mode: ModeAgent}, "agent mode needs claude, opencode or codex"},
+		{AgentConfig{Runner: "ollama", Mode: ModeAgent}, "agent mode needs claude, opencode, codex or dsh"},
+		{AgentConfig{Runner: "openai", Mode: ModeAgent}, "agent mode needs claude, opencode, codex or dsh"},
 		{AgentConfig{Runner: "opencode", Mode: ModeText}, "no read-only switch"},
 		{AgentConfig{Mode: ModeText}, "no read-only switch"}, // empty runner is opencode
 		{AgentConfig{Runner: "claude", Mode: "bogus"}, "invalid mode"},

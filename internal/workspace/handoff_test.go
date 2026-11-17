@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -197,5 +198,75 @@ func TestEngineAddCIFixAppendsExcerptWithinBudget(t *testing.T) {
 	id = e.AddCIFix("CI2", big, "coder")
 	if d := e.Snapshot().Node(id).Description; strings.Contains(d, "What failed") || len(d) > FixExcerptChars {
 		t.Errorf("no budget left but description has %d chars", len(d))
+	}
+}
+
+func TestFixExcerptKeepsErrorLinesOfCutPart(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 300; i++ {
+		switch i {
+		case 40:
+			sb.WriteString("FAIL: TestEarly\n")
+		case 150:
+			sb.WriteString("panic: late problem\n")
+		default:
+			fmt.Fprintf(&sb, "ok line %d\n", i)
+		}
+	}
+	sb.WriteString("TAIL END")
+	n := &Node{ID: "CHECK", Activity: []runner.Activity{failedCmd("a", "go test", sb.String(), 1)}}
+	got := FixExcerpt([]*Node{n}, 1500)
+	for _, want := range []string{"FAIL: TestEarly", "panic: late problem", "ok line 38\n", "ok line 42", "ok line 148", "ok line 152", "TAIL END", "characters omitted]"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "ok line 37\n") || strings.Contains(got, "ok line 43\n") {
+		t.Errorf("context is wider than two lines:\n%s", got)
+	}
+	if strings.Index(got, "FAIL: TestEarly") > strings.Index(got, "panic: late problem") || strings.Index(got, "panic: late problem") > strings.Index(got, "TAIL END") {
+		t.Errorf("pieces are out of order:\n%s", got)
+	}
+	if c := utf8.RuneCountInString(got); c > 1500 {
+		t.Errorf("%d characters, budget 1500", c)
+	}
+}
+
+func TestCutKeepingErrorsMarkersAreAccurate(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 200; i++ {
+		if i == 20 || i == 22 {
+			sb.WriteString("an Exception here\n")
+			continue
+		}
+		fmt.Fprintf(&sb, "line %d\n", i)
+	}
+	text := []rune(sb.String())
+	got := cutKeepingErrors(text, 600)
+	// The two matches are two lines apart: one merged window, so two markers.
+	if c := strings.Count(got, "characters omitted]"); c != 2 {
+		t.Fatalf("%d markers, want 2:\n%s", c, got)
+	}
+	// Markers plus kept text account for the whole input.
+	omitted := 0
+	kept := 0
+	for _, l := range strings.Split(got, "\n") {
+		var n int
+		if _, err := fmt.Sscanf(l, "[… %d characters omitted]", &n); err == nil {
+			omitted += n
+			continue
+		}
+		kept += utf8.RuneCountInString(l) + 1
+	}
+	if omitted+kept-1 != len(text) {
+		t.Errorf("omitted %d + kept %d does not add up to %d", omitted, kept-1, len(text))
+	}
+}
+
+func TestCutKeepingErrorsWithoutMatchesKeepsOnlyTail(t *testing.T) {
+	text := []rune(strings.Repeat("quiet line\n", 100))
+	got := cutKeepingErrors(text, 200)
+	if c := strings.Count(got, "characters omitted]"); c != 1 || !strings.HasPrefix(got, "[… 900 characters omitted]\n") {
+		t.Errorf("got %q", got)
 	}
 }

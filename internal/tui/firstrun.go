@@ -93,6 +93,8 @@ func frInstallHint(name string) string {
 		return "install the Codex CLI (npm i -g @openai/codex), then run decsr setup again"
 	case "copilot":
 		return "install the Copilot CLI, then run decsr setup again"
+	case "dsh":
+		return "install the DeepSeek Harness CLI (dsh), then run decsr setup again"
 	}
 	return "install " + name + " and put it on PATH"
 }
@@ -109,6 +111,7 @@ func firstRunEntries(d FirstRunDeps) []frEntry {
 		{"opencode", "OpenCode", frCLI},
 		{"codex", "Codex", frCLI},
 		{"copilot", "GitHub Copilot", frCLI},
+		{"dsh", "DeepSeek Harness", frCLI},
 	}
 	for _, p := range runner.Presets() {
 		specs = append(specs, spec{p.Name, p.Label + " API", frAPI})

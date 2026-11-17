@@ -24,6 +24,8 @@ type WorkerRequest struct {
 	// Mode is config.ModeText (or empty) or config.ModeAgent. In agent mode the
 	// runner edits files itself and file blocks in its text are ignored.
 	Mode string
+	// MCP keeps the user's own MCP servers for a Claude run.
+	MCP bool
 	// BuildCommands are the project's build and test commands an agent-mode
 	// Claude run may execute.
 	BuildCommands []string
@@ -92,7 +94,6 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 	sys := strings.NewReplacer(
 		"{{MODE}}", mode,
 		"{{ROLE}}", role,
-		"{{TASK}}", task,
 		"{{CONTEXT}}", req.Context,
 	).Replace(prompts.MustLoad("ws-worker"))
 
@@ -111,6 +112,8 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		Dir:          root,
 		Messages:     msgs,
 		Agent:        agentMode,
+		MCP:          req.MCP,
+		ReadOnly:     req.ReadOnly,
 	}
 	if agentMode {
 		creq.AllowedTools = runner.AgentTools(req.BuildCommands, req.ReadOnly)
