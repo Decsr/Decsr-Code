@@ -155,33 +155,49 @@ func (m *SetupModel) ensureSectionVisible() {
 func (m SetupModel) globalLines() ([]string, map[setupSection]int) {
 	w := m.width
 	anchors := map[setupSection]int{}
-	lines := []string{ui.PaneLabel("Provider", m.section == sectionProvider, w)}
-	lines = append(lines, m.providerLines()...)
-	lines = append(lines, "")
+	lines := strings.Split(ui.Box("DEFAULT PROVIDER", m.providerLines(w-4), w, m.section == sectionProvider), "\n")
 
 	anchors[sectionModel] = len(lines)
 	anchors[sectionEffort] = len(lines)
 	// The model list shows in full when it fits the rows left on screen.
-	rows := m.setupBodyHeight() - len(lines) - 3
+	rows := m.setupBodyHeight() - len(lines) - 2
 	if w >= setupSideBySideMin {
-		lw := min(52, (w-4)/2)
-		model := m.modelColumn(lw, rows)
-		effort := m.effortColumn(w - lw - 2)
-		lines = append(lines, sideBySide(model, effort, lw, 2)...)
+		lw := w * 3 / 5
+		model := m.modelColumn(lw-4, rows)
+		effort := m.effortColumn(w - lw - 4)
+		lines = append(lines, boxPair(model, effort, "DEFAULT MODEL", "EFFORT", lw, w-lw, m.section)...)
 	} else {
-		effort := m.effortColumn(w)
-		model := m.modelColumn(w, rows-len(effort)-1)
-		lines = append(lines, model...)
-		lines = append(lines, "")
+		effort := m.effortColumn(w - 4)
+		model := m.modelColumn(w-4, rows-len(effort)-4)
+		lines = append(lines, strings.Split(ui.Box("DEFAULT MODEL", model, w, m.section == sectionModel), "\n")...)
 		anchors[sectionEffort] = len(lines)
-		lines = append(lines, effort...)
+		lines = append(lines, strings.Split(ui.Box("EFFORT", effort, w, m.section == sectionEffort), "\n")...)
 	}
 	return lines, anchors
 }
 
+// boxPairTitled draws two boxes next to each other, as tall as the taller one.
+func boxPairTitled(left, right []string, lt, rt string, lw, rw int, lf, rf bool) []string {
+	n := max(len(left), len(right))
+	for len(left) < n {
+		left = append(left, "")
+	}
+	for len(right) < n {
+		right = append(right, "")
+	}
+	l := strings.Split(ui.Box(lt, left, lw, lf), "\n")
+	r := strings.Split(ui.Box(rt, right, rw, rf), "\n")
+	return sideBySide(l, r, lw, 0)
+}
+
+// boxPair draws the Model and Effort boxes next to each other.
+func boxPair(model, effort []string, modelTitle, effortTitle string, lw, rw int, section setupSection) []string {
+	return boxPairTitled(model, effort, modelTitle, effortTitle, lw, rw, section == sectionModel, section == sectionEffort)
+}
+
 // providerTabs is the label of every provider that can be chosen: the
 // reachable ones and the selected one.
-func (m SetupModel) providerLines() []string {
+func (m SetupModel) providerLines(width int) []string {
 	var tabs []string
 	var offline []string
 	for i, ent := range m.entries {
@@ -206,9 +222,9 @@ func (m SetupModel) providerLines() []string {
 			tabs = append(tabs, sfg(ui.Text).Render(ent.label))
 		}
 	}
-	lines := wrapItems(tabs, 4, max(m.width-2, 20), "  ")
+	lines := wrapItems(tabs, 0, max(width, 20), "  ")
 	if len(offline) > 0 {
-		lines = append(lines, "    "+sfg(ui.Muted).Render("offline: "+strings.Join(offline, " · ")))
+		lines = append(lines, sfg(ui.Muted).Render("offline: "+strings.Join(offline, " · ")))
 	}
 	sel := m.entry(m.provider)
 	if kl := m.apiKeyLine(); kl != "" {
@@ -216,13 +232,13 @@ func (m SetupModel) providerLines() []string {
 		if strings.Contains(kl, "not set") {
 			c = ui.Warn
 		}
-		lines = append(lines, "    "+sfg(c).Render(kl))
+		lines = append(lines, sfg(c).Render(kl))
 	}
 	if bl := m.baseURLLine(sel, m.baseURLOverride(sel)); bl != "" {
-		lines = append(lines, "    "+sfg(ui.Muted).Render(bl))
+		lines = append(lines, sfg(ui.Muted).Render(bl))
 	}
 	if sel.missing {
-		lines = append(lines, "    "+sfg(ui.Warn).Render(missingHint(sel)))
+		lines = append(lines, sfg(ui.Warn).Render(missingHint(sel)))
 	}
 	return lines
 }
@@ -349,8 +365,7 @@ func (m SetupModel) modelPaneFor(p providerKind) modelPane {
 // modelColumn is the Model pane of the global screen, width cells wide.
 // rows is the number of rows the model list may use before it is windowed.
 func (m SetupModel) modelColumn(width, rows int) []string {
-	focused := m.section == sectionModel
-	lines := []string{ui.PaneLabel("Model", focused, width)}
+	var lines []string
 	pane := m.modelPaneFor(m.provider)
 	for _, h := range pane.head {
 		lines = append(lines, wrapDim("  ", h, width, ui.Muted)...)
@@ -383,8 +398,7 @@ func (m SetupModel) modelColumn(width, rows int) []string {
 
 // effortColumn is the Effort pane of the global screen, width cells wide.
 func (m SetupModel) effortColumn(width int) []string {
-	focused := m.section == sectionEffort
-	lines := []string{ui.PaneLabel("Effort", focused, width)}
+	var lines []string
 	dim := sfg(ui.Muted)
 	loaded := m.effortFor != "" && !m.effortLoading
 	switch {
@@ -426,16 +440,18 @@ func (m SetupModel) effortColumn(width int) []string {
 
 func (m SetupModel) projectLines() ([]string, map[setupSection]int) {
 	w := m.width
-	leftW := min(max(w-40, 40), 60)
+	leftW := w / 2
 	if w < 90 {
 		leftW = max(w-38, 30)
 	}
-	rightW := max(w-leftW-1, 10)
+	rightW := max(w-leftW, 10)
 	anchors := map[setupSection]int{}
 
-	left, right := m.agentLines(leftW-ui.Gutter), m.infoLines(rightW-ui.Gutter, anchors)
-	body := ui.JoinColumns(w, ui.Column{Width: leftW, Body: strings.Join(left, "\n")}, ui.Column{Width: rightW, Body: strings.Join(right, "\n")})
-	lines := strings.Split(body, "\n")
+	left, right := m.agentLines(leftW-4), m.infoLines(rightW-4, anchors)
+	for k := range anchors {
+		anchors[k]++ // the top border of the box
+	}
+	lines := boxPairTitled(left, right, "AGENTS", "PROJECT", leftW, rightW, m.section == sectionAgentSetup, m.section == sectionProjectName || m.section == sectionProgLang)
 	lines = append(lines, "", "  "+sfg(ui.Muted).Render("Global provider, model & effort are configured in Global Settings (g)."))
 	return lines, anchors
 }
@@ -477,7 +493,7 @@ func (m SetupModel) agentSummary(role string) string {
 
 func (m SetupModel) agentLines(width int) []string {
 	focused := m.section == sectionAgentSetup
-	lines := []string{ui.PaneLabel("Agents", focused, width)}
+	var lines []string
 	for i, role := range m.agentRoles {
 		name := role
 		if m.hasCustomPrompt(role) {
@@ -534,8 +550,7 @@ func (m SetupModel) languageValue() string {
 }
 
 func (m SetupModel) infoLines(width int, anchors map[setupSection]int) []string {
-	focused := m.section == sectionProjectName || m.section == sectionProgLang
-	lines := []string{ui.PaneLabel("Project", focused, width)}
+	var lines []string
 	row := func(label, value string, focus bool) string {
 		ls := sfg(ui.Muted)
 		if focus {

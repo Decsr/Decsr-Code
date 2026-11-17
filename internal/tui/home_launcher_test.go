@@ -65,13 +65,10 @@ func TestLauncherRendering(t *testing.T) {
 				t.Errorf("%dx%d: double border %q", w, h, bad)
 			}
 		}
-		if caps := capsWord.FindString(plain); caps != "" {
-			t.Errorf("%dx%d: ALL-CAPS label %q", w, h, caps)
-		}
 		if w < 60 {
 			continue
 		}
-		for _, want := range []string{"decsr · test-project", "? help", "Start", "Workspace", "Classic pipeline (frozen)"} {
+		for _, want := range []string{"decsr · test-project", "? help", "◆ START", "Workspace", "Classic pipeline (frozen)"} {
 			if !strings.Contains(plain, want) {
 				t.Errorf("%dx%d: missing %q", w, h, want)
 			}
@@ -81,27 +78,30 @@ func TestLauncherRendering(t *testing.T) {
 
 func TestLauncherWideShowsAllSections(t *testing.T) {
 	plain := stripANSI(launcherHome(t, 120, 34).View())
-	for _, want := range []string{"Projects", "Sessions · test-project", "Project", "language", "lead", "autonomy",
-		"Settings", "More", "Open project…", "Global settings", "Project setup", "Connect a provider", "Model memory",
+	for _, want := range []string{"◆ PROJECTS", "◆ SESSIONS · test-project", "◆ PROJECT", "language", "lead", "autonomy",
+		"◆ SETTINGS", "◆ MORE", "Open project…", "Global settings", "Project setup", "Connect a provider", "Model memory",
 		"Reset artifacts", "Quit", "decsr_code", "ar_coating", "Refactor config", "2/5 · 1 waiting", "5/5 · 2d",
 		"codex · gpt-5.4", "1 manual · budget $5.00", "go"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("launcher missing %q:\n%s", want, plain)
 		}
 	}
-	if !strings.Contains(plain, "│") {
-		t.Error("wide layout needs the column divider")
+	if !strings.Contains(plain, "DECSR") && !strings.Contains(plain, "█") {
+		t.Error("wide layout shows the banner")
+	}
+	if !strings.Contains(plain, "┌─ ◆ PROJECTS") {
+		t.Error("boxes carry their title in the top border")
 	}
 }
 
 func TestLauncherNarrowStacksActionsFirst(t *testing.T) {
 	plain := stripANSI(launcherHome(t, 80, 60).View())
-	start, projects := strings.Index(plain, "Start"), strings.Index(plain, "Projects")
+	start, projects := strings.Index(plain, "START"), strings.Index(plain, "PROJECTS")
 	if start < 0 || projects < 0 || start > projects {
 		t.Fatalf("actions should come before projects when stacked:\n%s", plain)
 	}
-	if strings.Contains(plain, "│") {
-		t.Error("stacked layout has no column divider")
+	if strings.Contains(plain, "┐ ┌") {
+		t.Error("stacked layout has no side-by-side boxes")
 	}
 }
 

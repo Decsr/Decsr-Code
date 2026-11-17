@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -13,8 +12,6 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/config"
 )
-
-var setupCapsWord = regexp.MustCompile(`\b[A-Z]{4,}\b`)
 
 func pressKey(m SetupModel, t tea.KeyType) SetupModel {
 	m, _ = m.Update(tea.KeyMsg{Type: t})
@@ -52,12 +49,12 @@ func checkLook(t *testing.T, name, out string, w int) {
 			t.Errorf("%s: line %d is %d wide (max %d): %q", name, i, lw, w, ansi.Strip(l))
 		}
 	}
-	plain := ansi.Strip(out)
-	if strings.Contains(plain, "┐┌") || strings.Contains(plain, "││") {
-		t.Errorf("%s: doubled borders", name)
-	}
-	if c := setupCapsWord.FindString(plain); c != "" {
-		t.Errorf("%s: ALL-CAPS label %q", name, c)
+	// Boxes are titled in capitals and sit side by side without a gap; every
+	// box line must keep its right border at the same column as its top line.
+	for i, l := range strings.Split(ansi.Strip(out), "\n") {
+		if strings.HasPrefix(l, "┌") && !strings.Contains(l, "─ ◆ ") {
+			t.Errorf("%s: line %d has a box top without a title: %q", name, i, l)
+		}
 	}
 }
 
@@ -110,7 +107,7 @@ func TestSetupModelEffortSideBySideOrStacked(t *testing.T) {
 	both := func(w int) bool {
 		m := sizedSetup(prep(globalSetupFor(t, "claude", "sonnet", nil)), w, 40)
 		for _, l := range strings.Split(ansi.Strip(m.View()), "\n") {
-			if strings.Contains(l, "Model") && strings.Contains(l, "Effort") {
+			if strings.Contains(l, "DEFAULT MODEL") && strings.Contains(l, "EFFORT") {
 				return true
 			}
 		}

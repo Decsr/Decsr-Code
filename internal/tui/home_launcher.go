@@ -19,6 +19,9 @@ import (
 // it the columns are stacked, actions first.
 const homeWideMin = 100
 
+// homeMaxWidth is the widest the launcher gets; a wider terminal centres it.
+const homeMaxWidth = 150
+
 // homeLeftRow is one selectable row of the left column: a recent project or a
 // session of the current project.
 type homeLeftRow struct {
@@ -112,16 +115,38 @@ func homeRow(left, right string, w int, selected, focused bool) string {
 func dim(s string) string  { return lipgloss.NewStyle().Foreground(ui.Muted).Render(s) }
 func text(s string) string { return lipgloss.NewStyle().Foreground(ui.Text).Render(s) }
 
-// leftColumn renders recent projects, sessions and the project block for w
-// cells, and the line of the selected row.
-func (m HomeModel) leftColumn(w int, focused bool) (lines []string, sel int) {
-	rows := m.leftRows()
-	label := func(s string) { lines = append(lines, ui.PaneLabel(s, false, w)) }
-	nProj := len(m.recentProjects)
+// homeBox is one titled box of the launcher: its content lines, the line of
+// the selected row inside them (-1 when none) and whether it holds the cursor.
+type homeBox struct {
+	title string
+	lines []string
+	sel   int
+	focus bool
+}
 
-	label("Projects")
+// stackBoxes draws boxes one above the other, width cells wide, and gives the
+// line of the selected row. The box holding the cursor has the accent border
+// when its column is focused.
+func stackBoxes(boxes []homeBox, width int, focused bool) (lines []string, sel int) {
+	for _, b := range boxes {
+		if b.sel >= 0 {
+			sel = len(lines) + 1 + b.sel
+		}
+		lines = append(lines, strings.Split(ui.Box(b.title, b.lines, width, focused && b.focus), "\n")...)
+	}
+	return lines, sel
+}
+
+// leftBoxes lists recent projects, sessions and the project block for w inner
+// cells.
+func (m HomeModel) leftBoxes(w int, focused bool) []homeBox {
+	rows := m.leftRows()
+	nProj := len(m.recentProjects)
+	var boxes []homeBox
+
+	proj := homeBox{title: "PROJECTS", sel: -1, focus: m.leftCur < nProj}
 	if nProj == 0 {
-		lines = append(lines, dim("   no recent projects"))
+		proj.lines = append(proj.lines, dim("  no recent projects"))
 	}
 	nameW := 8
 	for _, r := range rows[:nProj] {
@@ -133,22 +158,22 @@ func (m HomeModel) leftColumn(w int, focused bool) (lines []string, sel int) {
 		name += strings.Repeat(" ", nameW-ansi.StringWidth(name))
 		meta := ui.TruncateMiddle(tildePath(r.path), max(w-4-nameW, 0))
 		if i == m.leftCur {
-			sel = len(lines)
+			proj.sel = len(proj.lines)
 		}
-		lines = append(lines, homeRow(name, meta, w, i == m.leftCur, focused))
+		proj.lines = append(proj.lines, homeRow(name, meta, w, i == m.leftCur, focused))
 	}
+	boxes = append(boxes, proj)
 
 	if !m.projectValid {
-		lines = append(lines, "", ui.PaneLabel("Project", false, w),
-			lipgloss.NewStyle().Foreground(ui.Warn).Render("   no project here"),
-			dim("   press o to open one"))
-		return lines, sel
+		return append(boxes, homeBox{title: "PROJECT", sel: -1, lines: []string{
+			lipgloss.NewStyle().Foreground(ui.Warn).Render("  no project here"),
+			dim("  press o to open one"),
+		}})
 	}
 
-	lines = append(lines, "")
-	label("Sessions · " + m.cachedProject)
+	sess := homeBox{title: "SESSIONS · " + m.cachedProject, sel: -1, focus: m.leftCur >= nProj}
 	if len(m.sessions) == 0 {
-		lines = append(lines, dim("   no saved sessions"))
+		sess.lines = append(sess.lines, dim("  no saved sessions"))
 	}
 	now := time.Now()
 	for j, r := range rows[nProj:] {
@@ -163,18 +188,18 @@ func (m HomeModel) leftColumn(w int, focused bool) (lines []string, sel int) {
 		meta := sessionMeta(r.info, now)
 		title := ui.Truncate(r.label, max(w-4-ansi.StringWidth(meta)-3, 4))
 		if selected {
-			sel = len(lines)
+			sess.sel = len(sess.lines)
 		}
-		lines = append(lines, homeRow(g+" "+title, meta, w, selected, focused))
+		sess.lines = append(sess.lines, homeRow(g+" "+title, meta, w, selected, focused))
 	}
+	boxes = append(boxes, sess)
 
-	lines = append(lines, "")
-	label("Project")
+	info := homeBox{title: "PROJECT", sel: -1}
 	for _, kv := range m.projectInfo() {
-		v := ui.Truncate(kv[1], max(w-14, 1))
-		lines = append(lines, "   "+dim(fmt.Sprintf("%-9s", kv[0]))+" "+text(v))
+		v := ui.Truncate(kv[1], max(w-12, 1))
+		info.lines = append(info.lines, "  "+dim(fmt.Sprintf("%-9s", kv[0]))+" "+text(v))
 	}
-	return lines, sel
+	return append(boxes, info)
 }
 
 // projectInfo is the language, lead and autonomy of the project, as label and
@@ -204,32 +229,84 @@ func (m HomeModel) projectInfo() [][2]string {
 	return [][2]string{{"language", lang}, {"lead", lead}, {"autonomy", auto}}
 }
 
-// rightColumn renders the actions grouped under dim labels for w cells, and
-// the line of the selected row. The selected action shows what it does.
-func (m HomeModel) rightColumn(w int, focused bool) (lines []string, sel int) {
-	group := ""
+// rightBoxes lists the actions, one box per group, for w inner cells. The
+// selected action shows what it does.
+func (m HomeModel) rightBoxes(w int, focused bool) []homeBox {
+	var boxes []homeBox
 	for i, it := range m.items {
-		if it.group != group {
-			if group != "" {
-				lines = append(lines, "")
-			}
-			group = it.group
-			lines = append(lines, ui.PaneLabel(group, false, w))
+		if len(boxes) == 0 || it.group != m.items[i-1].group {
+			boxes = append(boxes, homeBox{title: strings.ToUpper(it.group), sel: -1})
 		}
+		b := &boxes[len(boxes)-1]
 		selected := i == m.cursor
 		if selected {
-			sel = len(lines)
+			b.sel, b.focus = len(b.lines), true
 		}
-		lines = append(lines, homeRow(it.label, it.key, w, selected, focused))
+		b.lines = append(b.lines, homeRow(it.label, it.key, w, selected, focused))
 		if selected {
 			desc := it.desc
 			if !m.projectValid && requiresProject(it.action) {
 				desc = "open a project first"
 			}
-			lines = append(lines, "   "+dim(ui.Truncate(desc, max(w-4, 1))))
+			b.lines = append(b.lines, "  "+dim(ui.Truncate(desc, max(w-3, 1))))
 		}
 	}
-	return lines, sel
+	return boxes
+}
+
+// The banner is the DECSR block letters in a sparse starfield (46 cells wide,
+// the 24-cell logo in the middle). In the star rows "✦" is bright and "G" a
+// warm star; the other glyphs are dim.
+const (
+	homeStarsTop    = "  ·       ✦        +      ⋆       G           "
+	homeStarsBottom = "    ⋆       ·          ✦              G       "
+	homeBannerWidth = 46
+)
+
+var (
+	homeStarsLeft  = [3]string{"   ·       ", "  ⋆        ", "     ·     "}
+	homeStarsRight = [3]string{"  ·        ", "    G      ", "   ✦       "}
+)
+
+func renderStars(s string) string {
+	var sb strings.Builder
+	for _, r := range s {
+		switch r {
+		case ' ':
+			sb.WriteRune(r)
+		case '✦':
+			sb.WriteString(lipgloss.NewStyle().Foreground(ui.Text).Render("✦"))
+		case 'G':
+			sb.WriteString(lipgloss.NewStyle().Foreground(ui.Warn).Render("✦"))
+		default:
+			sb.WriteString(lipgloss.NewStyle().Foreground(ui.Muted).Render(string(r)))
+		}
+	}
+	return sb.String()
+}
+
+// banner is the logo with its tagline, centred in w cells, followed by an
+// empty line. It is empty when w is too narrow.
+func (m HomeModel) banner(w int) []string {
+	if w < homeBannerWidth+2 {
+		return nil
+	}
+	rowColors := make([]lipgloss.TerminalColor, 5)
+	for i := range rowColors {
+		rowColors[i] = ui.Accent
+	}
+	logo := renderBlockTextColored("DECSR", rowColors)
+	lines := []string{renderStars(homeStarsTop)}
+	for i, l := range logo {
+		lines = append(lines, renderStars(homeStarsLeft[i])+l+renderStars(homeStarsRight[i]))
+	}
+	lines = append(lines, renderStars(homeStarsBottom))
+	tag := "AI-powered multi-agent coding pipeline"
+	lines = append(lines, strings.Repeat(" ", (homeBannerWidth-ansi.StringWidth(tag))/2)+dim(tag))
+	for i, l := range lines {
+		lines[i] = strings.Repeat(" ", (w-homeBannerWidth)/2) + l
+	}
+	return append(lines, "")
 }
 
 // renderFooter is the hint bar, or the status message when there is one.
@@ -264,32 +341,57 @@ func (m HomeModel) renderBase() string {
 	}
 	header := ui.Header(left, "v"+Version+" · ? help", w)
 
+	bodyH := max(h-3, 1)
+	cw := min(w, homeMaxWidth)
+	margin := strings.Repeat(" ", (w-cw)/2)
+	banner := m.banner(cw)
 	var body []string
 	var sel int
 	if w >= homeWideMin {
-		lw := max(min((w-1)*2/5, 56), 34)
-		rw := w - 1 - lw
-		l, ls := m.leftColumn(lw-ui.Gutter, m.col == homeColLeft)
-		r, rs := m.rightColumn(rw-ui.Gutter, m.col == homeColRight)
+		lw := (cw - 1) / 2
+		rw := cw - 1 - lw
+		l, ls := stackBoxes(m.leftBoxes(lw-4, m.col == homeColLeft), lw, m.col == homeColLeft)
+		r, rs := stackBoxes(m.rightBoxes(rw-4, m.col == homeColRight), rw, m.col == homeColRight)
 		sel = rs
 		if m.col == homeColLeft {
 			sel = ls
 		}
-		body = strings.Split(ui.JoinColumns(w, ui.Column{Width: lw, Body: strings.Join(l, "\n")}, ui.Column{Width: rw, Body: strings.Join(r, "\n")}), "\n")
+		body = sideBySide(l, r, lw, 1)
 	} else {
-		r, rs := m.rightColumn(w, m.col == homeColRight)
-		l, ls := m.leftColumn(w, m.col == homeColLeft)
-		body = append(append(r, ""), l...)
+		r, rs := stackBoxes(m.rightBoxes(cw-4, m.col == homeColRight), cw, m.col == homeColRight)
+		l, ls := stackBoxes(m.leftBoxes(cw-4, m.col == homeColLeft), cw, m.col == homeColLeft)
+		body = append(append([]string(nil), r...), l...)
 		sel = rs
 		if m.col == homeColLeft {
-			sel = len(r) + 1 + ls
+			sel = len(r) + ls
+		}
+		if len(body) > bodyH {
+			// Both columns do not fit: show the focused one.
+			body, sel = r, rs
+			if m.col == homeColLeft {
+				body, sel = l, ls
+			}
+		}
+	}
+	if len(banner)+len(body) <= bodyH {
+		body = append(banner, body...)
+		sel += len(banner)
+	}
+	if top := (bodyH - len(body)) / 2; top > 0 {
+		body = append(make([]string, top), body...)
+		sel += top
+	}
+	if margin != "" {
+		for i, l := range body {
+			if l != "" {
+				body[i] = margin + l
+			}
 		}
 	}
 
 	for i, l := range body {
 		body[i] = ansi.Truncate(l, w, "")
 	}
-	bodyH := max(h-3, 1)
 	start := 0
 	if sel >= bodyH {
 		start = sel - bodyH + 2

@@ -20,7 +20,7 @@ func TestSetupRender_IncludesEffortCard(t *testing.T) {
 	m.width, m.height = 100, 40
 
 	content := m.renderContent()
-	if !strings.Contains(content, "Effort") {
+	if !strings.Contains(content, "EFFORT") {
 		t.Fatalf("expected effort pane in global setup content:\n%s", content)
 	}
 	if !strings.Contains(content, "default (high)") {

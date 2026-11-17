@@ -214,15 +214,15 @@ func (m modelMemoryModel) result() config.ModelMemoryConfig {
 
 func (m modelMemoryModel) View() string {
 	w := m.width
+	iw := max(w-4, 8)
 	dim := lipgloss.NewStyle().Foreground(ui.Muted)
-	lines := []string{
-		ui.Header("decsr · Model memory", "saved to ~/.decsr/config.yaml", w),
-		"",
-		ui.PaneLabel("Mode", true, w),
+	lines := []string{ui.Header("decsr · Model memory", "saved to ~/.decsr/config.yaml", w), ""}
+	box := func(title string, body []string, focused bool) {
+		lines = append(lines, strings.Split(ui.Box(title, body, w, focused), "\n")...)
 	}
-	lines = append(lines, wrapDim("  ", "Cap how much memory local models may use: a RAM budget (converted to a per-agent context window) or a fixed context size.", w, ui.Muted)...)
-	lines = append(lines, "")
 
+	mode := wrapDim("", "Cap how much memory local models may use: a RAM budget (converted to a per-agent context window) or a fixed context size.", iw, ui.Muted)
+	mode = append(mode, "")
 	var tabs []string
 	for i, label := range mmModeLabels {
 		if i == m.mode {
@@ -231,25 +231,25 @@ func (m modelMemoryModel) View() string {
 			tabs = append(tabs, lipgloss.NewStyle().Foreground(ui.Text).Render(label))
 		}
 	}
-	lines = append(lines, wrapItems(tabs, 4, max(w-2, 20), "  ")...)
-	lines = append(lines, "")
+	mode = append(mode, wrapItems(tabs, 0, max(iw, 20), "  ")...)
+	if m.mode == mmModeOff {
+		mode = append(mode, "", dim.Render("Local models run with their own default context window."))
+	}
+	box("MODE", mode, true)
 
 	switch m.mode {
-	case mmModeOff:
-		lines = append(lines, "  "+dim.Render("Local models run with their own default context window."))
 	case mmModeRAM:
-		label := "Max RAM (GB)"
+		label := "MAX RAM (GB)"
 		if m.totalRAMGB > 0 {
-			label += fmt.Sprintf(" · system total %.1f GB", m.totalRAMGB)
+			label += fmt.Sprintf(" · SYSTEM TOTAL %.1f GB", m.totalRAMGB)
 		}
-		lines = append(lines, ui.PaneLabel(label, false, w))
-		lines = append(lines, indentLines(ui.InputBox(m.value.View(), "", min(24, max(w-4, 5)), true, ""), "  ")...)
-		lines = append(lines, "")
-		lines = append(lines, m.renderPreview(w)...)
+		box(label, strings.Split(ui.InputBox(m.value.View(), "", min(24, max(iw, 5)), true, ""), "\n"), false)
+		if p := m.renderPreview(iw); len(p) > 0 {
+			title := "ESTIMATED CONTEXT PER LOCAL MODEL"
+			box(title, p, false)
+		}
 	case mmModeContext:
-		lines = append(lines, ui.PaneLabel("Max context (tokens)", false, w))
-		lines = append(lines, indentLines(ui.InputBox(m.value.View(), "", min(24, max(w-4, 5)), true, ""), "  ")...)
-		lines = append(lines, "", "  "+dim.Render("Applied verbatim to every agent."))
+		box("MAX CONTEXT (TOKENS)", append(strings.Split(ui.InputBox(m.value.View(), "", min(24, max(iw, 5)), true, ""), "\n"), "", dim.Render("Applied verbatim to every agent.")), false)
 	}
 
 	body := lines
@@ -281,17 +281,17 @@ func (m modelMemoryModel) renderPreview(w int) []string {
 	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	gb, err := strconv.ParseFloat(strings.TrimSpace(m.value.Value()), 64)
 	if err != nil || gb <= 0 {
-		return wrapDim("  ", "Enter a RAM budget to preview the derived context size.", w, ui.Muted)
+		return wrapDim("", "Enter a RAM budget to preview the derived context size.", w, ui.Muted)
 	}
 	if m.localLoading {
-		return []string{ui.PaneLabel("Estimated context per local model", false, w), "  " + dim.Render("scanning local backends…")}
+		return []string{dim.Render("scanning local backends…")}
 	}
 	if len(m.localModels) == 0 {
-		return wrapDim("  ", "No local models detected (Ollama / LM Studio / oMLX not running?). Heuristic for a typical 7B model: ≈ "+
+		return wrapDim("", "No local models detected (Ollama / LM Studio / oMLX not running?). Heuristic for a typical 7B model: ≈ "+
 			strconv.Itoa(runner.ContextTokensForWeights(0, gb))+" tokens.", w, ui.Muted)
 	}
 
-	lines := []string{ui.PaneLabel("Estimated context per local model", false, w)}
+	var lines []string
 	// Cap the list so the screen does not overflow; note any remainder.
 	maxRows := max(m.height-14, 4)
 	shown := m.localModels
@@ -300,19 +300,19 @@ func (m modelMemoryModel) renderPreview(w int) []string {
 		extra = len(shown) - maxRows
 		shown = shown[:maxRows]
 	}
-	rowW := min(w-2, 72)
+	rowW := min(w, 72)
 	for _, lm := range shown {
 		tokens := runner.ContextTokensForWeights(lm.WeightBytes, gb)
 		est := ""
 		if lm.WeightBytes <= 0 {
 			est = " (est)"
 		}
-		lines = append(lines, "  "+ui.ListRow(ui.RowOpts{
+		lines = append(lines, ui.ListRow(ui.RowOpts{
 			Left: fmt.Sprintf("%-9s %s", lm.Runner, lm.Model), Right: fmt.Sprintf("≈ %d tok%s", tokens, est), Width: rowW, Indent: 1,
 		}))
 	}
 	if extra > 0 {
-		lines = append(lines, "    "+dim.Render(fmt.Sprintf("… and %d more", extra)))
+		lines = append(lines, "  "+dim.Render(fmt.Sprintf("… and %d more", extra)))
 	}
 	return lines
 }

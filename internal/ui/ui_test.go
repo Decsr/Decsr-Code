@@ -423,3 +423,35 @@ func TestJoinColumnsKeepsGutterAroundDivider(t *testing.T) {
 		}
 	}
 }
+
+func TestBoxTitleInTopBorderAndExactWidths(t *testing.T) {
+	for _, dark := range []bool{true, false} {
+		setDark(dark)
+		for _, focused := range []bool{false, true} {
+			box := Box("DEFAULT MODEL", []string{"short", "a very long line that has to be cut to fit the box width", "\x1b[31mred\x1b[0m"}, 30, focused)
+			lines := strings.Split(box, "\n")
+			if len(lines) != 5 {
+				t.Fatalf("dark=%v: want 5 lines, got %d", dark, len(lines))
+			}
+			for i, l := range lines {
+				if w := ansi.StringWidth(l); w != 30 {
+					t.Errorf("dark=%v line %d width %d, want 30: %q", dark, i, w, ansi.Strip(l))
+				}
+			}
+			top := ansi.Strip(lines[0])
+			if !strings.HasPrefix(top, "┌─ ◆ DEFAULT MODEL ─") || !strings.HasSuffix(top, "┐") {
+				t.Errorf("dark=%v: title not in the top border: %q", dark, top)
+			}
+			if !strings.HasPrefix(ansi.Strip(lines[4]), "└") || !strings.HasSuffix(ansi.Strip(lines[4]), "┘") {
+				t.Errorf("bottom border wrong: %q", ansi.Strip(lines[4]))
+			}
+		}
+	}
+	setDark(true)
+	if got := Box("X", nil, 5, false); got != "" {
+		t.Errorf("a box below the minimum width must be empty, got %q", got)
+	}
+	if w := ansi.StringWidth(strings.Split(Box("a title much too long for the box", nil, 12, false), "\n")[0]); w != 12 {
+		t.Errorf("long title top border width %d, want 12", w)
+	}
+}
