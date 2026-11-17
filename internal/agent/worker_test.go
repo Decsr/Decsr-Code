@@ -292,7 +292,7 @@ func TestRunWorkerAgentModeIgnoresFileBlocks(t *testing.T) {
 	out := "**a/one.txt**\n```\nhello\n```\n===SUMMARY===\nchanged one file\n"
 	f := &workerFake{chunks: []string{out}}
 	res, err := RunWorker(context.Background(), f, root, config.DefaultConfig(),
-		WorkerRequest{Title: "T", Mode: config.ModeAgent, BuildCommands: []string{"go test ./..."}}, nil)
+		WorkerRequest{Title: "T", Mode: config.ModeAgent, BuildCommands: []string{"go test ./..."}, AllowedCommands: []string{"dpkg -l"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestRunWorkerAgentModeIgnoresFileBlocks(t *testing.T) {
 	if res.Summary != "changed one file" {
 		t.Errorf("summary = %q", res.Summary)
 	}
-	if !f.got.Agent || !strings.Contains(strings.Join(f.got.AllowedTools, ","), "Bash(go test ./...:*)") || !strings.Contains(strings.Join(f.got.AllowedTools, ","), "Edit") {
+	if !f.got.Agent || !strings.Contains(strings.Join(f.got.AllowedTools, ","), "Bash(go:*)") || !strings.Contains(strings.Join(f.got.AllowedTools, ","), "Bash(dpkg -l:*)") || !strings.Contains(strings.Join(f.got.AllowedTools, ","), "Edit") {
 		t.Errorf("request = %+v", f.got)
 	}
 	if !strings.Contains(f.got.SystemPrompt, "coding agent") || strings.Contains(f.got.SystemPrompt, "write its path in bold") {
@@ -323,7 +323,7 @@ func TestRunWorkerAgentModeReadOnlyPromptAndTools(t *testing.T) {
 		t.Errorf("prompt lacks the read-only agent text:\n%s", f.got.SystemPrompt)
 	}
 	tools := strings.Join(f.got.AllowedTools, ",")
-	if strings.Contains(tools, "Edit") || strings.Contains(tools, "Write") || strings.Contains(tools, "go test") {
+	if strings.Contains(tools, "Edit") || strings.Contains(tools, "Write") || strings.Contains(tools, "Bash(go:") {
 		t.Errorf("read-only tools = %s", tools)
 	}
 }
@@ -335,5 +335,72 @@ func TestRunWorkerTextModeRequestIsNotAgent(t *testing.T) {
 	}
 	if f.got.Agent || len(f.got.AllowedTools) != 0 || !strings.Contains(f.got.SystemPrompt, "write its path in bold") {
 		t.Errorf("request = %+v", f.got)
+	}
+}
+
+type progressFake struct{ toks []runner.Token }
+
+func (f progressFake) Complete(_ context.Context, _ runner.CompletionRequest) (<-chan runner.Token, error) {
+	ch := make(chan runner.Token, len(f.toks))
+	for _, tk := range f.toks {
+		ch <- tk
+	}
+	close(ch)
+	return ch, nil
+}
+
+func TestRunWorkerLiveUsageModelAndFinal(t *testing.T) {
+	f := progressFake{toks: []runner.Token{
+		{Model: "real-model"},
+		{Text: "hi\n===SUMMARY===\nok", Progress: &runner.TokenUsage{InputTokens: 5, OutputTokens: 1, Estimated: true}},
+		{Progress: &runner.TokenUsage{InputTokens: 5, OutputTokens: 4, Estimated: true}},
+		{Done: true, Usage: &runner.TokenUsage{InputTokens: 9, CachedTokens: 3, OutputTokens: 6}},
+	}}
+	var live []runner.TokenUsage
+	var models []string
+	res, err := RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(), WorkerRequest{
+		Title:   "T",
+		OnUsage: func(u runner.TokenUsage) { live = append(live, u) },
+		OnModel: func(m string) { models = append(models, m) },
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(live) != 2 || live[1].OutputTokens != 4 {
+		t.Errorf("live = %+v", live)
+	}
+	if len(models) != 1 || models[0] != "real-model" {
+		t.Errorf("models = %v", models)
+	}
+	if want := (runner.TokenUsage{InputTokens: 9, CachedTokens: 3, OutputTokens: 6}); res.Usage != want {
+		t.Errorf("final usage = %+v, want %+v", res.Usage, want)
+	}
+}
+
+func TestRunWorkerDoneWithoutUsageKeepsUsage(t *testing.T) {
+	// Copilot style: additive deltas, then a Done token without usage.
+	f := progressFake{toks: []runner.Token{
+		{Usage: &runner.TokenUsage{InputTokens: 8, Estimated: true}},
+		{Text: "hi\n===SUMMARY===\nok", Usage: &runner.TokenUsage{OutputTokens: 3, Estimated: true}},
+		{Done: true},
+	}}
+	res, err := RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(), WorkerRequest{Title: "T"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (runner.TokenUsage{InputTokens: 8, OutputTokens: 3, Estimated: true}); res.Usage != want {
+		t.Errorf("usage = %+v, want %+v", res.Usage, want)
+	}
+	// Only progress and a Done token without usage: the last progress stays.
+	g := progressFake{toks: []runner.Token{
+		{Text: "hi\n===SUMMARY===\nok", Progress: &runner.TokenUsage{InputTokens: 4, OutputTokens: 2, Estimated: true}},
+		{Done: true},
+	}}
+	res, err = RunWorker(context.Background(), g, t.TempDir(), config.DefaultConfig(), WorkerRequest{Title: "T"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Usage.InputTokens != 4 || res.Usage.OutputTokens != 2 {
+		t.Errorf("usage = %+v", res.Usage)
 	}
 }

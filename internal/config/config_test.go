@@ -844,3 +844,16 @@ func TestMerge_WorkspaceCoordinator(t *testing.T) {
 		t.Error("an empty layer reset the coordinator")
 	}
 }
+
+func TestMerge_ProjectAllowedCommands(t *testing.T) {
+	dst := DefaultConfig()
+	merge(&dst, Config{Project: ProjectConfig{AllowedCommands: []string{"dpkg -l"}}})
+	merge(&dst, Config{}) // empty layer keeps the list
+	if len(dst.Project.AllowedCommands) != 1 || dst.Project.AllowedCommands[0] != "dpkg -l" {
+		t.Fatalf("got %v", dst.Project.AllowedCommands)
+	}
+	merge(&dst, Config{Project: ProjectConfig{AllowedCommands: []string{"/opt/cmake"}}})
+	if len(dst.Project.AllowedCommands) != 1 || dst.Project.AllowedCommands[0] != "/opt/cmake" {
+		t.Fatalf("got %v", dst.Project.AllowedCommands)
+	}
+}

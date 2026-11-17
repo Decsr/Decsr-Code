@@ -29,6 +29,9 @@ type WorkerRequest struct {
 	// BuildCommands are the project's build and test commands an agent-mode
 	// Claude run may execute.
 	BuildCommands []string
+	// AllowedCommands are extra command prefixes (project.allowed_commands)
+	// an agent-mode Claude run may execute.
+	AllowedCommands []string
 	// OnActivity, when set, receives the runner's activity (thinking, tools,
 	// commands) and the file blocks the worker writes. Nil-safe.
 	OnActivity func(runner.Activity)
@@ -36,6 +39,13 @@ type WorkerRequest struct {
 	// estimated token count of the full prompt (system prompt and messages).
 	// Nil-safe.
 	OnContext func(tokens int)
+	// OnUsage, when set, receives the cumulative usage while the runner
+	// works, as often as the runner reports it (the caller throttles). It is
+	// advisory: WorkerResult.Usage is the final value. Nil-safe.
+	OnUsage func(runner.TokenUsage)
+	// OnModel, when set, receives the model the runner reports it is using,
+	// once. Nil-safe.
+	OnModel func(model string)
 }
 
 // WorkerResult is what a worker produced.
@@ -116,7 +126,7 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		ReadOnly:     req.ReadOnly,
 	}
 	if agentMode {
-		creq.AllowedTools = runner.AgentTools(req.BuildCommands, req.ReadOnly)
+		creq.AllowedTools = runner.AgentTools(req.BuildCommands, req.AllowedCommands, req.ReadOnly)
 	}
 	ch, err := r.Complete(ctx, creq)
 	if err != nil {
@@ -128,6 +138,7 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 	if !req.ReadOnly && !agentMode {
 		watch.onStart = writes.begin
 	}
+	var live *runner.TokenUsage // latest Progress
 	for tok := range ch {
 		if tok.Error != nil {
 			writes.finish()
@@ -136,9 +147,24 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		if tok.Activity != nil && req.OnActivity != nil {
 			req.OnActivity(*tok.Activity)
 		}
-		// Usage snapshots from streaming runners are cumulative: keep the latest.
+		if tok.Model != "" && req.OnModel != nil {
+			req.OnModel(tok.Model)
+		}
+		if tok.Progress != nil {
+			p := *tok.Progress
+			live = &p
+			if req.OnUsage != nil {
+				req.OnUsage(p)
+			}
+		}
+		// Usage tokens are added up: most runners send one on the Done token,
+		// copilot sends deltas before it. A Done token without usage adds
+		// nothing, so it never zeroes what came before.
 		if tok.Usage != nil {
-			res.Usage = *tok.Usage
+			res.Usage.InputTokens += tok.Usage.InputTokens
+			res.Usage.CachedTokens += tok.Usage.CachedTokens
+			res.Usage.OutputTokens += tok.Usage.OutputTokens
+			res.Usage.Estimated = res.Usage.Estimated || tok.Usage.Estimated
 		}
 		if tok.Text != "" {
 			sb.WriteString(tok.Text)
@@ -152,6 +178,10 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		if tok.Done {
 			break
 		}
+	}
+	// A runner that sent progress but no final usage keeps its last progress.
+	if res.Usage.InputTokens == 0 && res.Usage.OutputTokens == 0 && live != nil {
+		res.Usage = *live
 	}
 	if err := ctx.Err(); err != nil {
 		writes.finish()

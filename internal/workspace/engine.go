@@ -489,7 +489,8 @@ func (e *Engine) startLocked(parent context.Context, n *Node) started {
 	// The cost adds up over the attempts: this run is priced on top of what the
 	// earlier ones cost, and an unpriced earlier attempt keeps CostKnown false.
 	e.costBase[n.ID] = costBase{usd: n.CostUSD, unpriced: (n.InputTokens > 0 || n.OutputTokens > 0) && !n.CostKnown}
-	n.InputTokens, n.OutputTokens, n.Estimated = 0, 0, false
+	n.InputTokens, n.CachedTokens, n.OutputTokens, n.Estimated = 0, 0, 0, false
+	n.Model, n.Effort = "", ""
 	e.cancels[n.ID] = cancel
 	e.wg.Add(1)
 	gc := e.g.Clone()
@@ -561,10 +562,20 @@ func (e *Engine) runNode(s started) {
 			}
 			e.mu.Unlock()
 			e.emit(ev)
+		case EventModel:
+			e.mu.Lock()
+			if n := e.g.Node(id); n != nil {
+				if ev.Model != "" {
+					n.Model = ev.Model
+				}
+				n.Effort = ev.Effort
+			}
+			e.mu.Unlock()
+			e.emit(ev)
 		case EventUsage:
 			e.mu.Lock()
 			if n := e.g.Node(id); n != nil {
-				n.InputTokens, n.OutputTokens, n.Estimated = ev.In, ev.Out, ev.Estimated
+				n.InputTokens, n.CachedTokens, n.OutputTokens, n.Estimated = ev.In, ev.Cached, ev.Out, ev.Estimated
 				if e.cost != nil {
 					usd, known := e.cost(ev.Runner, ev.Model, ev.In, ev.Out)
 					base := e.costBase[id]
@@ -577,7 +588,9 @@ func (e *Engine) runNode(s started) {
 			e.checkBudgetLocked()
 			e.mu.Unlock()
 			e.emit(ev)
-			e.flush()
+			if !ev.Live {
+				e.flush()
+			}
 		}
 	}
 	res, err := e.ex.Run(s.ctx, s.g, s.n, forward)

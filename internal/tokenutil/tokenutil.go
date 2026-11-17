@@ -12,10 +12,15 @@ const charsPerToken = 4
 
 // EstimateTokens returns an approximate token count for the given text.
 func EstimateTokens(text string) int {
-	if text == "" {
+	return EstimateTokensForLen(len(text))
+}
+
+// EstimateTokensForLen is EstimateTokens for text of n bytes.
+func EstimateTokensForLen(n int) int {
+	if n <= 0 {
 		return 0
 	}
-	return (len(text) + charsPerToken - 1) / charsPerToken
+	return (n + charsPerToken - 1) / charsPerToken
 }
 
 // Truncate shortens text to fit within the given token budget.

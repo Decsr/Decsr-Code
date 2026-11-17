@@ -790,7 +790,10 @@ func workspaceHelp(cmds []wsCommand) []helpSection {
 		}},
 		{"Graph keys (graph focus)", []keyHint{
 			{"← ↑ ↓ → / h j k l", "move between nodes"},
-			{"Enter / o", "open the full output of the node"},
+			{"Enter / o", "open the node: its step timeline on the left, its changes on the right"},
+			{"Tab", "in a node (120+ columns two panes, else one): switch between the timeline and the changes"},
+			{"t / d / D", "in a node: t raw output, d full-screen diff with notes, D diff of the session"},
+			{"v", "show or hide the live pane under the graph (a running node; needs 30 rows)"},
 			{"i", "show or hide the inspector (under 100 columns it opens over the graph; i or Esc closes it)"},
 			{"a / A", "pick the agent / accept all suggestions"},
 			{"d / D", "diff of the node / diff of the whole session (c note a line, S send the notes as a new node)"},

@@ -79,27 +79,74 @@ func claudeToolNames(allowed []string) []string {
 	return out
 }
 
+// readOnlyBash are the shell commands that cannot write, allowed for every
+// writing agent run so chained inspection commands are not refused.
+var readOnlyBash = []string{"ls", "cat", "head", "tail", "wc", "pwd", "which", "file", "stat", "du", "tree"}
+
 // AgentTools is the allow list of a Claude agent run: file tools (read-only
-// for a read-only role), Bash limited to the given build and test commands
-// (never for a read-only role) and read-only git.
-func AgentTools(commands []string, readOnly bool) []string {
+// for a read-only role), Bash limited to the programs of the given build and
+// test commands, a few read-only shell commands and the extra command
+// prefixes (never for a read-only role) and read-only git.
+func AgentTools(commands, extra []string, readOnly bool) []string {
 	tools := []string{"Read", "Glob", "Grep"}
 	if !readOnly {
 		tools = []string{"Read", "Edit", "Write", "Glob", "Grep"}
 		seen := map[string]bool{}
-		for _, c := range commands {
-			c = strings.TrimSpace(c)
-			if c == "" || seen[c] || strings.ContainsAny(c, "()\n,") {
-				continue
+		add := func(prefix string) {
+			if prefix == "" || seen[prefix] || strings.ContainsAny(prefix, "()\n,") {
+				return
 			}
-			seen[c] = true
-			tools = append(tools, "Bash("+c+":*)")
+			seen[prefix] = true
+			tools = append(tools, "Bash("+prefix+":*)")
+		}
+		for _, c := range commands {
+			for _, p := range commandPrograms(c) {
+				add(p)
+			}
+		}
+		for _, p := range readOnlyBash {
+			add(p)
+		}
+		for _, e := range extra {
+			add(strings.TrimSpace(e))
 		}
 	}
 	for _, g := range []string{"status", "diff", "log", "show"} {
 		tools = append(tools, "Bash(git "+g+":*)")
 	}
 	return tools
+}
+
+// commandPrograms is the program of each part of a command line split on
+// &&, ||, ; and |, skipping leading VAR=val assignments and "cd <dir>" parts.
+// Parts with unsafe characters are dropped.
+func commandPrograms(cmd string) []string {
+	parts := strings.FieldsFunc(strings.NewReplacer("&&", ";", "||", ";", "|", ";").Replace(cmd), func(r rune) bool { return r == ';' })
+	var out []string
+	for _, part := range parts {
+		words := strings.Fields(part)
+		for len(words) > 0 && isAssignment(words[0]) {
+			words = words[1:]
+		}
+		if len(words) == 0 || words[0] == "cd" || strings.ContainsAny(words[0], "()\n,") {
+			continue
+		}
+		out = append(out, words[0])
+	}
+	return out
+}
+
+func isAssignment(w string) bool {
+	i := strings.Index(w, "=")
+	if i <= 0 {
+		return false
+	}
+	for _, r := range w[:i] {
+		if r != '_' && (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func buildClaudePrompt(messages []ConvMessage) string {
@@ -165,6 +212,7 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 	var finalUsage TokenUsage
 	gotUsage := false
 	acts := newClaudeActivities()
+	var liveUsage claudeLiveUsage
 	// limited is set when the result event reports an error that reads as a
 	// usage limit ("... limit reached ∙ resets 2pm"). The same text may also
 	// arrive as assistant text, so it is reported even after text was emitted.
@@ -180,7 +228,14 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 			continue
 		}
 		switch evt.Type {
+		case "system":
+			if evt.Subtype == "init" && evt.Model != "" {
+				ch <- Token{Model: evt.Model}
+			}
 		case "assistant":
+			if p := liveUsage.add(evt.Message); p != nil {
+				ch <- Token{Progress: p}
+			}
 			text := assistantText(evt.Message.Content)
 			delta := computeDelta(emitted.String(), text)
 			if delta != "" {
@@ -218,6 +273,7 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 			if in := evt.Usage.promptTokens(); in > 0 || evt.Usage.OutputTokens > 0 {
 				finalUsage = TokenUsage{
 					InputTokens:  in,
+					CachedTokens: evt.Usage.cachedTokens(),
 					OutputTokens: evt.Usage.OutputTokens,
 				}
 				gotUsage = true
@@ -269,6 +325,8 @@ func computeDelta(already, next string) string {
 // claudeStreamEvent is one NDJSON line from `--output-format stream-json`.
 type claudeStreamEvent struct {
 	Type    string                  `json:"type"`
+	Subtype string                  `json:"subtype"` // "init" on a system event
+	Model   string                  `json:"model"`   // system init: the model in use
 	Message claudeStreamMessage     `json:"message"`
 	Result  string                  `json:"result"`
 	IsError bool                    `json:"is_error"`
@@ -278,6 +336,9 @@ type claudeStreamEvent struct {
 type claudeStreamMessage struct {
 	ID      string                `json:"id"`
 	Content []claudeStreamContent `json:"content"`
+	// Usage is this message's own usage. The same message can arrive in
+	// several assistant events (one per content block), each repeating it.
+	Usage claudeStreamUsageFields `json:"usage"`
 }
 
 // claudeStreamContent is one content block. The block types and fields follow
@@ -303,6 +364,53 @@ type claudeStreamUsageFields struct {
 	OutputTokens             int `json:"output_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+}
+
+// cachedTokens is the part of the prompt that was written to or read from the cache.
+func (u claudeStreamUsageFields) cachedTokens() int {
+	return u.CacheCreationInputTokens + u.CacheReadInputTokens
+}
+
+// claudeLiveUsage adds up the usage of the assistant messages of a run. A
+// message seen again (same ID) replaces its earlier entry instead of being
+// added twice, so the sum matches what the result event reports at the end.
+type claudeLiveUsage struct {
+	byID  map[string]claudeStreamUsageFields
+	extra []claudeStreamUsageFields // messages without an ID
+	last  TokenUsage
+}
+
+// add records one assistant message and returns the cumulative usage when it
+// changed, else nil.
+func (l *claudeLiveUsage) add(m claudeStreamMessage) *TokenUsage {
+	u := m.Usage
+	if u.promptTokens() == 0 && u.OutputTokens == 0 {
+		return nil
+	}
+	if m.ID != "" {
+		if l.byID == nil {
+			l.byID = map[string]claudeStreamUsageFields{}
+		}
+		l.byID[m.ID] = u
+	} else {
+		l.extra = append(l.extra, u)
+	}
+	var sum TokenUsage
+	for _, v := range l.byID {
+		sum.InputTokens += v.promptTokens()
+		sum.CachedTokens += v.cachedTokens()
+		sum.OutputTokens += v.OutputTokens
+	}
+	for _, v := range l.extra {
+		sum.InputTokens += v.promptTokens()
+		sum.CachedTokens += v.cachedTokens()
+		sum.OutputTokens += v.OutputTokens
+	}
+	if sum == l.last {
+		return nil
+	}
+	l.last = sum
+	return &sum
 }
 
 // promptTokens is the full prompt size: uncached input plus cache writes and reads.

@@ -356,3 +356,29 @@ func TestThemeCheck(t *testing.T) {
 		t.Fatalf("invalid theme result = %+v", r)
 	}
 }
+
+func TestDshNeedsKey(t *testing.T) {
+	d := baseDeps()
+	d.Agents = []Agent{{Name: "coder", Runner: "dsh"}}
+	rs := Run(d)
+	r, ok := find(rs, "runner dsh key")
+	if !ok || r.Status != Fail || r.Required {
+		t.Fatalf("dsh without a key: %+v (found=%v)", r, ok)
+	}
+	if !strings.Contains(r.Hint, "decsr connect deepseek") || !strings.Contains(r.Hint, "DEEPSEEK_API_KEY") {
+		t.Errorf("hint = %q", r.Hint)
+	}
+	if r, ok := find(rs, "runner dsh"); ok && r.Status == OK {
+		t.Error("dsh must not be reported ready without a key")
+	}
+
+	d.Getenv = func(k string) string {
+		if k == "DEEPSEEK_API_KEY" {
+			return "k"
+		}
+		return ""
+	}
+	if r, ok := find(Run(d), "runner dsh"); !ok || r.Status != OK {
+		t.Errorf("dsh with a key: %+v (found=%v)", r, ok)
+	}
+}

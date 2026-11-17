@@ -768,8 +768,13 @@ func TestExecWorkEmitsContext(t *testing.T) {
 	if ctxEvs[0].ContextTokens != want || want == 0 || ctxEvs[0].ContextLimit != 32000 || ctxEvs[0].NodeID != "T1" {
 		t.Errorf("event = %+v, want tokens %d limit 32000", ctxEvs[0], want)
 	}
-	if evs[0].Type != EventContext {
-		t.Errorf("first event = %s, want context before the run output", evs[0].Type)
+	for _, e := range evs {
+		if e.Type == EventOutput {
+			t.Fatal("run output came before the context event")
+		}
+		if e.Type == EventContext {
+			break
+		}
 	}
 }
 

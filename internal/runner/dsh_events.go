@@ -34,6 +34,11 @@ type dshParser struct {
 	usage    TokenUsage
 	hasUsage bool
 
+	// model is the model decsr asked dsh to use (the id without the provider,
+	// or the profile default when none was set); a model field on the session
+	// event overrides it. The session event does not document one.
+	model string
+
 	tools map[string]dshTool // calls waiting for their result
 
 	final      bool
@@ -50,7 +55,21 @@ type dshTool struct {
 	start time.Time
 }
 
-func newDshParser() *dshParser { return &dshParser{tools: map[string]dshTool{}} }
+func newDshParser(model string) *dshParser {
+	return &dshParser{tools: map[string]dshTool{}, model: dshModelID(model)}
+}
+
+// dshModelID is the model id dsh runs for a requested "provider/model" (or
+// bare model); empty selects the profile default.
+func dshModelID(model string) string {
+	if model == "" {
+		return dshDefaultModel
+	}
+	if _, id, ok := strings.Cut(model, "/"); ok && id != "" {
+		return id
+	}
+	return model
+}
 
 // feed parses one NDJSON line and returns the Tokens it produces. Malformed and
 // unknown lines return nothing.
@@ -70,6 +89,7 @@ func (p *dshParser) feed(line []byte) []Token {
 			Reason string `json:"reason"`
 		} `json:"error"`
 		Message string `json:"message"`
+		Model   string `json:"model"`
 		Usage   *struct {
 			InputTokens      int `json:"inputTokens"`
 			OutputTokens     int `json:"outputTokens"`
@@ -90,12 +110,23 @@ func (p *dshParser) feed(line []byte) []Token {
 	now := time.Now()
 
 	switch ev.Type {
+	case "session":
+		if ev.Model != "" {
+			p.model = ev.Model
+		}
+		if p.model != "" {
+			return []Token{{Model: p.model}}
+		}
 	case "status":
 		if ev.Phase == "step_end" && ev.Usage != nil {
 			// InputTokens is the full prompt: uncached plus cache read and write.
-			p.usage.InputTokens += ev.Usage.InputTokens + ev.Usage.CacheReadTokens + ev.Usage.CacheWriteTokens
+			cached := ev.Usage.CacheReadTokens + ev.Usage.CacheWriteTokens
+			p.usage.InputTokens += ev.Usage.InputTokens + cached
+			p.usage.CachedTokens += cached
 			p.usage.OutputTokens += ev.Usage.OutputTokens
 			p.hasUsage = true
+			live := p.usage
+			return []Token{{Progress: &live}}
 		}
 	case "text":
 		if ev.Text == "" {

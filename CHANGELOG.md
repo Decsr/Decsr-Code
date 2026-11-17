@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Workspace: a live view of a running node. A pane under the graph shows the
+  running line (runner, model, effort, time, tokens in and out), the last steps
+  and the files edited so far; `v` hides it. `Enter` on a node now opens a
+  combined screen with the step timeline and the changes (file list and
+  highlighted diff, refreshed while the node runs), `Tab` switches panes, `t`
+  still shows the raw output. Running cards show the total tokens.
+
+- Setup: DeepSeek Harness (`dsh`) now has a model pick list like Claude and
+  OpenCode, in Global settings and the agent editor. `(default)` leaves the
+  model blank; the other rows are the ids the DeepSeek API lists. A saved model
+  that is not listed stays selected. Without a DeepSeek key or when the list
+  cannot be fetched, the model is typed as before, with a hint to run
+  `decsr connect deepseek`.
+
+- Config: `project.allowed_commands` lists extra command prefixes (for example
+  `/opt/Qt/Tools/CMake/bin/cmake` or `dpkg -l`) that a writing Claude agent-mode
+  role may run.
+
 ### Changed
+- `dsh` is reported as needing a key when `DEEPSEEK_API_KEY` is unset and no key
+  is saved by decsr: the runner checks, `decsr doctor` and first-run setup
+  point to `decsr connect deepseek` (first-run opens the key step). A key kept
+  only by dsh's own credentials is not visible to decsr.
 - Home and the setup screens (Global settings, Project setup, Model memory) are
   back to the galaxy layout. The other screens keep the shared look and the
   `ui.theme` setting. Sessions and recent projects are listed on Home, `Enter`
@@ -15,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its Mode field.
 
 ### Fixed
+- Claude agent mode no longer refuses `cmake --preset ...`, a cmake or ctest
+  called by absolute path, or chains such as `ls; cat file | head`. The allow
+  list now holds the program of each part of the build and test commands plus
+  read-only `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `which`, `file`, `stat`,
+  `du` and `tree`, instead of the whole command lines.
 - Setup screen: the `dsh` runner (DeepSeek Harness) is now listed, so an agent
   configured with it is no longer shown as OpenCode or rewritten to it on save.
   The model is typed (blank uses dsh's default) and the effort row is shown.

@@ -135,6 +135,7 @@ func (r *LMStudioRunner) streamFromReader(reader io.Reader, inputText string, ch
 	reasoningLen := 0
 	sawChunk := false
 	var think thinkingTracker
+	live := newLiveUsage(inputText)
 
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
@@ -161,6 +162,7 @@ func (r *LMStudioRunner) streamFromReader(reader io.Reader, inputText string, ch
 				emitActivity(ch, think.finish(time.Now()))
 				ch <- Token{Text: c.Delta.Content}
 				contentLen += len(c.Delta.Content)
+				live.add(c.Delta.Content, ch)
 			}
 			// Reasoning models (gemma "thinking", deepseek-r1) stream their
 			// chain-of-thought in reasoning_content. Show it live (display-only)
@@ -169,6 +171,7 @@ func (r *LMStudioRunner) streamFromReader(reader io.Reader, inputText string, ch
 				ch <- Token{Reasoning: c.Delta.Reasoning}
 				emitActivity(ch, think.add(c.Delta.Reasoning, time.Now()))
 				reasoningLen += len(c.Delta.Reasoning)
+				live.add(c.Delta.Reasoning, ch)
 			}
 		}
 		if chunk.Usage != nil {

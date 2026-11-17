@@ -17,7 +17,7 @@ func TestDshParserFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := newDshParser()
+	p := newDshParser("")
 	var text strings.Builder
 	acts := map[string][]*Activity{}
 	var order []string
@@ -67,7 +67,7 @@ func TestDshParserFixture(t *testing.T) {
 }
 
 func TestDshParserFallsBackToFinalTextAndEstimate(t *testing.T) {
-	p := newDshParser()
+	p := newDshParser("")
 	p.feed([]byte(`{"type":"final","sessionId":"s","reason":{"kind":"completed"},"text":"only final"}`))
 	text, usage := p.finish("some prompt text")
 	if text != "only final" || !usage.Estimated || usage.OutputTokens == 0 {
@@ -77,7 +77,7 @@ func TestDshParserFallsBackToFinalTextAndEstimate(t *testing.T) {
 
 func TestDshFailureMapping(t *testing.T) {
 	feed := func(lines ...string) *dshParser {
-		p := newDshParser()
+		p := newDshParser("")
 		for _, l := range lines {
 			p.feed([]byte(l))
 		}
@@ -118,13 +118,13 @@ func TestDshFailureMapping(t *testing.T) {
 }
 
 func TestDshRateLimitDetectedOnFailureOnly(t *testing.T) {
-	p := newDshParser()
+	p := newDshParser("")
 	p.feed([]byte(`{"type":"final","reason":{"kind":"error","error":{"code":"RATE_LIMITED","message":"429 Too Many Requests"}},"text":""}`))
 	if err := p.failure(nil, ""); !errors.Is(err, ErrRateLimited) {
 		t.Errorf("err = %v, want a rate limit", err)
 	}
 	// An answer that talks about rate limits is not one.
-	ok := newDshParser()
+	ok := newDshParser("")
 	ok.feed([]byte(`{"type":"text","text":"add a rate limit of 429 per hour"}`))
 	ok.feed([]byte(`{"type":"final","reason":{"kind":"completed"},"text":"add a rate limit"}`))
 	if err := ok.failure(nil, ""); err != nil {

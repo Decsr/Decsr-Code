@@ -295,6 +295,13 @@ func checkRunner(d Deps, g runnerGroup) []Result {
 	case "openai", "deepseek", "openrouter", "groq":
 		return checkAPIRunner(d, g, name, who)
 	}
+	if g.name == "dsh" {
+		// dsh runs on the DeepSeek key decsr hands over. A key kept by dsh's
+		// own credentials service is not visible here.
+		if d.keySource("deepseek", deepSeekKeyEnv) == "" {
+			return []Result{{Name: name + " key", Status: Fail, Detail: deepSeekKeyEnv + " is not set and no saved key (agents: " + who + ")", Hint: "run `decsr connect deepseek` or export " + deepSeekKeyEnv + "=<your key>"}}
+		}
+	}
 	if err := d.Reachable(g.name); err != nil {
 		return []Result{{Name: name, Status: Warn, Detail: fmt.Sprintf("%v (agents: %s)", err, who), Hint: runnerHint(g.name)}}
 	}

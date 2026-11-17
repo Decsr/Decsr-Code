@@ -29,6 +29,7 @@ type codexParser struct {
 
 	usage     TokenUsage
 	gotUsage  bool
+	progress  *TokenUsage // cumulative usage after the last turn.completed, until taken
 	errorMsgs []string
 }
 
@@ -69,8 +70,9 @@ func (p *codexParser) feed(line []byte, now time.Time) []*Activity {
 		Type  string    `json:"type"`
 		Item  codexItem `json:"item"`
 		Usage *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+			InputTokens       int `json:"input_tokens"`
+			CachedInputTokens int `json:"cached_input_tokens"`
+			OutputTokens      int `json:"output_tokens"`
 		} `json:"usage"`
 		Message string `json:"message"`
 		Error   *struct {
@@ -87,8 +89,11 @@ func (p *codexParser) feed(line []byte, now time.Time) []*Activity {
 	case "turn.completed":
 		if ev.Usage != nil {
 			p.usage.InputTokens += ev.Usage.InputTokens
+			p.usage.CachedTokens += ev.Usage.CachedInputTokens
 			p.usage.OutputTokens += ev.Usage.OutputTokens
 			p.gotUsage = true
+			live := p.usage
+			p.progress = &live
 		}
 	case "turn.failed":
 		msg := ""

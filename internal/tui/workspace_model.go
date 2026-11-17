@@ -636,6 +636,12 @@ type workspaceModel struct {
 	outAttempt int             // earlier attempt shown (its number); 0 = the current one
 	outCur     int             // timeline cursor: index into the node's activity
 	outOpen    map[string]bool // expanded timeline items, by outKey
+	outPane    int             // pane in focus (two panes) or shown (one): 0 timeline, 1 changes
+	outDiff    *wsDiffView     // changes of the output node
+	outDiffAt  time.Time       // when the last reload started
+	outDiffBusy,
+	outDiffDirty bool // a reload runs; another was asked for meanwhile
+	liveHide bool // v hid the live pane of a running node
 
 	stallNoted       map[string]time.Time // per node: the stall episode already announced
 	limitBackoff     map[string]time.Time // per limited node: when an automatic retry may be tried again
@@ -791,8 +797,7 @@ func (m workspaceModel) promptRows() int {
 func (m *workspaceModel) resize() {
 	m.input.SetWidth(max(m.width-6, 10))
 	m.input.SetHeight(m.promptRows())
-	m.outVP.Width = max(m.width, 1)
-	m.outVP.Height = max(m.height-3, 1)
+	m.sizeOutVP()
 	fw := max(min(70, m.width-2)-4-22, 10)
 	m.formName.Width = fw
 	m.formDesc.Width = fw
@@ -905,6 +910,8 @@ func (m workspaceModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onReviewDone(msg)
 	case wsEventMsg:
 		return m.onEvent(msg)
+	case wsOutDiffMsg:
+		return m.onOutDiff(msg)
 	case wsInstallMsg:
 		return m.onInstalled(msg)
 	case connectProbeMsg, connectTickMsg, connectSavedMsg, connectClosedMsg:
@@ -930,8 +937,12 @@ func (m workspaceModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.checkStalls()
 		m.checkLimitRetries()
+		m, diffCmd := m.outDiffTick()
 		if m.splitting || m.reviewing || m.running() > 0 || m.installing != "" || m.hasLimitedAuto() {
-			return m, wsTick()
+			return m, tea.Batch(wsTick(), diffCmd)
+		}
+		if diffCmd != nil {
+			return m, diffCmd
 		}
 		m.ticking = false
 		return m, nil
@@ -1538,7 +1549,12 @@ func (m workspaceModel) onEvent(msg wsEventMsg) (tea.Model, tea.Cmd) {
 	}
 	m, autoCmd := m.autoAfterEvent(ev)
 	m, coordCmd := m.coordAfterEvent(ev)
-	return m, tea.Batch(wsWaitEvent(m.eng), m.startTick(), m.prAfterEvent(ev), autoCmd, coordCmd)
+	var diffCmd tea.Cmd
+	if ev.Type == workspace.EventActivity && ev.NodeID == m.outNode && ev.Activity != nil &&
+		(ev.Activity.Kind == runner.ActEdit || ev.Activity.Kind == runner.ActWrite) {
+		m, diffCmd = m.startOutDiff()
+	}
+	return m, tea.Batch(wsWaitEvent(m.eng), m.startTick(), m.prAfterEvent(ev), autoCmd, coordCmd, diffCmd)
 }
 
 // wsMaxOutputBytes caps the stored output of one node.
@@ -1838,6 +1854,14 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "o", "enter":
 		if n != nil {
 			m = m.openOutput(n)
+			return m.startOutDiff()
+		}
+	case "v":
+		m.liveHide = !m.liveHide
+		if m.liveHide {
+			m.setNotice("Live pane hidden; v shows it again", false)
+		} else {
+			m.setNotice("Live pane shown for a running node", false)
 		}
 	}
 	return m, nil
@@ -1967,6 +1991,26 @@ func (m workspaceModel) outputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.outCombined() {
+		switch k := msg.String(); k {
+		case "tab":
+			m.outPane = 1 - m.outPane
+			return m, nil
+		case "d":
+			if n := m.g.Node(m.outNode); n != nil && n.Kind == workspace.KindWork {
+				return m.openDiff(n), nil
+			}
+			return m, nil
+		case "D":
+			return m.openDiff(nil), nil
+		default:
+			if m.outPane == 1 {
+				if next, ok := m.changesKey(k); ok {
+					return next, nil
+				}
+			}
+		}
+	}
 	switch msg.String() {
 	case "[":
 		return m.outAttemptStep(-1), nil
@@ -1979,7 +2023,11 @@ func (m workspaceModel) outputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.outRaw = !m.outRaw
 		m.outFollow = true
+		m.sizeOutVP()
 		m.refreshOutput()
+		if !m.outRaw {
+			return m.startOutDiff()
+		}
 		return m, nil
 	}
 	if m.outTimelineOn() || m.outArchived(m.g.Node(m.outNode)) != nil {
@@ -2803,6 +2851,8 @@ func (m workspaceModel) mainPanes(mainH int) []string {
 
 	n := m.selNode()
 	tail := m.outputTail(m.sel, mainH)
+	liveH := m.liveHeight(mainH)
+	graphH := mainH - liveH
 	graphPane := func(cw int) []string {
 		if !m.showGraph {
 			return m.feedPane(cw, mainH)
@@ -2810,12 +2860,18 @@ func (m workspaceModel) mainPanes(mainH int) []string {
 		out := []string{ui.PaneLabel("Graph", m.focus == wsFocusGraph, 0) + lipgloss.NewStyle().Foreground(ui.Muted).Render(" · g activity")}
 		var body []string
 		if len(g.Nodes) == 0 {
-			body = m.emptyPane(cw-4, mainH-1)
+			body = m.emptyPane(cw-4, graphH-1)
 		} else {
-			body = strings.Split(renderCanvas(g, canvasOpts{width: cw - 4, height: mainH - 1, selected: m.sel, models: models, runners: runners, icons: m.cfg.UI.Icons, spinner: spin}), "\n")
+			body = strings.Split(renderCanvas(g, canvasOpts{width: cw - 4, height: graphH - 1, selected: m.sel, models: models, runners: runners, icons: m.cfg.UI.Icons, spinner: spin}), "\n")
 		}
 		for _, l := range body {
 			out = append(out, "  "+l)
+		}
+		if liveH > 0 {
+			for len(out) < graphH {
+				out = append(out, "")
+			}
+			out = append(out[:graphH], m.liveLines(n, cw, liveH)...)
 		}
 		return out
 	}
@@ -2991,6 +3047,9 @@ func (m workspaceModel) outputView() string {
 	title := m.outputHeader(w)
 	if n == nil {
 		title = m.outNode
+	}
+	if m.outCombined() {
+		return m.combinedView(n, title)
 	}
 	vp := m.outVP
 	vp.Width, vp.Height = w, h-3

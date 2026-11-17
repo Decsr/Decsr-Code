@@ -291,3 +291,31 @@ func TestFirstRunRenderWidths(t *testing.T) {
 		}
 	}
 }
+
+func TestFirstRunDshNeedsKey(t *testing.T) {
+	frHome(t)
+	find := func(d FirstRunDeps) frEntry {
+		for _, e := range firstRunEntries(d.withDefaults()) {
+			if e.name == "dsh" {
+				return e
+			}
+		}
+		t.Fatal("dsh not listed")
+		return frEntry{}
+	}
+	e := find(frDeps(t, []string{"dsh"}, nil, nil))
+	if e.usable || !e.needsKey || !strings.Contains(e.status, "needs a DeepSeek key") {
+		t.Fatalf("dsh without a key = %+v", e)
+	}
+	e = find(frDeps(t, []string{"dsh"}, nil, map[string]string{"deepseek": "saved (~/.decsr/credentials.json)"}))
+	if !e.usable || e.needsKey {
+		t.Fatalf("dsh with a key = %+v", e)
+	}
+
+	m := newFirstRunModel(frDeps(t, []string{"dsh"}, nil, nil))
+	m = frSelect(t, m, "dsh")
+	m, _ = frSend(t, m, frKeyMsg("enter"))
+	if m.step != frKey || m.conn == nil {
+		t.Fatalf("step = %v, want the key step", m.step)
+	}
+}

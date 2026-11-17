@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -29,7 +30,7 @@ func Ping(provider, model string) error {
 	case "copilot":
 		return pingBinary(ctx, "copilot")
 	case "dsh":
-		return pingBinary(ctx, "dsh")
+		return pingDsh(ctx)
 	case "ollama":
 		return pingOllama(ctx, model)
 	case "mlx":
@@ -67,7 +68,7 @@ func ProviderReachable(provider string) error {
 	case "copilot":
 		return pingBinary(ctx, "copilot")
 	case "dsh":
-		return pingBinary(ctx, "dsh")
+		return pingDsh(ctx)
 	case "ollama":
 		return pingHTTP(ctx, ollamaBaseURL+"/api/tags", "ollama")
 	case "mlx":
@@ -84,6 +85,23 @@ func ProviderReachable(provider string) error {
 	default:
 		return fmt.Errorf("unknown provider %q", provider)
 	}
+}
+
+// ErrDshNoKey is wrapped by the error pingDsh returns when the dsh binary is
+// present but no DeepSeek key is available to hand over to it.
+var ErrDshNoKey = errors.New("dsh has no DeepSeek key")
+
+// pingDsh checks the dsh binary, then that a DeepSeek key is available: the
+// environment variable or the key saved by decsr. A key kept by dsh's own
+// credentials service is not visible here.
+func pingDsh(ctx context.Context) error {
+	if err := pingBinary(ctx, "dsh"); err != nil {
+		return err
+	}
+	if KeySource("deepseek", "") == "" {
+		return fmt.Errorf("%w — run \"decsr connect deepseek\" or export DEEPSEEK_API_KEY", ErrDshNoKey)
+	}
+	return nil
 }
 
 // pingBinary checks that a CLI binary is installed and runnable.

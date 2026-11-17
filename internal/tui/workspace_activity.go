@@ -409,10 +409,14 @@ func activityTimelineRows(n *workspace.Node, now time.Time, iw int) []string {
 	return rows
 }
 
-// cardMeta is the dim text after the duration: " · ctx 18k".
+// cardMeta is the dim text after the duration: " · ctx 18k · 184k tok".
 func cardMeta(n *workspace.Node) string {
+	meta := ""
 	if c := ctxLabel(n); c != "" {
-		return " · " + c
+		meta += " · " + c
 	}
-	return ""
+	if t := tokTotalLabel(n); t != "" {
+		meta += " · " + t
+	}
+	return meta
 }

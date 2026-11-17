@@ -32,6 +32,7 @@ type openCodeParser struct {
 	usage      TokenUsage
 	foundUsage bool
 	stepIn     int
+	stepCached int
 	stepOut    int
 }
 
@@ -104,8 +105,11 @@ func (p *openCodeParser) feed(line []byte) []Token {
 			} `json:"part"`
 		}
 		if json.Unmarshal(line, &sf) == nil {
-			p.stepIn += sf.Part.Tokens.Input + sf.Part.Tokens.Cache.Read + sf.Part.Tokens.Cache.Write
+			cached := sf.Part.Tokens.Cache.Read + sf.Part.Tokens.Cache.Write
+			p.stepIn += sf.Part.Tokens.Input + cached
+			p.stepCached += cached
 			p.stepOut += sf.Part.Tokens.Output
+			return []Token{{Progress: &TokenUsage{InputTokens: p.stepIn, CachedTokens: p.stepCached, OutputTokens: p.stepOut}}}
 		}
 	case "tool_use":
 		return activityTokens(openCodeToolActivity(line, now))
@@ -151,7 +155,7 @@ func (p *openCodeParser) finish(raw []byte, inputText string) (string, TokenUsag
 	switch {
 	case p.foundUsage:
 	case p.stepIn > 0 || p.stepOut > 0:
-		usage = TokenUsage{InputTokens: p.stepIn, OutputTokens: p.stepOut}
+		usage = TokenUsage{InputTokens: p.stepIn, CachedTokens: p.stepCached, OutputTokens: p.stepOut}
 	default:
 		usage = TokenUsage{
 			InputTokens:  tokenutil.EstimateTokens(inputText),

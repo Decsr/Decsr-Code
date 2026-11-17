@@ -80,6 +80,7 @@ type frEntry struct {
 	kind        frKind
 	status      string
 	usable      bool // can run as it is: installed, key set or server running
+	needsKey    bool // installed, but waiting for the DeepSeek key (dsh)
 }
 
 // frInstallHint says how to get a runner that is not installed.
@@ -149,6 +150,10 @@ func firstRunEntry(d FirstRunDeps, name, label string, kind frKind) frEntry {
 		}
 		e.usable = true
 		e.status = name + " found"
+		if name == "dsh" && d.KeySource("deepseek", "DEEPSEEK_API_KEY") == "" {
+			e.usable, e.needsKey = false, true
+			e.status = "dsh found · needs a DeepSeek key"
+		}
 		if name == "claude" {
 			e.status = "claude CLI found"
 			if d.LoggedIn(name) {
@@ -300,6 +305,11 @@ func (m firstRunModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m firstRunModel) choose() (tea.Model, tea.Cmd) {
 	e := m.entries[m.idx]
 	m.chosen, m.notice = e, ""
+	if e.needsKey {
+		c := newConnectModel("deepseek", false, m.deps.Probe, nil)
+		m.conn, m.step = &c, frKey
+		return m, nil
+	}
 	if e.kind == frCLI && !e.usable {
 		m.notice = frInstallHint(e.name)
 		return m, nil

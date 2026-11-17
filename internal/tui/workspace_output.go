@@ -27,7 +27,10 @@ func (m workspaceModel) openOutput(n *workspace.Node) workspaceModel {
 	m.screen = wsScreenOutput
 	m.outNode = n.ID
 	m.outFollow = true
-	m.outRaw = len(n.Activity) == 0
+	m.outRaw = len(n.Activity) == 0 && len(m.outputs[n.ID]) > 0
+	m.outPane = 0
+	m.outDiff = nil
+	m.outDiffBusy, m.outDiffDirty = false, false
 	m.outAttempt = 0
 	m.outCur = max(len(n.Activity)-1, 0)
 	m.refreshOutput()
@@ -41,6 +44,7 @@ func (m workspaceModel) outTimelineOn() bool { return !m.outRaw }
 // line per item and the detail of the expanded ones. The cursor row has a bar;
 // the viewport follows the newest item or keeps the cursor in view.
 func (m *workspaceModel) refreshTimeline() {
+	m.sizeOutVP()
 	n := m.g.Node(m.outNode)
 	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	if n == nil {
@@ -56,6 +60,9 @@ func (m *workspaceModel) refreshTimeline() {
 	}
 	if len(acts) == 0 {
 		msg := "(no activity recorded; t shows the raw output)"
+		if n.Status == workspace.StatusRunning && arch == nil {
+			msg = fmt.Sprintf("waiting for %s's first output… (%s)", n.Role, formatElapsed(m.now().Sub(n.StartedAt)))
+		}
 		if arch != nil {
 			msg = "  (the activity of this attempt was not kept)"
 		}
@@ -174,7 +181,7 @@ func (m workspaceModel) outputHeader(w int) string {
 			meta = append(meta, "Worked for "+feedDuration(a.EndedAt.Sub(a.StartedAt)))
 		}
 	} else {
-		if !n.StartedAt.IsZero() {
+		if !n.StartedAt.IsZero() && !m.outCombined() {
 			end, word := n.EndedAt, "Worked for "
 			if n.Status == workspace.StatusRunning || end.IsZero() {
 				end, word = m.now(), "Working for "

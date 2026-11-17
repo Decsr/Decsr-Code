@@ -29,7 +29,14 @@ const (
 	// (thinking, a command, a file edit, ...). A later activity with the same
 	// ID replaces the earlier one.
 	EventActivity EventType = "activity"
-	EventUsage    EventType = "usage"
+	// EventUsage carries the usage of the node. With Live set it is a
+	// progress snapshot sent while the node runs (at most about twice a
+	// second); without it, it is the final usage of the run.
+	EventUsage EventType = "usage"
+	// EventModel reports the model (Event.Model) and reasoning effort
+	// (Event.Effort) of the node. It is sent when the node starts, from the
+	// role, and again when the runner reports the model it really uses.
+	EventModel EventType = "model"
 	// EventContext reports the size of the prompt a worker is about to get:
 	// Event.ContextTokens (estimated) and Event.ContextLimit (0 = unknown).
 	EventContext EventType = "context"
@@ -55,11 +62,16 @@ type Event struct {
 	NodeID string
 	Type   EventType
 	Text   string // output chunk, or the error text for EventFailed
-	// EventUsage: cumulative for the node.
-	In, Out   int
-	Estimated bool
+	// EventUsage: cumulative for the node. In is the whole prompt; Cached is
+	// the part of it read from or written to a prompt cache.
+	In, Cached, Out int
+	Estimated       bool
+	// Live marks an EventUsage that is a progress snapshot, not the final usage.
+	Live bool
+	// Effort is set for EventModel; "" = the provider default.
+	Effort string
 	// Runner and Model of the agent that used the tokens (EventUsage), to
-	// price them.
+	// price them. For EventModel, Model is the model of the node.
 	Runner, Model string
 	// Activity is set for EventActivity.
 	Activity *runner.Activity
@@ -210,24 +222,36 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 		buildCommands = x.checkCommands()
 	}
 	before, snapOK := snapshotTree(wx.root, maxSnapshotFiles)
+	emit(Event{NodeID: n.ID, Type: EventModel, Model: role.Agent.Model, Effort: runner.NormalizeEffort(role.Agent.Effort)})
+	throttle := newUsageThrottle(time.Now)
 	res, err := agent.RunWorker(ctx, r, wx.root, x.cfg, agent.WorkerRequest{
-		RolePrompt:    rolePrompt,
-		Skills:        role.Agent.Skills,
-		Model:         role.Agent.Model,
-		Title:         n.Title,
-		Description:   n.Description,
-		Context:       wx.workContext(g, n),
-		ReadOnly:      role.ReadOnly,
-		Mode:          role.Agent.EffectiveMode(),
-		MCP:           role.Agent.MCP,
-		BuildCommands: buildCommands,
-		OnActivity:    func(a runner.Activity) { emit(Event{NodeID: n.ID, Type: EventActivity, Activity: &a}) },
+		RolePrompt:      rolePrompt,
+		Skills:          role.Agent.Skills,
+		Model:           role.Agent.Model,
+		Title:           n.Title,
+		Description:     n.Description,
+		Context:         wx.workContext(g, n),
+		ReadOnly:        role.ReadOnly,
+		Mode:            role.Agent.EffectiveMode(),
+		MCP:             role.Agent.MCP,
+		BuildCommands:   buildCommands,
+		AllowedCommands: x.cfg.Project.AllowedCommands,
+		OnActivity:      func(a runner.Activity) { emit(Event{NodeID: n.ID, Type: EventActivity, Activity: &a}) },
+		OnUsage: func(u runner.TokenUsage) {
+			if throttle.allow() {
+				emit(Event{NodeID: n.ID, Type: EventUsage, Live: true, In: u.InputTokens, Cached: u.CachedTokens, Out: u.OutputTokens,
+					Estimated: u.Estimated, Runner: role.Agent.Runner, Model: role.Agent.Model})
+			}
+		},
+		OnModel: func(model string) {
+			emit(Event{NodeID: n.ID, Type: EventModel, Model: model, Effort: runner.NormalizeEffort(role.Agent.Effort)})
+		},
 		OnContext: func(tokens int) {
 			emit(Event{NodeID: n.ID, Type: EventContext, ContextTokens: tokens, ContextLimit: max(role.Agent.MaxContextTokens, 0)})
 		},
 	}, func(s string) { emit(Event{NodeID: n.ID, Type: EventOutput, Text: s}) })
 	if res.Usage.InputTokens > 0 || res.Usage.OutputTokens > 0 {
-		emit(Event{NodeID: n.ID, Type: EventUsage, In: res.Usage.InputTokens, Out: res.Usage.OutputTokens, Estimated: res.Usage.Estimated,
+		emit(Event{NodeID: n.ID, Type: EventUsage, In: res.Usage.InputTokens, Cached: res.Usage.CachedTokens, Out: res.Usage.OutputTokens, Estimated: res.Usage.Estimated,
 			Runner: role.Agent.Runner, Model: role.Agent.Model})
 	}
 	if err != nil {
@@ -267,6 +291,27 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 		}
 	}
 	return out, nil
+}
+
+// liveUsageEvery is the shortest time between two live usage events of a node.
+const liveUsageEvery = 500 * time.Millisecond
+
+// usageThrottle lets one live usage event through per liveUsageEvery. The
+// final usage event is not throttled, so a dropped snapshot is never lost.
+type usageThrottle struct {
+	now  func() time.Time
+	last time.Time
+}
+
+func newUsageThrottle(now func() time.Time) *usageThrottle { return &usageThrottle{now: now} }
+
+func (t *usageThrottle) allow() bool {
+	now := t.now()
+	if !t.last.IsZero() && now.Sub(t.last) < liveUsageEvery {
+		return false
+	}
+	t.last = now
+	return true
 }
 
 // unionSkills is the role's own skills followed by the skills the lead chose

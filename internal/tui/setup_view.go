@@ -223,7 +223,14 @@ func (m SetupModel) renderModelCard(contentWidth int, label, focusLabel, active,
 		modelLines = append(modelLines, m.viewAPIModels(m.provider, active, inactive, dim)...)
 	case providerDsh:
 		modelLines = append(modelLines, dim.Render("  DeepSeek Harness (dsh)"))
-		modelLines = append(modelLines, dim.Render("  type a model id, blank for dsh's default:"), "  "+m.typed.View())
+		switch {
+		case m.dshModelsLoading:
+			modelLines = append(modelLines, dim.Render("  loading models…"))
+		case m.typedMode(providerDsh):
+			modelLines = append(modelLines, dim.Render("  "+dshTypedHint()), "  "+m.typed.View())
+		default:
+			modelLines = append(modelLines, renderWindowedList(m.dshRows(), m.modelIdx, m.section == sectionModel, active, inactive, dim)...)
+		}
 	default:
 		if e := m.entry(m.provider); e.custom() {
 			modelLines = append(modelLines, dim.Render("  "+e.label+" API ("+m.apiKeyLine()+")"))
@@ -481,7 +488,7 @@ func (m SetupModel) agentEditorLines(contentWidth int, focusLabel, active, inact
 		case m.typedMode(m.agentEditProv):
 			hint := "no model list — type a model id:"
 			if ent.runner == "dsh" {
-				hint = "type a model id (blank = dsh default):"
+				hint = dshTypedHint()
 			}
 			lines = append(lines, dim.Render("    "+hint), "    "+m.typed.View())
 		case m.claudeTyping && m.agentEditProv == providerClaude:

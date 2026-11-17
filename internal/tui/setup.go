@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -274,6 +275,11 @@ type SetupModel struct {
 
 	deepseekModels        []string
 	deepseekModelsLoading bool
+	// dshModels are the DeepSeek API ids offered to dsh; dshCustom is a saved
+	// id that may not be among them.
+	dshModels        []string
+	dshModelsLoading bool
+	dshCustom        string
 
 	// Models of the other API providers (OpenAI, OpenRouter, Groq, saved custom
 	// providers), listed from /models once a key exists. Keyed by
@@ -393,6 +399,7 @@ func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs 
 		lmstudioModelsLoading: true,
 		deepseekModels:        runner.DeepSeekFallbackModels(),
 		deepseekModelsLoading: true,
+		dshModelsLoading:      true,
 		apiModels:             make(map[string][]string),
 		apiModelsLoading:      make(map[string]bool),
 		baseURLs:              make(map[string]string),
@@ -425,9 +432,12 @@ func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs 
 	if currentRunner == "claude" {
 		m.noteClaudeCustom(currentModel)
 	}
+	if currentRunner == "dsh" {
+		m.noteDshCustom(currentModel)
+	}
 	m.provider = providerFromString(currentRunner)
 	m.applyGlobalEndpoint(agentCfgs, currentRunner)
-	if m.typedMode(m.provider) || m.entry(m.provider).isAPI() {
+	if m.typedMode(m.provider) || m.entry(m.provider).isAPI() || m.provider == providerDsh {
 		m.typed.SetValue(currentModel)
 	}
 
@@ -558,6 +568,8 @@ func (m SetupModel) modelsForProvider(p providerKind) []string {
 		return m.lmstudioModels
 	case providerDeepSeek:
 		return m.deepseekModels
+	case providerDsh:
+		return m.dshRows()
 	case providerOpenAI, providerOpenRouter, providerGroq:
 		return m.apiModels[m.entry(p).key()]
 	default:
@@ -575,6 +587,9 @@ func (m SetupModel) agentModel() string {
 		return m.typedModel()
 	}
 	if models := m.modelsForProvider(m.agentEditProv); m.agentEditIdx < len(models) && models[m.agentEditIdx] != claudeTypeRow {
+		if m.agentEditProv == providerDsh {
+			return dshRowModel(models[m.agentEditIdx])
+		}
 		return models[m.agentEditIdx]
 	}
 	return ""
@@ -699,7 +714,7 @@ func (m SetupModel) selectedEffort() string {
 }
 
 func (m SetupModel) Init() tea.Cmd {
-	return tea.Batch(m.spinner.Tick, fetchOpenCodeModels(), fetchOllamaModels(), fetchMLXModels(), fetchCodexModels(), fetchClaudeModels(), fetchCopilotModels(), fetchLMStudioModels(), m.fetchAPIModelsCmd(), checkProviderAvailability())
+	return tea.Batch(m.spinner.Tick, fetchOpenCodeModels(), fetchOllamaModels(), fetchMLXModels(), fetchCodexModels(), fetchClaudeModels(), fetchCopilotModels(), fetchLMStudioModels(), fetchDshModels(), m.fetchAPIModelsCmd(), checkProviderAvailability())
 }
 
 // fetchAPIModelsCmd lists the models of every API entry that has a name.
@@ -933,6 +948,12 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 				m.modelIdx = findModelIndex(m.lmstudioModels, prevModel)
 			}
 		}
+		if m.ready {
+			m.viewport.SetContent(m.renderContent())
+		}
+
+	case dshModelsListMsg:
+		m.onDshModels(msg)
 		if m.ready {
 			m.viewport.SetContent(m.renderContent())
 		}
@@ -1489,6 +1510,9 @@ func (m SetupModel) openAgentEditor() (SetupModel, tea.Cmd) {
 		if m.agentEditProv == providerClaude {
 			m.noteClaudeCustom(ov.model)
 		}
+		if m.agentEditProv == providerDsh {
+			m.noteDshCustom(ov.model)
+		}
 		for i, mdl := range m.modelsForProvider(m.agentEditProv) {
 			if mdl == ov.model {
 				m.agentEditIdx = i
@@ -1808,6 +1832,9 @@ func (m SetupModel) selectedProviderModel() (string, string) {
 		model = m.typedModel()
 	case m.modelIdx < len(models) && models[m.modelIdx] != claudeTypeRow:
 		model = models[m.modelIdx]
+		if m.provider == providerDsh {
+			model = dshRowModel(model)
+		}
 	}
 	return provider, model
 }
@@ -1900,10 +1927,12 @@ func checkProviderAvailability() tea.Cmd {
 			if name := apiPresetName(kind); name != "" && runner.KeySource(name, "") == "" {
 				return providerAvailabilityMsg{kind: kind}
 			}
-			return providerAvailabilityMsg{
-				kind: kind,
-				err:  runner.ProviderReachable(providerToString(kind)),
+			err := runner.ProviderReachable(providerToString(kind))
+			// dsh without a key is installed: the screen hints at the key.
+			if errors.Is(err, runner.ErrDshNoKey) {
+				err = nil
 			}
+			return providerAvailabilityMsg{kind: kind, err: err}
 		})
 	}
 	return tea.Batch(cmds...)
@@ -1933,7 +1962,7 @@ func (m SetupModel) apiLoading() bool {
 
 // isLoadingModels returns true if any model list is still being fetched.
 func (m SetupModel) isLoadingModels() bool {
-	return m.modelsLoading || m.claudeModelsLoading || m.ollamaModelsLoading || m.mlxModelsLoading || m.codexModelsLoading || m.copilotModelsLoading || m.lmstudioModelsLoading || m.deepseekModelsLoading || m.apiLoading()
+	return m.modelsLoading || m.claudeModelsLoading || m.ollamaModelsLoading || m.mlxModelsLoading || m.codexModelsLoading || m.copilotModelsLoading || m.lmstudioModelsLoading || m.deepseekModelsLoading || m.dshModelsLoading || m.apiLoading()
 }
 
 // promptsDir returns the project-level prompts override directory.

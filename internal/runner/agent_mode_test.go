@@ -94,9 +94,10 @@ func TestClaudeRunSetsNonessentialTrafficEnv(t *testing.T) {
 }
 
 func TestClaudeAgentModeAllowList(t *testing.T) {
-	tools := AgentTools([]string{"go build ./...", "go test ./...", "go test ./..."}, false)
+	tools := AgentTools([]string{"go build ./...", "go test ./...", "go test ./..."}, nil, false)
 	wantTools := []string{"Read", "Edit", "Write", "Glob", "Grep",
-		"Bash(go build ./...:*)", "Bash(go test ./...:*)",
+		"Bash(go:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)",
+		"Bash(pwd:*)", "Bash(which:*)", "Bash(file:*)", "Bash(stat:*)", "Bash(du:*)", "Bash(tree:*)",
 		"Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)"}
 	if !reflect.DeepEqual(tools, wantTools) {
 		t.Fatalf("tools = %q", tools)
@@ -114,7 +115,7 @@ func TestClaudeAgentModeAllowList(t *testing.T) {
 }
 
 func TestClaudeAgentModeReadOnlyRole(t *testing.T) {
-	tools := AgentTools([]string{"go test ./..."}, true)
+	tools := AgentTools([]string{"go test ./..."}, []string{"dpkg -l"}, true)
 	wantTools := []string{"Read", "Glob", "Grep", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)"}
 	if !reflect.DeepEqual(tools, wantTools) {
 		t.Fatalf("read-only tools = %q", tools)
@@ -130,10 +131,42 @@ func TestClaudeAgentModeReadOnlyRole(t *testing.T) {
 }
 
 func TestAgentToolsSkipsUnsafeCommands(t *testing.T) {
-	tools := AgentTools([]string{"", "  ", "make (all)", "go vet ./..."}, false)
+	tools := AgentTools([]string{"", "  ", "make (all)", "go vet ./..."}, nil, false)
 	joined := strings.Join(tools, ",")
-	if strings.Contains(joined, "make") || !strings.Contains(joined, "Bash(go vet ./...:*)") {
+	if strings.Contains(joined, "(all)") || !strings.Contains(joined, "Bash(go:*)") {
 		t.Errorf("tools = %q", tools)
+	}
+}
+
+func TestAgentToolsSplitsCommandsIntoPrograms(t *testing.T) {
+	cmds := []string{
+		"cmake -S . -B build && cmake --build build",
+		"/opt/Qt/bin/ctest --test-dir build; CC=gcc make -j4 | tee log",
+		"cd sub && make || true",
+	}
+	tools := AgentTools(cmds, []string{"/opt/Qt/Tools/CMake/bin/cmake", " dpkg -l ", "dpkg -l"}, false)
+	have := map[string]int{}
+	for _, tl := range tools {
+		have[tl]++
+	}
+	for _, w := range []string{"Bash(cmake:*)", "Bash(/opt/Qt/bin/ctest:*)", "Bash(make:*)", "Bash(tee:*)", "Bash(true:*)",
+		"Bash(ls:*)", "Bash(/opt/Qt/Tools/CMake/bin/cmake:*)", "Bash(dpkg -l:*)"} {
+		if have[w] != 1 {
+			t.Errorf("%s count = %d, tools = %q", w, have[w], tools)
+		}
+	}
+	for _, bad := range []string{"Bash(cd:*)", "Bash(CC=gcc:*)", "Bash(sed:*)", "Bash(find:*)", "Bash(rm:*)"} {
+		if have[bad] != 0 {
+			t.Errorf("unexpected %s in %q", bad, tools)
+		}
+	}
+}
+
+func TestAgentToolsReadOnlyHasNoGeneralBash(t *testing.T) {
+	for _, tl := range AgentTools([]string{"go test ./..."}, []string{"dpkg -l"}, true) {
+		if strings.HasPrefix(tl, "Bash(") && !strings.HasPrefix(tl, "Bash(git ") {
+			t.Errorf("read-only role got %s", tl)
+		}
 	}
 }
 

@@ -183,6 +183,10 @@ func streamCodexOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffer
 			for _, a := range p.feed(t, time.Now()) {
 				ch <- Token{Activity: a}
 			}
+			if p.progress != nil {
+				ch <- Token{Progress: p.progress}
+				p.progress = nil
+			}
 		}
 		if readErr != nil {
 			break

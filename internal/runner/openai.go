@@ -137,6 +137,7 @@ func (r *OpenAIRunner) streamFromReader(reader io.Reader, inputText string, ch c
 	contentLen := 0
 	reasoningLen := 0
 	var think thinkingTracker
+	live := newLiveUsage(inputText)
 
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
@@ -162,11 +163,13 @@ func (r *OpenAIRunner) streamFromReader(reader io.Reader, inputText string, ch c
 				emitActivity(ch, think.finish(time.Now()))
 				ch <- Token{Text: c.Delta.Content}
 				contentLen += len(c.Delta.Content)
+				live.add(c.Delta.Content, ch)
 			}
 			if c.Delta.Reasoning != "" {
 				ch <- Token{Reasoning: c.Delta.Reasoning}
 				emitActivity(ch, think.add(c.Delta.Reasoning, time.Now()))
 				reasoningLen += len(c.Delta.Reasoning)
+				live.add(c.Delta.Reasoning, ch)
 			}
 		}
 		if chunk.Usage != nil {

@@ -69,8 +69,11 @@ type Node struct {
 	Skills        []string   `json:"skills,omitempty"` // plugin skill ids the lead chose for this node
 	Spec          *SpecRef   `json:"spec,omitempty"`   // the Spec Kit task this node was imported from
 	Error         string     `json:"error,omitempty"`
-	InputTokens   int        `json:"input_tokens,omitempty"`
+	InputTokens   int        `json:"input_tokens,omitempty"`  // the whole prompt, cached part included; live while the node runs
+	CachedTokens  int        `json:"cached_tokens,omitempty"` // part of InputTokens served from or written to a prompt cache
 	OutputTokens  int        `json:"output_tokens,omitempty"`
+	Model         string     `json:"model,omitempty"`  // model of the current attempt: the role's, replaced by the one the runner reports
+	Effort        string     `json:"effort,omitempty"` // reasoning effort of the role; "" = provider default
 	Estimated     bool       `json:"estimated,omitempty"`
 	CostUSD       float64    `json:"cost_usd,omitempty"`   // priced from the configured prices, added up over every attempt; 0 when unknown
 	CostKnown     bool       `json:"cost_known,omitempty"` // a price was found for the node's model

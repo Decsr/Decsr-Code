@@ -262,7 +262,8 @@ func streamCopilotOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buff
 
 	// Emit the input-token estimate immediately so the agent's usage starts
 	// climbing the moment it begins, before any output arrives.
-	ch <- Token{Usage: &TokenUsage{InputTokens: tokenutil.EstimateTokens(fullInput), Estimated: true}}
+	inEst := tokenutil.EstimateTokens(fullInput)
+	ch <- Token{Usage: &TokenUsage{InputTokens: inEst, Estimated: true}, Progress: &TokenUsage{InputTokens: inEst, Estimated: true}}
 
 	var collected strings.Builder
 	emittedOut := 0
@@ -275,7 +276,8 @@ func streamCopilotOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buff
 			ch <- Token{Text: chunk}
 			if d := tokenutil.EstimateTokens(chunk); d > 0 {
 				emittedOut += d
-				ch <- Token{Usage: &TokenUsage{OutputTokens: d, Estimated: true}}
+				ch <- Token{Usage: &TokenUsage{OutputTokens: d, Estimated: true},
+					Progress: &TokenUsage{InputTokens: inEst, OutputTokens: emittedOut, Estimated: true}}
 			}
 		}
 		if readErr != nil {

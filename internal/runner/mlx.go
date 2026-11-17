@@ -172,6 +172,7 @@ func (r *MLXRunner) streamSSE(reader io.Reader, inputText string, ch chan<- Toke
 	reasoningLen := 0
 	sawChunk := false
 	var think thinkingTracker
+	live := newLiveUsage(inputText)
 
 	decided := false   // whether streaming-vs-buffer has been chosen
 	streaming := false // true once we know the reply is plain text (emit live)
@@ -200,6 +201,7 @@ func (r *MLXRunner) streamSSE(reader io.Reader, inputText string, ch chan<- Toke
 			if c.Delta.Content != "" {
 				emitActivity(ch, think.finish(time.Now()))
 				buf.WriteString(c.Delta.Content)
+				live.add(c.Delta.Content, ch)
 				if !decided {
 					// Wait for the first non-whitespace character before
 					// deciding whether the reply is a JSON envelope.
@@ -217,6 +219,9 @@ func (r *MLXRunner) streamSSE(reader io.Reader, inputText string, ch chan<- Toke
 				}
 			}
 			reasoningLen += len(c.Delta.Reasoning)
+			if c.Delta.Reasoning != "" {
+				live.add(c.Delta.Reasoning, ch)
+			}
 			emitActivity(ch, think.add(c.Delta.Reasoning, time.Now()))
 		}
 		if chunk.Usage != nil {

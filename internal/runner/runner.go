@@ -10,8 +10,13 @@ import (
 // TokenUsage holds token counts for a single LLM completion.
 // Estimated is true when the count was derived from a heuristic (chars÷4)
 // rather than actual API data.
+//
+// InputTokens is the whole prompt, cached part included; CachedTokens is the
+// part of it served from or written to the provider's prompt cache (0 when
+// the runner does not report it).
 type TokenUsage struct {
 	InputTokens  int
+	CachedTokens int
 	OutputTokens int
 	Estimated    bool
 }
@@ -34,7 +39,19 @@ type Token struct {
 	Activity *Activity
 	Done     bool
 	Error    error
-	Usage    *TokenUsage // non-nil only on the Done token
+	// Usage is the usage of the call. Most runners set it once, on the Done
+	// token; copilot also sends additive deltas on earlier tokens. Whoever
+	// adds up Usage tokens gets the final total either way.
+	Usage *TokenUsage
+	// Progress is the cumulative usage so far, sent while the call runs so a
+	// UI can show tokens climbing. It is advisory: the final usage (the
+	// summed Usage) always replaces it. Estimated is set when the numbers are
+	// a heuristic. Runners that report usage only at the end never send it.
+	Progress *TokenUsage
+	// Model is the model the runner is actually using, sent once when the
+	// runner learns it (for example from the CLI's init event). Empty on
+	// every other token.
+	Model string
 }
 
 // CompletionRequest describes what to send to the LLM.

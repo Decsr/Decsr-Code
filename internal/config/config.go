@@ -162,6 +162,9 @@ type ProjectConfig struct {
 	Scope          ScopeConfig   `yaml:"scope,omitempty"`
 	Context        ContextConfig `yaml:"context,omitempty"`
 	Profile        string        `yaml:"profile,omitempty"` // name of the last applied role profile
+	// AllowedCommands are extra command prefixes a writing agent-mode Claude
+	// run may execute, e.g. "/opt/Qt/Tools/CMake/bin/cmake" or "dpkg -l".
+	AllowedCommands []string `yaml:"allowed_commands,omitempty"`
 }
 
 type ScopeConfig struct {
@@ -483,6 +486,9 @@ func merge(dst *Config, src Config) {
 	}
 	if src.Project.LintCmd != "" {
 		dst.Project.LintCmd = src.Project.LintCmd
+	}
+	if len(src.Project.AllowedCommands) > 0 {
+		dst.Project.AllowedCommands = src.Project.AllowedCommands
 	}
 	if src.Project.Profile != "" {
 		dst.Project.Profile = src.Project.Profile

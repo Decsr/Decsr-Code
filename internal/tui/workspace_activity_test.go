@@ -390,7 +390,8 @@ func TestOutputViewTimelineKeys(t *testing.T) {
 		t.Fatalf("screen %v raw %v", h.m.screen, h.m.outRaw)
 	}
 	h.want("go vet ./...")
-	h.want("Worked for 1m 12s")
+	h.want("✓")
+	h.want("1m 12s")
 	h.want("ctx 18k")
 	if h.m.outCur != 3 {
 		t.Fatalf("cursor starts at %d, want the newest (3)", h.m.outCur)

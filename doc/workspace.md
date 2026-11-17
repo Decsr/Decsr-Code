@@ -266,8 +266,9 @@ node keys work with focus on the sidebar or on the main pane, in either mode.
 | `Space` | Activity mode: expand or collapse the selected card (its whole activity timeline; the last 15 output lines for a node without activity) |
 | `g` | Switch the main pane between Activity and Graph (text in the prompt) |
 | `b` | Hide or show the sidebar; under 100 columns it opens as a box (`Esc` or `b` closes it) |
-| `Enter` or `o` | Open the full output of the node (in the sidebar, on a saved session: resume it) |
+| `Enter` or `o` | Open the node: its step timeline and its changes (in the sidebar, on a saved session: resume it) |
 | `i` | Show or hide the inspector. In Graph mode with a main pane of 100 columns or more it sits beside the graph; otherwise, and in Activity mode, it opens as a box; `i` or `Esc` closes it |
+| `v` | Show or hide the live pane under the graph; it appears while the selected node runs, on a terminal 30 rows or taller |
 | `a` | Pick the role for the selected node |
 | `A` | Accept all suggestions that are defined roles |
 | `d` | Open the diff of the selected node (see [Diff and review notes](#diff-and-review-notes)) |
@@ -286,14 +287,31 @@ node keys work with focus on the sidebar or on the main pane, in either mode.
 | `?` | Help |
 | `q` | Quit (asks first while nodes run) |
 
-**Output view.** `o` or `Enter` opens the timeline of the node: one line per
-step, the newest at the bottom, following while the node runs. The header shows
-the node, its status, `Worked for …` and `ctx`. `j`/`k` or the arrows move the
+**Live pane.** While the selected node runs, a pane about 10 rows tall sits at
+the bottom of the graph. It starts with the running line, `⠋ claude · opus-5-5
+· effort medium · 1m 12s · ↑ 182k (164k cached) ↓ 2.1k` (`~` marks estimated
+tokens, the effort and cached parts are left out when empty), then the last
+steps with the current one on a spinner, and from 100 columns the files edited
+so far with `+`/`−` counts (below that, `N files changed`). `v` hides or shows
+it for the session; `i` still toggles the inspector only. Running cards show
+`· 184k tok` after the duration.
+
+**Output view.** `o` or `Enter` opens the node: the running line (frozen with
+`✓` or `✗` and the final time for a finished node) over the timeline of the
+node and its changes. From 120 columns the timeline is on the left and the
+changes on the right (the file list with `+`/`−`, under it the diff of the
+selected file with syntax colours) and `Tab` moves the focus between them;
+narrower, one pane shows at a time and `Tab` switches. In the changes pane the
+arrows scroll, `n`/`p` pick the next or previous file and `←`/`→` pan. While
+the node runs the changes reload on each file edit and every 2 seconds, keeping
+the selected file and the scroll; a finished node shows its commit. `d` and
+`D` open the full-screen diff with review notes.
+The header shows the node and its status, and `ctx`. `j`/`k` or the arrows move the
 cursor over the steps (`g`/`G` jump to the first and last), `Enter` or `Space`
 expands the step under the cursor to its detail (the full text while decsr
 still holds it, else the 500 characters saved in the session), and `t` toggles
-the raw output text. A node without activity (an old session) opens in raw
-mode. After a reply the node has earlier attempts: `[` and `]` show the
+the raw output text. A node without activity but with output (an old session)
+opens in raw mode. After a reply the node has earlier attempts: `[` and `]` show the
 previous and next attempt (its summary or error and its timeline, when that
 was kept), and `]` past the last earlier attempt returns to the current one.
 `Esc` or `q` returns, `s` stops the node, and `PgUp`/`PgDn` scroll.
@@ -783,12 +801,26 @@ not on the list is refused instead of asking, whatever your own Claude settings
 allow):
 
 - `Read`, `Edit`, `Write`, `Glob`, `Grep`;
-- `Bash` limited to the project's build and test commands (the ones the Build &
-  test node runs, each as a prefix: `Bash(go test ./...:*)`);
+- `Bash` limited to the programs of the project's build and test commands. Each
+  command is split on `&&`, `||`, `;` and `|`, and the program of each part
+  is allowed (`cmake -S . -B build && cmake --build build` gives
+  `Bash(cmake:*)`), plus the read-only `ls`, `cat`, `head`, `tail`, `wc`,
+  `pwd`, `which`, `file`, `stat`, `du` and `tree`;
+- `Bash` for each prefix in `project.allowed_commands`;
 - read-only git: `git status`, `git diff`, `git log`, `git show`.
 
 A read-only role gets `Read`, `Glob`, `Grep` and the read-only git commands.
-There are no interactive permission prompts. In text mode Claude runs with all
+```yaml
+# .decsr/project.yaml or ~/.decsr/config.yaml
+project:
+  allowed_commands:
+    - /opt/Qt/Tools/CMake/bin/cmake
+    - dpkg -l
+```
+
+A project list replaces the global one. Use it for a program called by absolute
+path or a command that is not a build or test command. There are no interactive
+permission prompts. In text mode Claude runs with all
 tools off, as before.
 
 **Shell in a node's worktree.** `!` on the selected node opens `$SHELL` (else

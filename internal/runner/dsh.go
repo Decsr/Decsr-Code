@@ -80,7 +80,7 @@ func (r DshRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan 
 		if patchPath != "" {
 			defer func() { _ = os.Remove(patchPath) }()
 		}
-		parser := newDshParser()
+		parser := newDshParser(model)
 		err := r.run(ctx, prompt, req.Dir, opts, func(line []byte) {
 			for _, tok := range parser.feed(line) {
 				ch <- tok
