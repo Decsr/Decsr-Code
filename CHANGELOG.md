@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-17
+
 ### Added
+- `dsh` runner for the DeepSeek Harness CLI (headless profile), in text and
+  agent mode. `model` is `provider/model`; the key comes from
+  `DEEPSEEK_API_KEY` or the key saved with `decsr connect deepseek`.
+- Markdown in the Workspace: your and the lead's messages, node summaries,
+  report questions and output-view messages render with a style that follows
+  the theme. Plain text below 60 columns, while a message streams, or with
+  `ui.markdown: false`.
+- Syntax-highlighted diffs: the diff view colours code by language, one hunk at
+  a time, and keeps the add and remove tint. Files over 2000 changed lines stay
+  plain.
+- Role option `mcp: true` keeps your own MCP servers for a Claude role.
 - Inbox and go-to palette in the Workspace. The sidebar shows `● 3 need you`
   while nodes wait on a question, a block or a usage limit, a lead review waits
   for `y`/`n`, a node failed or stalled for 5 minutes, or a plugin question is
@@ -189,6 +202,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `HOMEBREW_TAP_GITHUB_TOKEN` secret is set (skipped otherwise).
 
 ### Changed
+- Claude worker runs are lean: no MCP servers, only project and local
+  settings, and no nonessential traffic. A small worker run sends about 40
+  times fewer tokens with a typical global setup.
+- Worker, split and review prompts put their fixed text first so provider
+  prompt caching hits; the worker task is sent only as the user message.
+- Input token counts include cache reads and writes for Claude, OpenCode and
+  dsh, so the context meter and budgets no longer undercount.
+- A fix node's failure excerpt keeps error, fail, panic and exception lines
+  (with 2 lines around each) from the part of a long output that is cut.
+- Code highlighting uses `github-dark` or `github` to match the theme.
+- The README is rewritten for end users around the Workspace.
 - One look for every screen. The shared components in `internal/ui` (header,
   pane label, list row, card, hint bar, input box, overlay) now draw Home, the
   setup screens, the artifact viewer, file preview, editor, chat, the project

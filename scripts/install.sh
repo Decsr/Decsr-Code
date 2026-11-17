@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/Decsr/Decsr-Code/main/scripts/install.sh | sh
 #
 # Environment:
-#   DECSR_VERSION      release tag to install, e.g. v0.6.0 (default: latest)
+#   DECSR_VERSION      release tag to install, e.g. v0.7.0 (default: latest)
 #   DECSR_INSTALL_DIR  install directory (default: $HOME/.local/bin)
 set -eu
 
@@ -50,7 +50,7 @@ tag="${DECSR_VERSION:-}"
 if [ -z "$tag" ]; then
 	tag=$(fetch_stdout "https://api.github.com/repos/$REPO/releases/latest" |
 		sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
-	[ -n "$tag" ] || err "could not determine the latest release (GitHub API rate limit? set DECSR_VERSION, e.g. DECSR_VERSION=v0.6.0)"
+	[ -n "$tag" ] || err "could not determine the latest release (GitHub API rate limit? set DECSR_VERSION, e.g. DECSR_VERSION=v0.7.0)"
 fi
 case "$tag" in
 v*) ;;
