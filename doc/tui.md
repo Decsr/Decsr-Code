@@ -255,18 +255,18 @@ detection stays in effect.
 
 ## Home launcher
 
-`/config` (or `/menu`) in the Workspace opens Home, a two-column launcher.
-The left column lists recent projects and the saved sessions of the current
-project, with the language, lead and autonomy of the project under them. The
-right column lists the actions in groups (Start, Settings, More): Workspace
-(`w`), open a project (`o`), Global settings (`g`), Project setup (`s`),
-connect a provider (`k`), Model memory (`m`), the classic pipeline (`1`),
-reset artifacts (`c`) and quit (`q`).
+`/config` (or `/menu`) in the Workspace opens Home, in the galaxy look: the
+DECSR logo and the pipeline stages on top, then the project card (name,
+language, branch, default runner and the agents) on the left and the action
+card on the right. The actions are Workspace (`w`), classic pipeline (`1`),
+open a project (`o`), Global settings (`g`), connect a provider (`k`), Model
+memory (`m`), Project setup (`s`), reset artifacts (`c`) and quit (`q`).
 
-Use the arrow keys to move and `Tab` to switch column. `Enter` on a project
-switches to it, and `Enter` on a session opens the Workspace on that session.
-`r` resumes the interrupted task, `?` opens help. Below 100 columns the two
-columns stack.
+When the project has saved sessions or there are recent projects, they are
+listed under the project card. Use the arrow keys to move and `Tab` to switch
+between the actions and these lists. `Enter` on a project switches to it, and
+`Enter` on a session opens the Workspace on that session. `r` resumes the
+interrupted task, `?` opens help. Below 86 columns the cards stack.
 
 ## First-run setup
 
@@ -288,29 +288,32 @@ inside an automation. `decsr setup` opens it any time.
 ## Setup screens
 
 **Global Settings** chooses the provider, model and reasoning effort for all
-agents. The provider is a row of tabs (`←→`); providers that cannot be reached
-are listed on a dim `offline:` line instead. Model and Effort sit side by side
-from 110 columns and stacked below. A model list is shown in full when it fits
-the screen; otherwise it scrolls with `… N more` markers. The effort list
-follows the selected model. `Tab` moves between the sections.
+agents, in three cards: Default Provider (a row of tabs, `←→`; providers that
+cannot be reached are struck through and marked `(offline)`), Default Model and
+Effort. A model list shows seven rows and scrolls with `↑ N more` / `↓ N more`
+markers. The effort list follows the selected model. `Tab` moves between the
+cards, `[` and `]` scroll a wide screen sideways.
 
-**Project Setup** has the Agents list on the left and the project values on
-the right. `Enter` on an agent opens an editor with Runner, Model, Effort and
-Mode (text or agent) for that agent.
+**Project Setup** has the project name, the Agent Overrides list and the
+programming language, one card each. `Enter` on an agent opens an editor in the
+card with Runner, Model, Effort and Mode (text or agent) for that agent: `↑↓`
+moves between the fields and `←→` changes the focused one.
 
 **Enter saves the current choice**, shows a green **`✓ Saved`** indicator in the
 footer, and advances to the next section. The screen stays open. **Esc** closes
 as “Done” (saved choices persist); **Ctrl+S** saves the remaining choices and
 closes.
 
-Project Setup edits per-agent overrides in three steps:
+The agent editor has four fields:
 
 1. **Runner** — OpenCode, Claude, Ollama, oMLX, Codex, Copilot, LM Studio,
-   DeepSeek, OpenAI, OpenRouter, Groq, each saved custom provider (shown as
-   `<name> (custom)`), or `+ custom…` to add one.
+   DeepSeek, OpenAI, OpenRouter, Groq, DeepSeek Harness, each saved custom
+   provider (shown as `<name> (custom)`), or `+ custom…` to add one.
 2. **Model** — the provider's model list. An API provider whose `/models` list
-   is empty or fails shows a text input instead: type the model id.
+   is empty or fails, and DeepSeek Harness, show a text input instead: type the
+   model id (blank uses dsh's default).
 3. **Effort** — the levels supported by that model, or provider default.
+4. **Mode** — the runner default, `text` or `agent`.
 
 **Claude models.** The model list (Global Settings and the per-agent model step)
 shows the aliases `fable`, `opus`, `sonnet` and `haiku` (each with a dim
@@ -322,7 +325,7 @@ shows as `<id> (custom)` and stays selected. When a role has no model, DECSR
 passes `--model claude-opus-5-5` and, when its effort is empty or `default`,
 `--effort high`; an explicit model or effort is passed unchanged. The first line
 of the section then reads `default → claude-opus-5-5 · high effort`, the default
-row carries a dim `default` hint, the effort step labels its default entry
+row carries a dim `default` hint, the effort list labels its default entry
 `default (high)`, and an unset model starts the cursor on `claude-opus-5-5`. The
 same line shows in the per-agent model step of a role with no model.
 

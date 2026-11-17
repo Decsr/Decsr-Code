@@ -77,7 +77,7 @@ func TestHomeNewTask_ConfirmCancelKeepsArtifacts(t *testing.T) {
 		if cmd != nil || m.confirmAction == nil {
 			t.Fatalf("%s: expected dialog and no command", k)
 		}
-		if v := stripANSI(m.View()); !strings.Contains(v, "Start a new task?") || !strings.Contains(v, "any other key cancel") {
+		if v := stripANSI(m.View()); !strings.Contains(v, "Start a new task?") || !strings.Contains(v, "any other key to cancel") {
 			t.Fatalf("dialog not rendered:\n%s", v)
 		}
 		m, cmd = m.Update(homeKey(k))

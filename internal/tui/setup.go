@@ -19,7 +19,6 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/credentials"
 	"github.com/Decsr/Decsr-Code/internal/prompts"
 	"github.com/Decsr/Decsr-Code/internal/runner"
-	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // ── provider ─────────────────────────────────────────────────────────────────
@@ -347,9 +346,7 @@ type SetupModel struct {
 	spinner  spinner.Model
 	viewport viewport.Model
 	ready    bool
-
-	// info is the read-only project data shown next to the editable fields.
-	info projectInfo
+	scrollX  int // horizontal scroll offset
 
 	promptStatus string // status message after prompt export
 
@@ -372,7 +369,7 @@ var setupAgentRoles = []string{"pm", "coder", "coder_fixer", "qa", "ux_reviewer"
 func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs map[string]config.AgentConfig) SetupModel {
 	sp := spinner.New()
 	sp.Spinner = pixelSpinner
-	sp.Style = lipgloss.NewStyle().Foreground(ui.Accent)
+	sp.Style = lipgloss.NewStyle().Foreground(homePalette.accent)
 
 	nameInput := textinput.New()
 	nameInput.CharLimit = 80
@@ -460,7 +457,7 @@ func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs 
 	}
 
 	m.section = sectionProvider
-	return m.WithProjectInfo(config.Config{})
+	return m
 }
 
 // NewSetupModelWithOverrides creates a setup model pre-populated with explicit
@@ -724,6 +721,7 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.scrollX = 0
 		m.syncViewport()
 
 	case spinner.TickMsg:
@@ -1076,6 +1074,17 @@ func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			return m, nil
 		}
 		return m, func() tea.Msg { return setupClosedMsg{} }
+	case "[", "]":
+		// While a text field has the focus the bracket is typed, not a scroll.
+		if m.typingText() {
+			break
+		}
+		if msg.String() == "]" {
+			m.scrollX += horizontalScrollStep
+		} else {
+			m.scrollX = max(m.scrollX-horizontalScrollStep, 0)
+		}
+		return m, nil
 	}
 
 	switch m.section {
@@ -1495,6 +1504,19 @@ func (m SetupModel) openAgentEditor() (SetupModel, tea.Cmd) {
 	cmd := m.startAgentEffortLoad()
 	m.ensureSectionVisible()
 	return m, cmd
+}
+
+// typingText reports whether a text input has the focus.
+func (m SetupModel) typingText() bool {
+	switch {
+	case m.agentEditing:
+		return m.agentEditTyping()
+	case m.section == sectionProjectName:
+		return true
+	case m.section == sectionModel:
+		return m.typedMode(m.provider) || (m.claudeTyping && m.provider == providerClaude)
+	}
+	return false
 }
 
 // agentEditTyping reports whether the model field is a text input.

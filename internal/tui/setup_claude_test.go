@@ -151,7 +151,7 @@ func TestClaudeSavedUnknownIdShowsCustom(t *testing.T) {
 
 func TestClaudeDefaultLine(t *testing.T) {
 	m := claudeSetup(t, "")
-	const want = "default → claude-opus-5-5 · high"
+	const want = "default → claude-opus-5-5 · high effort"
 	if got := m.claudeDefaultLine(true); got != want {
 		t.Errorf("line = %q", got)
 	}
@@ -197,17 +197,19 @@ func TestClaudeAgentEditorShowsDefault(t *testing.T) {
 	m.agentRoles = []string{"coder"}
 	m.section = sectionAgentSetup
 	m, _ = press(m, "enter")
-	if view := ansi.Strip(m.View()); !strings.Contains(view, "claude-opus-5-5") || !strings.Contains(view, "default") {
-		t.Errorf("editor lacks the default model:\n%s", view)
+	m.agentField = agentFieldModel
+	if !strings.Contains(ansi.Strip(m.renderContent()), "default → claude-opus-5-5 · high effort") {
+		t.Error("agent editor lacks the default line")
 	}
 	m.agentEditing = false
 	m.agentOverrides["coder"] = agentSetupOverride{runner: "claude"}
-	if !strings.Contains(ansi.Strip(m.renderContent()), "claude · default · default") {
+	if !strings.Contains(ansi.Strip(m.renderContent()), "claude / default → claude-opus-5-5 · high") {
 		t.Error("agent list lacks the default text for a claude role without a model")
 	}
+	m.agentEditing = true
 	m.agentOverrides["coder"] = agentSetupOverride{runner: "claude", model: "haiku"}
-	if strings.Contains(ansi.Strip(m.renderContent()), "default · default") || !strings.Contains(ansi.Strip(m.renderContent()), "claude · haiku") {
-		t.Error("agent list shows a default for a role with a model")
+	if strings.Contains(ansi.Strip(m.renderContent()), "default → ") {
+		t.Error("default line shown for a role with a model")
 	}
 }
 

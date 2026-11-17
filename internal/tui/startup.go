@@ -183,7 +183,7 @@ func (m startupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if projectCfg.Agents != nil {
 					projectOverrides = projectCfg.Agents
 				}
-				setup := NewSetupModelWithOverrides(currentRunner, currentModel, currentEffort, m.cfg.Project.Language, m.cfg.Project.Name, projectOverrides).WithGlobalAgents(m.cfg.Agents).WithProjectInfo(m.cfg)
+				setup := NewSetupModelWithOverrides(currentRunner, currentModel, currentEffort, m.cfg.Project.Language, m.cfg.Project.Name, projectOverrides).WithGlobalAgents(m.cfg.Agents)
 				setup.root = m.root
 				setup.width, setup.height = m.width, m.height
 				setup.syncViewport()
@@ -446,6 +446,10 @@ func (m *startupModel) cleanAfterEditorSave(newContent string) {
 }
 
 func (m startupModel) View() string {
+	switch m.phase {
+	case startupPhaseHome, startupPhaseSetup, startupPhaseModelMemory:
+		return paintBackground(m.view(), m.width, m.height)
+	}
 	return m.view()
 }
 

@@ -130,7 +130,6 @@ func newModelSetupModel(root string, cfg config.Config) modelSetupModel {
 	setup := NewSetupModelWithOverrides(currentRunner, currentModel, currentEffort,
 		cfg.Project.Language, cfg.Project.Name, projectOverrides).WithGlobalAgents(cfg.Agents)
 	setup.root = root
-	setup = setup.WithProjectInfo(cfg)
 	return modelSetupModel{setup: setup, root: root, cfg: cfg, width: 80, height: 24}
 }
 
@@ -162,7 +161,7 @@ func (m modelSetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m modelSetupModel) View() string {
-	return m.setup.View()
+	return paintBackground(m.setup.View(), m.width, m.height)
 }
 
 // RunModelSetup shows only the per-agent project setup screen and returns the

@@ -23,7 +23,7 @@ func TestSetupRender_IncludesEffortCard(t *testing.T) {
 	if !strings.Contains(content, "EFFORT") {
 		t.Fatalf("expected effort pane in global setup content:\n%s", content)
 	}
-	if !strings.Contains(content, "default (high)") {
+	if !strings.Contains(content, "Reasoning effort") {
 		t.Fatalf("expected effort explanation in setup content:\n%s", content)
 	}
 }
@@ -33,7 +33,7 @@ func TestSetupRender_ProjectHidesGlobalDefaults(t *testing.T) {
 	m.width, m.height = 100, 40
 
 	content := m.renderContent()
-	if strings.Contains(ansi.Strip(content), "Effort") {
+	if strings.Contains(content, "◆ EFFORT") {
 		t.Fatalf("project setup must not render the global effort card:\n%s", content)
 	}
 	if !strings.Contains(content, "configured in Global Settings") {

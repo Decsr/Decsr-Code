@@ -447,3 +447,23 @@ func (m *SetupModel) applyGlobalEndpoint(agents map[string]config.AgentConfig, r
 		m.baseURLs[runnerName] = base
 	}
 }
+
+// packTabs lays the provider tabs out in rows that fit width, so a tab is
+// never split across lines.
+func packTabs(tabs []string, width int) []string {
+	var rows []string
+	row, rowW := "  ", 2
+	for i, t := range tabs {
+		w := lipgloss.Width(t)
+		if i > 0 && rowW+2+w > width {
+			rows = append(rows, row)
+			row, rowW = "  ", 2
+		} else if i > 0 {
+			row += "  "
+			rowW += 2
+		}
+		row += t
+		rowW += w
+	}
+	return append(rows, row)
+}

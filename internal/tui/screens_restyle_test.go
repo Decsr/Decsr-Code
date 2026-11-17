@@ -171,8 +171,16 @@ func TestCockpitUsesSharedHeaderAndHintBar(t *testing.T) {
 	}
 }
 
-// TestNoGalaxyColours keeps the old palette out of the package: no hex
-// literals and no galaxy identifiers in any non-test file.
+// galaxyFiles are the files of the screens that keep the galaxy look: Home,
+// Global settings, Project setup and Model memory, with the palette they use.
+var galaxyFiles = map[string]bool{
+	"styles.go": true, "home.go": true, "setup.go": true, "setup_view.go": true,
+	"setup_claude.go": true, "setup_providers.go": true, "model_memory.go": true,
+	"model_setup.go": true, "startup.go": true,
+}
+
+// TestNoGalaxyColours keeps the old palette out of the other screens: no hex
+// literals and no galaxy identifiers in any non-test file outside galaxyFiles.
 func TestNoGalaxyColours(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {
@@ -180,7 +188,7 @@ func TestNoGalaxyColours(t *testing.T) {
 	}
 	bad := regexp.MustCompile(`#[0-9a-fA-F]{6}\b|galaxy|\bcrt\.|paintBackground|screenHeader|lipgloss\.Color`)
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
+		if strings.HasSuffix(f, "_test.go") || galaxyFiles[f] {
 			continue
 		}
 		data, err := os.ReadFile(f)

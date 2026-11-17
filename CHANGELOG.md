@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Home and the setup screens (Global settings, Project setup, Model memory) are
+  back to the galaxy layout. The other screens keep the shared look and the
+  `ui.theme` setting. Sessions and recent projects are listed on Home, `Enter`
+  on a session opens it, `k` connects a provider, and the agent editor keeps
+  its Mode field.
+
 ### Fixed
 - Setup screen: the `dsh` runner (DeepSeek Harness) is now listed, so an agent
   configured with it is no longer shown as OpenCode or rewritten to it on save.

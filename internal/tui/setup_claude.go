@@ -7,7 +7,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/Decsr/Decsr-Code/internal/runner"
-	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // claudeTypeRow is the last row of the Claude model list; it opens a text
@@ -68,11 +67,19 @@ func (m SetupModel) claudeDefaultLine(modelEmpty bool) string {
 	if !modelEmpty {
 		return ""
 	}
-	return "default → " + runner.ClaudeDefaultModel + " · " + runner.ClaudeDefaultEffort
+	return "default → " + runner.ClaudeDefaultModel + " · " + runner.ClaudeDefaultEffort + " effort"
 }
 
 // globalClaudeModelEmpty reports whether the global setting names no model.
 func (m SetupModel) globalClaudeModelEmpty() bool { return m.globalModelEmpty }
+
+// agentClaudeModelEmpty reports whether the agent being edited has no model.
+func (m SetupModel) agentClaudeModelEmpty() bool {
+	if m.agentEditing && m.agentField == agentFieldModel && m.agentCursor < len(m.agentRoles) {
+		return m.agentOverrides[m.agentRoles[m.agentCursor]].model == ""
+	}
+	return false
+}
 
 // startClaudeTyping switches the model step to the text input.
 func (m *SetupModel) startClaudeTyping() {
@@ -108,10 +115,10 @@ func (m *SetupModel) claudeTypedKey(msg tea.KeyMsg, idx *int) (bool, tea.Cmd) {
 }
 
 // claudeTypingLines is the typed model id input with its error.
-func (m SetupModel) claudeTypingLines() []string {
-	lines := []string{lipgloss.NewStyle().Foreground(ui.Muted).Render("type a Claude model id:"), m.typed.View()}
+func (m SetupModel) claudeTypingLines(dim lipgloss.Style) []string {
+	lines := []string{dim.Render("  type a Claude model id:"), "  " + m.typed.View()}
 	if m.claudeTypeErr != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(ui.Warn).Render(m.claudeTypeErr))
+		lines = append(lines, lipgloss.NewStyle().Foreground(crt.warn).Render("  "+m.claudeTypeErr))
 	}
 	return lines
 }

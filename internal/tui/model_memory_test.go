@@ -107,7 +107,7 @@ func TestModelMemoryViewIsPanelled(t *testing.T) {
 		m, _ = m.Update(tea.WindowSizeMsg{Width: sz[0], Height: sz[1]})
 		out := m.View()
 		plain := stripANSI(out)
-		for _, want := range []string{"Model memory", mmModeLabels[0], mmModeLabels[1], mmModeLabels[2]} {
+		for _, want := range []string{"MODEL MEMORY", "┌", "└", mmModeLabels[0], mmModeLabels[1], mmModeLabels[2]} {
 			if !strings.Contains(plain, want) {
 				t.Errorf("%dx%d: view missing %q", sz[0], sz[1], want)
 			}
@@ -132,10 +132,10 @@ func TestModelMemory_ActiveModeMarkedWithoutColor(t *testing.T) {
 	if row == "" {
 		t.Fatal("mode row not found")
 	}
-	if got := strings.Count(row, "▌"); got != 1 {
+	if got := strings.Count(row, "▸"); got != 1 {
 		t.Fatalf("want exactly one marker, got %d in %q", got, row)
 	}
-	if !strings.Contains(row, "▌"+mmModeLabels[m.mode]+"▐") {
+	if !strings.Contains(row, "▸  "+mmModeLabels[m.mode]) {
 		t.Fatalf("marker not on active mode %q: %q", mmModeLabels[m.mode], row)
 	}
 }
