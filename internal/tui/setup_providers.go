@@ -177,10 +177,13 @@ func (m SetupModel) revertKind() providerKind { return providerKind(max(len(m.en
 
 // ── models of API entries ────────────────────────────────────────────────────
 
-// typedMode reports whether a model id has to be typed: an API entry whose
-// model list is empty and not loading.
+// typedMode reports whether a model id has to be typed: dsh (no model list) or
+// an API entry whose model list is empty and not loading.
 func (m SetupModel) typedMode(p providerKind) bool {
 	e := m.entry(p)
+	if e.runner == "dsh" {
+		return true
+	}
 	if !e.isAPI() {
 		return false
 	}

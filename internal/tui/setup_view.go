@@ -315,6 +315,9 @@ func (m SetupModel) modelPaneFor(p providerKind) modelPane {
 		}
 		return empty(m.deepseekModels, "no models found")
 	}
+	if e.runner == "dsh" {
+		return modelPane{head: []string{"type a model id, blank for dsh's default:"}, input: []string{m.typed.View()}}
+	}
 	if e.isNew {
 		return modelPane{notes: []string{"press Enter to add a provider"}}
 	}
@@ -395,7 +398,7 @@ func (m SetupModel) effortColumn(width int) []string {
 			model = runner.ClaudeDefaultModel
 		}
 		rn := m.entry(m.provider).runner
-		if opts := runner.EffortOptions(rn, model); (rn == "claude" || rn == "codex") && len(opts) > 0 {
+		if opts := runner.EffortOptions(rn, model); (rn == "claude" || rn == "codex" || rn == "dsh") && len(opts) > 0 {
 			choices := effortChoices(opts)
 			idx, _ := effortChoiceIndex(choices, m.effort)
 			lines = append(lines, listLines(effortLabels(choices, rn == "claude"), nil, idx, width)...)

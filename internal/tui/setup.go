@@ -38,9 +38,10 @@ const (
 	providerOpenAI
 	providerOpenRouter
 	providerGroq
+	providerDsh
 )
 
-var providerLabels = []string{"OpenCode", "Claude", "Ollama", "oMLX", "Codex", "Copilot", "LM Studio", "DeepSeek", "OpenAI", "OpenRouter", "Groq"}
+var providerLabels = []string{"OpenCode", "Claude", "Ollama", "oMLX", "Codex", "Copilot", "LM Studio", "DeepSeek", "OpenAI", "OpenRouter", "Groq", "DeepSeek Harness"}
 
 // apiPresetName is the runner/preset name of an API provider, "" for the rest.
 func apiPresetName(p providerKind) string {
@@ -79,6 +80,8 @@ func providerFromString(s string) providerKind {
 		return providerOpenRouter
 	case "groq":
 		return providerGroq
+	case "dsh":
+		return providerDsh
 	default:
 		return providerOpenCode
 	}
@@ -106,6 +109,8 @@ func providerToString(p providerKind) string {
 		return "openrouter"
 	case providerGroq:
 		return "groq"
+	case providerDsh:
+		return "dsh"
 	default:
 		return "opencode"
 	}
@@ -425,7 +430,7 @@ func NewSetupModel(currentRunner, currentModel, currentEffort string, agentCfgs 
 	}
 	m.provider = providerFromString(currentRunner)
 	m.applyGlobalEndpoint(agentCfgs, currentRunner)
-	if m.entry(m.provider).isAPI() {
+	if m.typedMode(m.provider) || m.entry(m.provider).isAPI() {
 		m.typed.SetValue(currentModel)
 	}
 
@@ -641,7 +646,7 @@ func effortKey(provider, model string) string {
 // startEffortLoad fetches effort options for the global model selection.
 func (m *SetupModel) startEffortLoad() tea.Cmd {
 	provider, model := m.selectedProviderModel()
-	if model == "" {
+	if model == "" && provider != "dsh" {
 		return nil
 	}
 	key := effortKey(provider, model)
@@ -660,7 +665,7 @@ func (m *SetupModel) startEffortLoad() tea.Cmd {
 func (m *SetupModel) startAgentEffortLoad() tea.Cmd {
 	provider := m.entry(m.agentEditProv).runner
 	model := m.agentModel()
-	if model == "" {
+	if model == "" && provider != "dsh" {
 		return nil
 	}
 	key := effortKey(provider, model)

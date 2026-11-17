@@ -43,7 +43,7 @@ func NormalizeEffort(effort string) string {
 func EffortOptions(provider, model string) []string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	model = strings.TrimSpace(model)
-	if model == "" {
+	if model == "" && provider != "dsh" {
 		return nil
 	}
 
