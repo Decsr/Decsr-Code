@@ -67,7 +67,7 @@ type wsDeps struct {
 	// split asks the lead to split task; earlier is the session summary and
 	// the current nodes ("" for a fresh session). existing are the node IDs
 	// already in the graph and next the first number for new sub-tasks.
-	split func(ctx context.Context, task, earlier string, existing []string, next int, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error)
+	split func(ctx context.Context, task, earlier string, existing []string, next int, routing bool, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error)
 	// review asks the lead to review the graph after a batch (the coordinator);
 	// nil disables reviews.
 	review func(ctx context.Context, in workspace.ReviewInput) (workspace.ReviewResult, runner.TokenUsage, error)
@@ -80,7 +80,7 @@ type wsDeps struct {
 	checkCmds func() []string
 
 	listProfiles   func() []string
-	saveProfile    func(name string, agents map[string]config.AgentConfig) error
+	saveProfile    func(name string, agents map[string]config.AgentConfig, routing config.RoutingProfile) error
 	applyProfile   func(name string) (config.Config, error) // applies and returns the reloaded config
 	deleteProfile  func(name string) error
 	recent         func() []RecentProject
@@ -112,7 +112,7 @@ func (d *wsDeps) fillDefaults(root string) {
 		d.listProfiles = config.ListProfiles
 	}
 	if d.saveProfile == nil {
-		d.saveProfile = config.SaveProfile
+		d.saveProfile = config.SaveProfileRouting
 	}
 	if d.applyProfile == nil {
 		d.applyProfile = func(name string) (config.Config, error) {
@@ -234,7 +234,7 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 	deps := wsDeps{
 		notify: wsSendNote,
 		cfg:    getCfg,
-		split: func(ctx context.Context, task, earlier string, existing []string, next int, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error) {
+		split: func(ctx context.Context, task, earlier string, existing []string, next int, routing bool, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error) {
 			c := getCfg()
 			agents := make(map[string]config.AgentConfig, len(c.Agents))
 			for k, v := range c.Agents {
@@ -252,7 +252,7 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 				pc += "\n\n## Earlier in this session\n" + earlier
 			}
 			var raw strings.Builder
-			opts := workspace.SplitOptions{Plugins: plugins.Load(root), Catalog: plugins.Catalog()}
+			opts := workspace.SplitOptions{Plugins: plugins.Load(root), Catalog: plugins.Catalog(), Routing: routing}
 			g, u, err := workspace.SplitOpts(ctx, r, pm.Model, task, workspace.Roles(c), pc, existing, next, opts, func(s string) {
 				raw.WriteString(s)
 				if onToken != nil {
@@ -387,6 +387,7 @@ const (
 	wsOverlayConnect
 	wsOverlayInbox
 	wsOverlayPalette
+	wsOverlayAgent
 )
 
 // wsConfirm is a pending y/n question. kind: quit | menu | clear | delsession
@@ -668,6 +669,8 @@ type workspaceModel struct {
 	textKind string // "path" | "profile"
 	textErr  string
 	infoName string
+	rankBusy bool         // a /rank fetch is running
+	agentEd  *agentEditor // the agent editor of the approval card
 	infoText []string
 	infoTop  int
 
@@ -906,6 +909,8 @@ func (m workspaceModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case wsSplitDoneMsg:
 		return m.onSplitDone(msg)
+	case wsRankMsg:
+		return m.onRank(msg)
 	case wsReviewDoneMsg:
 		return m.onReviewDone(msg)
 	case wsEventMsg:
@@ -1279,8 +1284,9 @@ func (m workspaceModel) sendTask(task, shown string) (tea.Model, tea.Cmd) {
 		next = max(m.sess.snapshot().NextID, nextWorkNumber(m.g))
 	}
 	split, stream := m.deps.split, m.stream
+	routing := m.freezeRoutingMode() != config.RoutingManual
 	cmd := func() tea.Msg {
-		g, u, err := split(ctx, task, earlier, existing, next, stream.add)
+		g, u, err := split(ctx, task, earlier, existing, next, routing, stream.add)
 		return wsSplitDoneMsg{gen: gen, g: g, usage: u, err: err}
 	}
 	return m, tea.Batch(cmd, m.startTick())
@@ -1400,6 +1406,7 @@ func (m workspaceModel) openGraph(g *workspace.Graph) (tea.Model, tea.Cmd) {
 	})
 	m.say("lead", splitNotice(ids))
 	m, cmd := m.attachGraph(g, true)
+	m = m.proposeAgents(ids)
 	m.setFocus(wsFocusGraph)
 	m.saveSession()
 	return m, cmd
@@ -1424,6 +1431,7 @@ func (m workspaceModel) appendGraph(add *workspace.Graph) (tea.Model, tea.Cmd) {
 	}
 	m.sess.update(func(s *workspace.Session) { s.NextID = next })
 	m.say("lead", splitNotice(ids))
+	m = m.proposeAgents(ids)
 	m.g = m.eng.Snapshot()
 	if len(ids) > 0 {
 		m.sel = ids[0]
@@ -1681,8 +1689,18 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "N":
 		return m.openInbox(), nil
 	case "y", "n":
+		if m.focus != wsFocusPrompt && len(m.g.PendingApproval()) > 0 {
+			if k == "y" {
+				return m.approveAgents()
+			}
+			return m.rejectAgents()
+		}
 		if m.pendingReview() >= 0 && m.focus != wsFocusPrompt {
 			return m.reviewResolve(k == "y")
+		}
+	case "e":
+		if m.focus != wsFocusPrompt && len(m.g.PendingApproval()) > 0 {
+			return m.openAgentEditor()
 		}
 	case "q":
 		return m.requestQuit(false)
@@ -1744,6 +1762,8 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if d, ok := dirs[k]; ok {
 		switch {
 		case m.focus == wsFocusSidebar:
+		case !m.showGraph && (d == "up" || d == "down") && len(m.g.PendingApproval()) > 0:
+			return m.approvalSelect(map[string]int{"up": -1, "down": 1}[d]), nil
 		case !m.showGraph:
 			switch d {
 			case "up":
@@ -1950,6 +1970,10 @@ func (m workspaceModel) runAll() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	g := m.eng.Snapshot()
+	if p := len(g.PendingApproval()); p > 0 && len(g.Runnable()) == 0 {
+		m.setNotice(fmt.Sprintf("%d %s wait for the approval of their agent: press y to approve, n to cancel the split", p, pluralize(p, "node", "nodes")), true)
+		return m, nil
+	}
 	unassigned := 0
 	for _, n := range g.Nodes {
 		if n.Kind == workspace.KindWork && n.Role == "" && n.Status == workspace.StatusTodo {
@@ -2088,6 +2112,9 @@ func (m workspaceModel) overlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case wsOverlayPalette:
 		return m.paletteKey(msg)
+
+	case wsOverlayAgent:
+		return m.agentKey(msg)
 
 	case wsOverlayInfo:
 		switch k {
@@ -2375,6 +2402,8 @@ func (m workspaceModel) overlayBox() string {
 		return m.inboxBox()
 	case wsOverlayPalette:
 		return m.paletteBox()
+	case wsOverlayAgent:
+		return m.agentEditorBox()
 	}
 	return ""
 }
@@ -2505,7 +2534,11 @@ func (m workspaceModel) guidanceParts() (short, long string, isErr bool) {
 			if !n.Limit.ResetAt.IsZero() {
 				what += " (" + limitClock(m.now(), n.Limit.ResetAt) + ")"
 			}
-			return what, via + "select it: r retries", false
+			hint := via + "select it: r retries"
+			if why := m.limitAutoOffNote(n); why != "" {
+				hint = via + "auto-retry is off on a subscription login; select it: r retries"
+			}
+			return what, hint, false
 		}
 		if n.Report != nil && n.Report.Status == workspace.ReportBlocked {
 			return fmt.Sprintf("◇ %s is blocked", n.ID), fmt.Sprintf("%sselect it: m replies", via), false
@@ -2862,7 +2895,7 @@ func (m workspaceModel) mainPanes(mainH int) []string {
 		if len(g.Nodes) == 0 {
 			body = m.emptyPane(cw-4, graphH-1)
 		} else {
-			body = strings.Split(renderCanvas(g, canvasOpts{width: cw - 4, height: graphH - 1, selected: m.sel, models: models, runners: runners, icons: m.cfg.UI.Icons, spinner: spin}), "\n")
+			body = strings.Split(renderCanvas(g, canvasOpts{width: cw - 4, height: graphH - 1, selected: m.sel, models: models, runners: runners, look: m.nodeLook, icons: m.cfg.UI.Icons, spinner: spin}), "\n")
 		}
 		for _, l := range body {
 			out = append(out, "  "+l)

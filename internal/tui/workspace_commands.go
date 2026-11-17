@@ -60,6 +60,10 @@ func (m workspaceModel) commandList() []wsCommand {
 		{name: "/plugin", aliases: []string{"/plugins"}, args: "[available|install <name>|enable|disable <name>|reload]", desc: "list plugins, see or install catalog plugins, enable, disable or reload", run: workspaceModel.cmdPlugin},
 		{name: "/status", desc: "project, session, roles and limits", run: workspaceModel.cmdStatus},
 		{name: "/cost", desc: "tokens per node and per role", run: workspaceModel.cmdCost},
+		{name: "/approve", desc: "approve the agents of the split and start the runnable nodes (the same as y)", run: workspaceModel.cmdApprove},
+		{name: "/reject", desc: "cancel the split that waits for approval (the same as n)", run: workspaceModel.cmdReject},
+		{name: "/routing", args: "[auto-connected|auto-role|manual]", desc: "show or set how agents are picked for the nodes of a split", run: workspaceModel.cmdRouting},
+		{name: "/rank", desc: "fetch model rankings from Artificial Analysis and show them", run: workspaceModel.cmdRank},
 		{name: "/autonomy", args: "[1|2|3]", desc: "how much runs by itself: 1 manual, 2 assisted, 3 unattended", run: workspaceModel.cmdAutonomy},
 		{name: "/coordinator", args: "[on|off]", desc: "let the lead review each finished batch and propose changes to the graph", run: workspaceModel.cmdCoordinator},
 		{name: "/review", args: "[y|n]", desc: "run one lead review now; y applies the waiting proposals, n rejects them", run: workspaceModel.cmdReview},
@@ -537,7 +541,7 @@ func (m workspaceModel) submitText() (tea.Model, tea.Cmd) {
 			m.textErr = "Name must be 1-32 characters: lowercase letters, digits, - and _, starting with a letter or digit"
 			return m, nil
 		}
-		if err := m.deps.saveProfile(val, m.effectiveAgents()); err != nil {
+		if err := m.deps.saveProfile(val, m.effectiveAgents(), config.ProfileRouting(m.cfg.Routing)); err != nil {
 			m.textErr = oneLine(err.Error())
 			return m, nil
 		}

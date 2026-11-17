@@ -35,7 +35,10 @@ type Automation struct {
 	Autonomy   int
 	BudgetUSD  float64
 	Timeout    time.Duration
-	Line       int // line of the entry in the file
+	// AllowSubscription accepts an unattended run of the claude runner on a
+	// subscription login.
+	AllowSubscription bool
+	Line              int // line of the entry in the file
 
 	cron Cron
 }
@@ -90,7 +93,7 @@ func Find(list []Automation, name string) (Automation, bool) {
 
 var knownFields = map[string]bool{
 	"name": true, "schedule": true, "task": true, "issue_query": true,
-	"autonomy": true, "budget_usd": true, "timeout": true,
+	"autonomy": true, "budget_usd": true, "timeout": true, "allow_subscription": true,
 }
 
 // Parse validates the contents of automations.yaml. Every problem is reported
@@ -215,6 +218,12 @@ func parseItem(item *yaml.Node, seen map[string]int) (Automation, []string) {
 		errs = append(errs, fmt.Sprintf("line %d: %s: budget_usd is required and must be greater than 0", item.Line, label))
 	} else if err := n.Decode(&a.BudgetUSD); err != nil || a.BudgetUSD <= 0 {
 		errs = append(errs, fmt.Sprintf("line %d: %s: budget_usd must be a number greater than 0", n.Line, label))
+	}
+
+	if n := fields["allow_subscription"]; n != nil {
+		if err := n.Decode(&a.AllowSubscription); err != nil || n.Kind != yaml.ScalarNode {
+			errs = append(errs, fmt.Sprintf("line %d: %s: allow_subscription must be true or false", n.Line, label))
+		}
 	}
 
 	if n := fields["timeout"]; n != nil {

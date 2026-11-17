@@ -119,3 +119,18 @@ func TestLoad(t *testing.T) {
 		t.Error("Find found nope")
 	}
 }
+
+func TestParseAllowSubscription(t *testing.T) {
+	const base = "automations:\n  - name: a\n    schedule: \"0 3 * * *\"\n    task: x\n    autonomy: 2\n    budget_usd: 1\n"
+	list, err := Parse([]byte(base + "    allow_subscription: true\n"))
+	if err != nil || !list[0].AllowSubscription {
+		t.Fatalf("true: %v %+v", err, list)
+	}
+	list, err = Parse([]byte(base))
+	if err != nil || list[0].AllowSubscription {
+		t.Fatalf("unset: %v %+v", err, list)
+	}
+	if _, err = Parse([]byte(base + "    allow_subscription: maybe\n")); err == nil {
+		t.Fatal("a non-boolean was accepted")
+	}
+}

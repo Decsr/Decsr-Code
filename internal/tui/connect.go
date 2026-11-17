@@ -131,7 +131,7 @@ func connectOptions() []connectOption {
 	}
 	if entries, err := credentials.List(); err == nil {
 		for _, e := range entries {
-			if !runner.IsPreset(e.Name) {
+			if !runner.IsPreset(e.Name) && credentials.IsProvider(e.Name) {
 				out = append(out, connectOption{name: e.Name, label: e.Name, baseURL: e.BaseURL, custom: true})
 			}
 		}

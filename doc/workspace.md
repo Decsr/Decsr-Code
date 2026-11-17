@@ -437,6 +437,9 @@ prompt and lands there.
 | `/plugin` (`/plugins`) | List plugins; `/plugin available`, `/plugin install <name>`, `/plugin enable <name>`, `/plugin disable <name>` and `/plugin reload` (see [Plugins](#plugins)) |
 | `/status` | Project path, language, profile, session, node counts, roles with runner/model/effort, parallel limit, custom commands and skills found |
 | `/cost` | Tokens in and out per node and per role, the lead's usage, and the total |
+| `/approve`, `/reject` | The same as `y` and `n` on the approval card: approve the proposed agents and start the runnable nodes, or cancel the split (see [Approval](#approval)) |
+| `/routing [auto-connected\|auto-role\|manual]` | Show the routing mode and where it comes from (this session, a profile, the project or the default); with a mode, set it for this session and save it to `project.yaml` (see [Agent routing](#agent-routing)) |
+| `/rank` | Fetch the model rankings from Artificial Analysis with the key saved by `decsr connect artificialanalysis`, save them to `~/.decsr/rankings.json` and show the table (sorted by balance score, with the request count and the models that map to no runner). The fetch runs in the background; with no key the view says how to connect and shows the built-in fallback tiers. Data: Artificial Analysis (artificialanalysis.ai) |
 | `/coordinator [on\|off]` | Show or set, for this session, whether the lead reviews each finished batch (see [Coordinator mode](#coordinator-mode)) |
 | `/review [y\|n]` | Run one lead review now; `y` applies the waiting proposals, `n` rejects them (see [Coordinator mode](#coordinator-mode)) |
 | `/budget [amount\|off]` | Spending per runner and the models without a price; `/budget 10` sets this session's budget, `/budget off` removes that override (see [Cost and budget](#cost-and-budget)) |
@@ -725,6 +728,88 @@ true). It has no runner, model, effort or description, and an empty value in a
 profile keeps what the project already has, so applying it only adds skills.
 Open decsr, run `/plugin` to see the plugins and `/profile plugins` to apply
 the profile.
+
+## Agent routing
+
+By default each node runs on the agent of its role. Routing lets the lead's
+split hand small and medium nodes to a cheaper agent. It is set by
+`routing.mode` in `~/.decsr/config.yaml`, `.decsr/project.yaml` or a profile
+(a profile saved with `/profile` stores the mode, and applying it writes the
+mode to `project.yaml`); the session freezes the mode at its first split.
+
+| Mode | Behaviour |
+|------|-----------|
+| `manual` (default) | Nodes use the role's agent. You can change the agent of a node by hand. |
+| `auto-role` | A node may get another model or effort of the role's own runner. |
+| `auto-connected` | A node may also get any other connected runner (binary on PATH or key available), for example a Claude lead's node on `dsh`. |
+
+```yaml
+routing:
+  mode: auto-role
+  auto_approve: true   # unattended runs approve the picks themselves (default); false waits for you
+```
+
+In the two auto modes the lead adds a `difficulty` (`small`, `medium`, `large`)
+and a one-line `reason` to every sub-task, in the same call as the split. The
+lead only grades: decsr picks the agent itself, from the saved rankings (see
+`/rank`) or the built-in fallback tiers, so the same grade gives the same pick.
+
+- The pick never costs more per task than the role's own (model, effort) pair.
+- `small` needs an intelligence index of at least 30; `medium` needs at least
+  85% of the role pair's; `large` keeps the role's agent.
+- Among the pairs that pass, the highest balance score wins; the model and the
+  effort are chosen together. `auto-role` looks at the role's runner only.
+- A role whose model is not ranked (a local model, a custom endpoint) keeps its
+  agent, and unranked models are never picked automatically.
+
+The prompt, skills, mode, MCP servers and read-only flag still come from the
+role; only the runner, model and effort are replaced. If the picked runner is
+not connected when the node starts, or its first call hits a rate limit, the
+node runs on the role's agent instead and the node records why. Cost is priced
+with the model that actually ran.
+
+### Approval
+
+After a split, in every mode, the proposed agents wait for your approval and
+nothing starts until you give it. The Workspace shows one card at the end of
+the feed:
+
+```
+Approve agents · 4 nodes · mode auto-connected · est. $0.62
+▸ T1 Data model          small   claude · haiku · low         ↓   $0.04
+     small: claude haiku low is the best fit
+  T2 Command parser      large   claude · opus · medium       =   $0.31
+```
+
+Each node has one row: its ID and title, the grade (`small`, `medium`,
+`large`), the agent as `runner · model · effort`, a marker, the estimated cost
+per task (`–` when unknown) and, dim on the next line, the reason. The marker
+compares the pick with the role's own agent: `↓` cheaper, `=` the same, `↑`
+dearer (a manual pick), `≠` different with an unknown cost.
+
+| Key | Action |
+|-----|--------|
+| `y` (or `/approve`) | Approve every agent and start the nodes that can run |
+| `n` (or `/reject`) | Cancel the split: its nodes are removed and a notice says which |
+| `↑` `↓` | Select a node (the selected row is marked `▸`) |
+| `e` | Edit the agent of the selected node |
+
+`a` already picks the role of a node, so only `e` opens the agent editor.
+It has a runner (the role's own, the connected ranked runners and the local
+ones), a model (`←` `→` cycle the ranked models of the runner, or type any id)
+and an effort (`←` `→`). Where a ranking exists, the editor shows the balance
+and cost of the choice and of each model. A pick that costs more than the
+role's agent shows a warning but is allowed: it is your choice. `Enter` saves
+it as a manual assignment; the node stays pending until you approve. A node
+waiting for approval shows the status `approval`.
+
+Unattended runs (autonomy levels 2 and 3, automations) approve and record the
+picks themselves, with no card, unless `routing.auto_approve` is `false`, in
+which case they wait for you.
+
+`/routing` shows the mode in force and where it comes from; `/routing auto-role`
+sets it for this session and saves it to `project.yaml`. It applies to the next
+split.
 
 ## Roles
 
@@ -1091,6 +1176,11 @@ The node card shows `◷ waiting · resets 14:30`, the provider message and
   is not reached, the node is retried 30 seconds after the reset time
   (`auto › T3 retry 1/3 after the claude limit reset`). A retry continues the
   same attempt; it is not a reply.
+- `workspace.limit_auto_retry: true|false` turns the automatic retry on or off.
+  When unset it is on, except for the `claude` runner on a subscription login
+  (no `ANTHROPIC_API_KEY`, Bedrock, Vertex, Foundry or `apiKeyHelper`), where
+  it is off: the notice says `auto-retry is off on a subscription login; press
+  r to retry`.
 - At level 1, or when the reset time is unknown, the node waits for you: `r`
   retries it. Retries you start with `r` do not count toward the automatic ones.
 - A node gets at most 3 automatic retries. After the third limit hit it fails

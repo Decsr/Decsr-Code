@@ -12,6 +12,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/automation"
 	"github.com/Decsr/Decsr-Code/internal/notify"
+	"github.com/Decsr/Decsr-Code/internal/runner"
 	"github.com/Decsr/Decsr-Code/internal/tui"
 )
 
@@ -79,9 +80,12 @@ func newAutoHarness(t *testing.T, yaml string) *autoHarness {
 			h.gh = append(h.gh, append([]string{name}, args...))
 			return h.ghOut, nil
 		},
-		pid:   os.Getpid(),
-		alive: func(int) bool { return h.alive },
-		isTTY: func() bool { return true },
+		pid:         os.Getpid(),
+		alive:       func(int) bool { return h.alive },
+		isTTY:       func() bool { return true },
+		in:          strings.NewReader(""),
+		authMode:    func() string { return runner.AuthAPIKey },
+		claudeRoles: func(string) []string { return nil },
 		runWorkspace: func(_ string, o tui.WorkspaceOptions) (tui.AutomationResult, error) {
 			h.ran = append(h.ran, o)
 			return h.result, h.runErr

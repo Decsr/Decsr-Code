@@ -15,6 +15,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/executil"
 	"github.com/Decsr/Decsr-Code/internal/plugins"
+	"github.com/Decsr/Decsr-Code/internal/ranking"
 	"github.com/Decsr/Decsr-Code/internal/runner"
 	"github.com/Decsr/Decsr-Code/internal/skills"
 )
@@ -40,7 +41,10 @@ const (
 	// EventContext reports the size of the prompt a worker is about to get:
 	// Event.ContextTokens (estimated) and Event.ContextLimit (0 = unknown).
 	EventContext EventType = "context"
-	EventDone    EventType = "done"
+	// EventFallback reports that the node's assigned agent could not be used
+	// and the role's own agent ran instead; Text is the reason.
+	EventFallback EventType = "fallback"
+	EventDone     EventType = "done"
 	// EventWaiting ends a node that reported a question or was blocked, in
 	// place of EventDone. Text is the question (or the blocked summary); the
 	// node's Report holds the details.
@@ -122,10 +126,11 @@ type executor struct {
 	cfg            config.Config
 	projectContext string
 	newRunner      func(config.AgentConfig) (runner.LLMRunner, error)
-	checkCommands  func() []string // commands for a check node without Commands; may be nil
-	checkTimeout   time.Duration   // 0 = checkTimeout
-	summary        func() string   // session summary for the work context; may be nil
-	iso            *Isolator       // per-node worktrees; nil = all nodes share root
+	checkCommands  func() []string        // commands for a check node without Commands; may be nil
+	checkTimeout   time.Duration          // 0 = checkTimeout
+	summary        func() string          // session summary for the work context; may be nil
+	iso            *Isolator              // per-node worktrees; nil = all nodes share root
+	connected      func() map[string]bool // runners that can start now; nil = ranking.Connected
 }
 
 // maxSessionSummaryChars caps the session summary given to a worker.
@@ -182,9 +187,17 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	if err := role.Agent.ModeError(); err != nil {
 		return Result{}, fmt.Errorf("role %q: %w", role.Name, err)
 	}
-	r, err := x.newRunner(role.Agent)
-	if err != nil {
-		return Result{}, fmt.Errorf("runner for role %q: %w", role.Name, err)
+	// cur is the agent that runs the node: the assigned one, else the role's.
+	cur, r, note := x.nodeAgent(role, n)
+	if note != "" {
+		emit(Event{NodeID: n.ID, Type: EventFallback, Text: note})
+		emit(Event{NodeID: n.ID, Type: EventOutput, Text: "\u26a0 " + note + "\n"})
+	}
+	if r == nil {
+		var err error
+		if r, err = x.newRunner(cur); err != nil {
+			return Result{}, fmt.Errorf("runner for role %q: %w", role.Name, err)
+		}
 	}
 	rolePrompt := ""
 	switch {
@@ -222,37 +235,32 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 		buildCommands = x.checkCommands()
 	}
 	before, snapOK := snapshotTree(wx.root, maxSnapshotFiles)
-	emit(Event{NodeID: n.ID, Type: EventModel, Model: role.Agent.Model, Effort: runner.NormalizeEffort(role.Agent.Effort)})
+	emit(Event{NodeID: n.ID, Type: EventModel, Model: cur.Model, Effort: runner.NormalizeEffort(cur.Effort)})
 	throttle := newUsageThrottle(time.Now)
-	res, err := agent.RunWorker(ctx, r, wx.root, x.cfg, agent.WorkerRequest{
-		RolePrompt:      rolePrompt,
-		Skills:          role.Agent.Skills,
-		Model:           role.Agent.Model,
-		Title:           n.Title,
-		Description:     n.Description,
-		Context:         wx.workContext(g, n),
-		ReadOnly:        role.ReadOnly,
-		Mode:            role.Agent.EffectiveMode(),
-		MCP:             role.Agent.MCP,
-		BuildCommands:   buildCommands,
-		AllowedCommands: x.cfg.Project.AllowedCommands,
-		OnActivity:      func(a runner.Activity) { emit(Event{NodeID: n.ID, Type: EventActivity, Activity: &a}) },
-		OnUsage: func(u runner.TokenUsage) {
-			if throttle.allow() {
-				emit(Event{NodeID: n.ID, Type: EventUsage, Live: true, In: u.InputTokens, Cached: u.CachedTokens, Out: u.OutputTokens,
-					Estimated: u.Estimated, Runner: role.Agent.Runner, Model: role.Agent.Model})
+	var res agent.WorkerResult
+	var err error
+	for attempt := 0; ; attempt++ {
+		res, err = x.runWorker(ctx, r, wx, cur, role, n, g, rolePrompt, buildCommands, emit, throttle)
+		// A rate limit on the assigned agent before it did any work: the
+		// role's own agent takes over once.
+		if attempt == 0 && usedAssign(n, cur, role) && asRateLimit(err) != nil && res.Usage.OutputTokens == 0 && ctx.Err() == nil {
+			cur = role.Agent
+			rr, rerr := x.newRunner(cur)
+			if rerr != nil {
+				break
 			}
-		},
-		OnModel: func(model string) {
-			emit(Event{NodeID: n.ID, Type: EventModel, Model: model, Effort: runner.NormalizeEffort(role.Agent.Effort)})
-		},
-		OnContext: func(tokens int) {
-			emit(Event{NodeID: n.ID, Type: EventContext, ContextTokens: tokens, ContextLimit: max(role.Agent.MaxContextTokens, 0)})
-		},
-	}, func(s string) { emit(Event{NodeID: n.ID, Type: EventOutput, Text: s}) })
+			r = rr
+			note := fmt.Sprintf("%s %s is rate limited: %s ran instead", n.Assign.Runner, n.Assign.Model, roleLabel(role))
+			emit(Event{NodeID: n.ID, Type: EventFallback, Text: note})
+			emit(Event{NodeID: n.ID, Type: EventOutput, Text: "\u26a0 " + note + "\n"})
+			emit(Event{NodeID: n.ID, Type: EventModel, Model: cur.Model, Effort: runner.NormalizeEffort(cur.Effort)})
+			continue
+		}
+		break
+	}
 	if res.Usage.InputTokens > 0 || res.Usage.OutputTokens > 0 {
 		emit(Event{NodeID: n.ID, Type: EventUsage, In: res.Usage.InputTokens, Cached: res.Usage.CachedTokens, Out: res.Usage.OutputTokens, Estimated: res.Usage.Estimated,
-			Runner: role.Agent.Runner, Model: role.Agent.Model})
+			Runner: cur.Runner, Model: cur.Model})
 	}
 	if err != nil {
 		return Result{}, err
@@ -291,6 +299,88 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 		}
 	}
 	return out, nil
+}
+
+// usedAssign reports whether cur is the node's assigned agent rather than the
+// role's own.
+func usedAssign(n *Node, cur config.AgentConfig, role Role) bool {
+	return n.Assign != nil && (cur.Runner != role.Agent.Runner || cur.Model != role.Agent.Model || cur.Effort != role.Agent.Effort)
+}
+
+func roleLabel(role Role) string {
+	return fmt.Sprintf("role %s (%s %s)", role.Name, role.Agent.Runner, role.Agent.Model)
+}
+
+// nodeAgent returns the agent config that runs n and, when it is built, its
+// runner. The assigned agent replaces the role's runner, model and effort; the
+// prompt, skills, mode, MCP and read-only stay the role's. When the assigned
+// agent cannot start (runner not connected, bad mode, no runner) the role's
+// agent is used and note says why.
+func (x *executor) nodeAgent(role Role, n *Node) (config.AgentConfig, runner.LLMRunner, string) {
+	a := n.Assign
+	if a == nil || a.Runner == "" {
+		return role.Agent, nil, ""
+	}
+	ac := role.Agent
+	if a.Runner != ac.Runner {
+		// The role's endpoint and key belong to its own runner.
+		ac.BaseURL, ac.APIKeyEnv, ac.Provider = "", "", ""
+	}
+	ac.Runner, ac.Model, ac.Effort = a.Runner, a.Model, a.Effort
+	if same := ac.Runner == role.Agent.Runner && ac.Model == role.Agent.Model && ac.Effort == role.Agent.Effort; same {
+		return role.Agent, nil, ""
+	}
+	fall := func(why string) (config.AgentConfig, runner.LLMRunner, string) {
+		return role.Agent, nil, fmt.Sprintf("%s %s is not available (%s): %s ran instead", a.Runner, a.Model, why, roleLabel(role))
+	}
+	if ac.Runner != role.Agent.Runner {
+		conn := ranking.Connected
+		if x.connected != nil {
+			conn = x.connected
+		}
+		if !usableRunner(conn(), ac.Runner) {
+			return fall("not connected")
+		}
+	}
+	if err := ac.ModeError(); err != nil {
+		return fall(err.Error())
+	}
+	r, err := x.newRunner(ac)
+	if err != nil {
+		return fall(oneLineErr(err))
+	}
+	return ac, r, ""
+}
+
+// runWorker is one worker run with the agent cur.
+func (x *executor) runWorker(ctx context.Context, r runner.LLMRunner, wx executor, cur config.AgentConfig, role Role, n *Node, g *Graph,
+	rolePrompt string, buildCommands []string, emit func(Event), throttle *usageThrottle) (agent.WorkerResult, error) {
+	return agent.RunWorker(ctx, r, wx.root, x.cfg, agent.WorkerRequest{
+		RolePrompt:      rolePrompt,
+		Skills:          role.Agent.Skills,
+		Model:           cur.Model,
+		Title:           n.Title,
+		Description:     n.Description,
+		Context:         wx.workContext(g, n),
+		ReadOnly:        role.ReadOnly,
+		Mode:            role.Agent.EffectiveMode(),
+		MCP:             role.Agent.MCP,
+		BuildCommands:   buildCommands,
+		AllowedCommands: x.cfg.Project.AllowedCommands,
+		OnActivity:      func(a runner.Activity) { emit(Event{NodeID: n.ID, Type: EventActivity, Activity: &a}) },
+		OnUsage: func(u runner.TokenUsage) {
+			if throttle.allow() {
+				emit(Event{NodeID: n.ID, Type: EventUsage, Live: true, In: u.InputTokens, Cached: u.CachedTokens, Out: u.OutputTokens,
+					Estimated: u.Estimated, Runner: cur.Runner, Model: cur.Model})
+			}
+		},
+		OnModel: func(model string) {
+			emit(Event{NodeID: n.ID, Type: EventModel, Model: model, Effort: runner.NormalizeEffort(cur.Effort)})
+		},
+		OnContext: func(tokens int) {
+			emit(Event{NodeID: n.ID, Type: EventContext, ContextTokens: tokens, ContextLimit: max(role.Agent.MaxContextTokens, 0)})
+		},
+	}, func(s string) { emit(Event{NodeID: n.ID, Type: EventOutput, Text: s}) })
 }
 
 // liveUsageEvery is the shortest time between two live usage events of a node.

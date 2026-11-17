@@ -85,6 +85,7 @@ func buildDoctorDeps(root string) doctor.Deps {
 		ConfigErr:   cfgErr,
 		Theme:       cfg.UI.Theme,
 		Automations: automationDoctor(root, automation.ExecCrontab{}),
+		ClaudeAuth:  claudeAuthDoctor(root, automation.ExecCrontab{}, runner.ClaudeAuthMode, projectClaudeRoles(root)),
 		Notify: doctor.NotifyInfo{
 			DisableCMux:    cfg.Notifications.DisableCMux,
 			DisableBell:    cfg.Notifications.DisableBell,

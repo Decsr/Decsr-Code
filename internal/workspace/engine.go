@@ -28,6 +28,9 @@ type Engine struct {
 	save   func(*Graph) error // nil disables persistence
 	events chan Event
 
+	// router proposes the agent of a node (see Propose); nil = none.
+	router *Router
+
 	auto    bool
 	autoCtx context.Context
 	// resumeAuto is set when a node hit a usage limit during a run-all: its
@@ -243,6 +246,16 @@ func (e *Engine) Assign(id, role string) error {
 		e.mu.Unlock()
 		return fmt.Errorf("node %s is %s and cannot be reassigned", id, n.Status)
 	}
+	if n.Role != role && n.Assign != nil && n.Assign.Source != SourceManual {
+		// The proposal was made for another role: propose again, with the
+		// same approval state.
+		pending := n.Assign.Pending
+		n.Role = role
+		n.Assign = e.router.propose(n)
+		if n.Assign != nil {
+			n.Assign.Pending = pending
+		}
+	}
 	n.Role = role
 	err := e.saveLocked()
 	e.mu.Unlock()
@@ -384,6 +397,9 @@ func (e *Engine) Run(ctx context.Context, id string) error {
 	case !e.g.Assigned(n):
 		e.mu.Unlock()
 		return fmt.Errorf("node %s has no role assigned", id)
+	case n.AwaitingApproval():
+		e.mu.Unlock()
+		return fmt.Errorf("node %s waits for the approval of its agent", id)
 	}
 	if b := e.g.Blockers(id); len(b) > 0 {
 		e.mu.Unlock()
@@ -491,6 +507,9 @@ func (e *Engine) startLocked(parent context.Context, n *Node) started {
 	e.costBase[n.ID] = costBase{usd: n.CostUSD, unpriced: (n.InputTokens > 0 || n.OutputTokens > 0) && !n.CostKnown}
 	n.InputTokens, n.CachedTokens, n.OutputTokens, n.Estimated = 0, 0, 0, false
 	n.Model, n.Effort = "", ""
+	if n.Assign != nil {
+		n.Assign.FallbackNote = ""
+	}
 	e.cancels[n.ID] = cancel
 	e.wg.Add(1)
 	gc := e.g.Clone()
@@ -555,6 +574,13 @@ func (e *Engine) runNode(s started) {
 			serr := e.recordActivity(id, ev.Activity)
 			e.reportSave(serr)
 			e.emitOutput(ev)
+		case EventFallback:
+			e.mu.Lock()
+			if n := e.g.Node(id); n != nil && n.Assign != nil {
+				n.Assign.FallbackNote = ev.Text
+			}
+			e.mu.Unlock()
+			e.emit(ev)
 		case EventContext:
 			e.mu.Lock()
 			if n := e.g.Node(id); n != nil {

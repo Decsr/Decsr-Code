@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Decsr/Decsr-Code/internal/notify"
+	"github.com/Decsr/Decsr-Code/internal/runner"
 	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
@@ -123,8 +124,46 @@ func (m workspaceModel) limitAutoRetries(n *workspace.Node) bool {
 	if n.Limit == nil || n.Limit.ResetAt.IsZero() || m.autoPaused || m.budgetReached() {
 		return false
 	}
+	if !m.limitRetryAllowed(n) {
+		return false
+	}
 	lvl, _ := m.autonomy()
 	return lvl >= autoAssisted
+}
+
+// claudeAuthMode reports the login of the claude runner; replaced in tests.
+var claudeAuthMode = runner.ClaudeAuthMode
+
+// limitRetryAllowed is the workspace.limit_auto_retry setting. When it is
+// unset, the retry is on, except for the claude runner on a subscription login.
+func (m workspaceModel) limitRetryAllowed(n *workspace.Node) bool {
+	c := m.liveCfg()
+	if v := c.Workspace.LimitAutoRetry; v != nil {
+		return *v
+	}
+	return !m.limitOnSubscription(n)
+}
+
+// limitOnSubscription is true when the node ran on the claude runner and
+// claude uses a subscription login.
+func (m workspaceModel) limitOnSubscription(n *workspace.Node) bool {
+	if n.Limit == nil {
+		return false
+	}
+	name := n.Limit.Provider
+	if role, ok := workspace.FindRole(m.liveCfg(), n.Role); ok && role.Agent.Runner != "" {
+		name = runnerKey(role.Agent.Runner)
+	}
+	return name == "claude" && claudeAuthMode() == runner.AuthSubscription
+}
+
+// limitAutoOffNote says why a limited node is not retried by itself, "" when
+// it is, or when the reason is not the claude subscription login.
+func (m workspaceModel) limitAutoOffNote(n *workspace.Node) string {
+	if n.Limit == nil || m.liveCfg().Workspace.LimitAutoRetry != nil || !m.limitOnSubscription(n) {
+		return ""
+	}
+	return "auto-retry is off on a subscription login; press r to retry"
 }
 
 // notifyLimited tells the user a node hit a usage limit: NeedsYou when they
@@ -143,6 +182,10 @@ func (m workspaceModel) notifyLimited(ev workspace.Event) {
 		m.notifyNote(notify.Info, fmt.Sprintf("%s waits for the %s limit — retrying after %s", n.ID, l.Provider, limitClock(now, l.ResetAt)))
 		return
 	}
+	if why := m.limitAutoOffNote(n); why != "" {
+		m.notifyNote(notify.NeedsYou, fmt.Sprintf("%s hit the %s limit — %s", n.ID, l.Provider, why))
+		return
+	}
 	if l.ResetAt.IsZero() {
 		m.notifyNote(notify.NeedsYou, fmt.Sprintf("%s hit the %s limit — reset time unknown, press r to retry", n.ID, l.Provider))
 		return
@@ -152,7 +195,15 @@ func (m workspaceModel) notifyLimited(ev workspace.Event) {
 
 // limitNotice is the one-line notice shown when a node becomes limited.
 func (m *workspaceModel) limitNotice(ev workspace.Event) {
-	m.setNotice("◷ "+ev.NodeID+" hit a usage limit: "+oneLine(ev.Text), false)
+	text := "◷ " + ev.NodeID + " hit a usage limit: " + oneLine(ev.Text)
+	if m.g != nil {
+		if n := m.g.Node(ev.NodeID); n != nil {
+			if why := m.limitAutoOffNote(n); why != "" {
+				text += " (" + why + ")"
+			}
+		}
+	}
+	m.setNotice(text, false)
 }
 
 // hasLimitedAuto reports whether some limited node will be retried by itself,
@@ -171,7 +222,7 @@ func (m workspaceModel) hasLimitedAuto() bool {
 
 // checkLimitRetries starts the automatic retry of every limited node whose
 // reset time (plus limitRetryDelay) has passed. It does nothing at level 1,
-// when paused, when the budget is reached or when the reset time is unknown.
+// when the node's runner is not allowed to retry by itself, when paused, when the budget is reached or when the reset time is unknown.
 func (m *workspaceModel) checkLimitRetries() {
 	if m.eng == nil || m.g == nil || m.g.CountLimited() == 0 {
 		return
@@ -179,7 +230,7 @@ func (m *workspaceModel) checkLimitRetries() {
 	now := m.now()
 	var started bool
 	for _, n := range m.g.Nodes {
-		if !n.Limited() || n.Limit.ResetAt.IsZero() {
+		if !n.Limited() || n.Limit.ResetAt.IsZero() || !m.limitRetryAllowed(n) {
 			continue
 		}
 		due := n.Limit.ResetAt.Add(limitRetryDelay)

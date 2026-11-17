@@ -30,6 +30,9 @@ const (
 type SplitOptions struct {
 	Plugins plugins.Set
 	Catalog []plugins.CatalogEntry
+	// Routing asks the lead to grade each sub-task (difficulty and reason),
+	// which the agent picker uses.
+	Routing bool
 }
 
 func cutRunes(s string, n int) string {

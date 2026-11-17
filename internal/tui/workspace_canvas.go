@@ -53,11 +53,12 @@ func canvasMarkW(cols int) int { return len(fmt.Sprint(cols)) + 4 }
 // canvasOpts configures renderCanvas.
 type canvasOpts struct {
 	width, height int
-	selected      string            // node ID
-	models        map[string]string // role name → short model label, for the node's second line
-	runners       map[string]string // role name → runner name, for the card's runner glyph
-	icons         string            // ui.icons: unicode | ascii | nerd
-	spinner       string            // current spinner frame for running nodes
+	selected      string                                       // node ID
+	models        map[string]string                            // role name → short model label, for the node's second line
+	runners       map[string]string                            // role name → runner name, for the card's runner glyph
+	look          func(*workspace.Node) (runner, model string) // the node's own agent; overrides the two maps
+	icons         string                                       // ui.icons: unicode | ascii | nerd
+	spinner       string                                       // current spinner frame for running nodes
 }
 
 type canvasRect struct{ x, y, w, h int }
@@ -127,6 +128,9 @@ func nodeStatusKind(g *workspace.Graph, n *workspace.Node) string {
 	}
 	if !g.Assigned(n) {
 		return "unassigned"
+	}
+	if n.AwaitingApproval() {
+		return "approval"
 	}
 	if len(g.Blockers(n.ID)) > 0 {
 		return "blocked"
@@ -358,7 +362,10 @@ func (c *canvasGrid) drawBox(g *workspace.Graph, n *workspace.Node, r canvasRect
 	case n.Kind == workspace.KindCheck:
 		c.textOn(x, r.y+2, room, truncateOneLine("build & test", room), ui.Muted, bg, false)
 	case n.Role != "":
-		runner := o.runners[n.Role]
+		runner, modelLabel := o.runners[n.Role], o.models[n.Role]
+		if o.look != nil {
+			runner, modelLabel = o.look(n)
+		}
 		gl := runnerGlyph(runner, o.icons)
 		c.textOn(x, r.y+2, room, gl, runnerColor(runner), bg, false)
 		gw := ansi.StringWidth(gl) + 1
@@ -367,7 +374,7 @@ func (c *canvasGrid) drawBox(g *workspace.Graph, n *workspace.Node, r canvasRect
 		c.textOn(x, r.y+2, room, role, ui.Text, bg, false)
 		rw := ansi.StringWidth(role)
 		x, room = x+rw, room-rw
-		model := strings.TrimPrefix(o.models[n.Role], runner+":")
+		model := strings.TrimPrefix(modelLabel, runner+":")
 		if model != "" && model != runner && room > 5 {
 			c.textOn(x, r.y+2, room, truncateOneLine(" · "+model, room), ui.Muted, bg, false)
 		}

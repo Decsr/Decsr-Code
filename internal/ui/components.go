@@ -355,6 +355,8 @@ func Status(kind string) (glyph, word string, color lipgloss.TerminalColor) {
 		return "▖", "running", Accent
 	case "unassigned":
 		return "?", "unassigned", Warn
+	case "approval":
+		return "◇", "approval", Warn
 	case "blocked":
 		return "⏸", "blocked", Muted
 	case "ready":

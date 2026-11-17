@@ -186,8 +186,9 @@ func TestWorkspaceSplitFocusesGraphAndSavesSession(t *testing.T) {
 	if s.Title != "Todo CLI" || s.Graph == nil || len(s.Graph.Nodes) != 6 || s.NextID != 6 {
 		t.Fatalf("session: title=%q next=%d graph=%v", s.Title, s.NextID, s.Graph)
 	}
-	if len(s.Transcript) != 2 || s.Transcript[0].Who != "you" || s.Transcript[1].Who != "lead" ||
-		!strings.Contains(s.Transcript[1].Text, "split into 5 nodes: T1, T2, T3, T4, T5") {
+	if len(s.Transcript) != 3 || s.Transcript[0].Who != "you" || s.Transcript[1].Who != "lead" ||
+		!strings.Contains(s.Transcript[1].Text, "split into 5 nodes: T1, T2, T3, T4, T5") ||
+		!strings.Contains(s.Transcript[2].Text, "4 nodes wait for approval of their agent (y approve · e edit · n cancel)") {
 		t.Fatalf("transcript: %+v", s.Transcript)
 	}
 	if s.In != 100 || s.Out != 50 {

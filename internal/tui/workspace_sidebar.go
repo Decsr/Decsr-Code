@@ -115,12 +115,16 @@ func (m workspaceModel) nodeRows(n *workspace.Node, w int, on bool, models, runn
 			l2 = sbSeg("    unassigned", ui.Warn, false, on)
 		}
 	default:
-		badge := lipgloss.NewStyle().Foreground(runnerColor(runners[n.Role]))
+		rn, md := runners[n.Role], models[n.Role]
+		if r2, m2 := m.nodeLook(n); r2 != "" {
+			rn, md = r2, m2
+		}
+		badge := lipgloss.NewStyle().Foreground(runnerColor(rn))
 		if on {
 			badge = badge.Background(ui.Sel)
 		}
-		l2 = sbSeg("    ", ui.Muted, false, on) + badge.Render(runnerGlyph(runners[n.Role], m.cfg.UI.Icons))
-		if md := models[n.Role]; md != "" {
+		l2 = sbSeg("    ", ui.Muted, false, on) + badge.Render(runnerGlyph(rn, m.cfg.UI.Icons))
+		if md != "" {
 			l2 += sbSeg(" "+md, ui.Muted, false, on)
 		}
 	}

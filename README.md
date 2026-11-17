@@ -166,8 +166,9 @@ In the diff view: `c` adds a note, `x` deletes it, `S` sends the notes, `n`/`p` 
 | `/pr`, `/pr watch`, `/pr stop` | Open a pull request, watch CI and review comments, stop watching |
 | `/issue`, `/import speckit` | Start from an issue / import Spec Kit tasks |
 | `/autonomy 1\|2\|3`, `/coordinator on\|off`, `/budget` | Autonomy, coordinator and spending |
+| `/approve`, `/reject`, `/routing` | Approve or cancel the agents of a split, show or set the routing mode |
 | `/resume`, `/clear`, `/compact`, `/project`, `/profile` | Sessions, projects and profiles |
-| `/connect`, `/roles`, `/plugin`, `/status`, `/cost`, `/export` | Providers, roles, plugins, status and reports |
+| `/connect`, `/roles`, `/plugin`, `/status`, `/cost`, `/rank`, `/export` | Providers, roles, plugins, status and reports |
 | `/config` | Home launcher (settings and classic pipeline) |
 
 `/help` lists every command. Full key reference: [Workspace keys](doc/workspace.md#keys) and [Commands](doc/workspace.md#commands).
@@ -202,6 +203,16 @@ echo "$KEY" | decsr connect groq    # or pipe the key
 decsr connect --list                # saved providers with masked keys
 decsr disconnect deepseek           # delete a saved key
 ```
+
+### Using the claude runner
+
+The `claude` runner starts your own, unmodified `claude` CLI headlessly. It uses whatever login that CLI already has; decsr never reads or stores Claude credentials. Use it the way you use `claude` yourself: in a session you started and are present for. Unattended runs (cron automations) should use an API key (`ANTHROPIC_API_KEY`, or Bedrock, Vertex or Foundry), because Anthropic's [Consumer Terms](https://www.anthropic.com/legal/consumer-terms) (section 3) do not allow automated access through a subscription login, and the advertised Pro, Max and Ultra [usage limits](https://code.claude.com/docs/en/legal-and-compliance) assume ordinary, individual usage. So on a subscription login decsr refuses to run automations that use `claude` unless the automation sets `allow_subscription: true`, asks you to confirm `decsr automation install` (`--yes` skips the question), and does not retry a node by itself after a usage limit (press `r`; `workspace.limit_auto_retry` overrides this). `decsr doctor` shows the login mode in its `claude auth` line.
+
+### Model rankings
+
+`decsr connect artificialanalysis` saves an [Artificial Analysis](https://artificialanalysis.ai) key (it is a data source, not a provider, so it never appears as a runner). `decsr models rank` then fetches the rankings once, saves them to `~/.decsr/rankings.json` and prints every model and effort sorted by a balance score (intelligence 50%, cost per task 30%, time per task 10%, context 10%; change the shares with `routing.weights`). `--json` prints the same as JSON. `/rank` does the same in the Workspace and shows the table in a scrollable view. Nothing is fetched unless you run one of them; the free tier allows 100 requests a day and the output says how many were used. Efforts without a measured row are estimated and marked `~`. With no key, the built-in relative tiers are shown. AA names that match no runner model are listed; add `routing.aliases` (`"AA name": "runner/model"`) to map them, and `routing.fallback` to edit the tiers.
+
+Data: Artificial Analysis (artificialanalysis.ai)
 
 Keys are saved in `~/.decsr/credentials.json` (mode `0600`) and never written to a yaml config. The environment variable wins over a saved key. See [Connect a provider](doc/workspace.md#connect-a-provider).
 

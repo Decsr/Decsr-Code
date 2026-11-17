@@ -239,3 +239,11 @@ func Get(name string) (Cred, bool, error) { return Default().Get(name) }
 func Set(name string, c Cred) error       { return Default().Set(name, c) }
 func Delete(name string) error            { return Default().Delete(name) }
 func List() ([]Entry, error)              { return Default().List() }
+
+// ArtificialAnalysis is the credentials entry that holds the Artificial
+// Analysis API key. It is a data source, not an LLM provider.
+const ArtificialAnalysis = "artificialanalysis"
+
+// IsProvider reports whether a saved entry is an LLM provider; the
+// Artificial Analysis key is not one.
+func IsProvider(name string) bool { return name != ArtificialAnalysis }

@@ -75,6 +75,7 @@ func buildSplitPrompt(task string, roles []Role, projectContext string, existing
 		"{{ROLES}}", strings.TrimRight(sb.String(), "\n"),
 		"{{SKILLS}}", skillsSection(opts.Plugins),
 		"{{CATALOG}}", catalogSection(opts.Plugins, opts.Catalog),
+		"{{ROUTING}}", routingSection(opts.Routing),
 		"{{FOLLOWUP}}", followUpRules(existing, next),
 		"{{TASK}}", task,
 		"{{PROJECT_CONTEXT}}", projectContext,
@@ -88,6 +89,8 @@ type splitTask struct {
 	Role        string   `json:"role"`
 	DependsOn   []string `json:"depends_on"`
 	Skills      []string `json:"skills"`
+	Difficulty  string   `json:"difficulty"`
+	Reason      string   `json:"reason"`
 }
 
 // UnmarshalJSON accepts the common alternative key names the lead uses; an
@@ -109,6 +112,11 @@ func (t *splitTask) UnmarshalJSON(data []byte) error {
 		DependsOnC   []string `json:"dependsOn"`
 		Deps         []string `json:"deps"`
 		Skills       idList   `json:"skills"`
+		Difficulty   string   `json:"difficulty"`
+		Grade        string   `json:"grade"`
+		Size         string   `json:"size"`
+		Reason       string   `json:"reason"`
+		DiffReason   string   `json:"difficulty_reason"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -127,6 +135,8 @@ func (t *splitTask) UnmarshalJSON(data []byte) error {
 	t.Role = first(raw.Role, raw.Agent, raw.Assignee, raw.Owner)
 	t.DependsOn = raw.DependsOn
 	t.Skills = raw.Skills
+	t.Difficulty = first(raw.Difficulty, raw.Grade, raw.Size)
+	t.Reason = first(raw.Reason, raw.DiffReason)
 	for _, alt := range [][]string{raw.Depends, raw.Dependencies, raw.DependsOnC, raw.Deps} {
 		if t.DependsOn == nil {
 			t.DependsOn = alt
@@ -230,6 +240,10 @@ func ParseSplitOpts(task, output string, roles []Role, existing []string, opts S
 				d = renamed
 			}
 			nd.DependsOn = append(nd.DependsOn, d)
+		}
+		if opts.Routing {
+			nd.Difficulty = NormalizeGrade(t.Difficulty)
+			nd.DifficultyReason = cutRunes(Sanitize(t.Reason), 200)
 		}
 		var dropped []string
 		nd.Skills, dropped = filterSkills(t.Skills, allowed)
@@ -587,4 +601,22 @@ func normalizeRole(s string) string {
 		return "r_role"
 	}
 	return s
+}
+
+// routingGrading is the part of the split prompt that asks for a grade per
+// sub-task. It is the same text on every call and comes after the static part
+// of the prompt, so the prefix stays cacheable.
+const routingGrading = `## Grading
+
+For every sub-task also add two fields to its JSON object: "difficulty" and "reason".
+"difficulty" is "small" (simple, mechanical or a few lines), "medium" (ordinary work) or
+"large" (hard, risky or spanning many files). "reason" is one short line. Grade the work,
+not the role: a weaker model will be given the small and medium sub-tasks to save cost.
+`
+
+func routingSection(on bool) string {
+	if on {
+		return routingGrading
+	}
+	return ""
 }

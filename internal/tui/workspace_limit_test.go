@@ -209,3 +209,70 @@ func TestLimitRendering(t *testing.T) {
 		}
 	}
 }
+
+func init() {
+	// Tests never depend on the login of the machine they run on.
+	claudeAuthMode = func() string { return runner.AuthAPIKey }
+}
+
+func withClaudeAuth(t *testing.T, mode string) {
+	t.Helper()
+	old := claudeAuthMode
+	claudeAuthMode = func() string { return mode }
+	t.Cleanup(func() { claudeAuthMode = old })
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+func TestLimitAutoRetryOffOnSubscription(t *testing.T) {
+	withClaudeAuth(t, runner.AuthSubscription)
+	reset := limitBase.Add(time.Hour)
+	h, notes, clock := limitHarness(t, autoAssisted, reset)
+	if !notes.has(notify.NeedsYou, "auto-retry is off on a subscription login; press r to retry") {
+		t.Fatalf("no explaining note: %+v", notes.notes)
+	}
+	if h.m.limitAutoRetries(h.m.g.Node("T1")) {
+		t.Fatal("limitAutoRetries is true on a subscription")
+	}
+	h.tick(clock, reset.Add(time.Hour))
+	if h.status("T1") != workspace.StatusWaiting {
+		t.Fatalf("retried by itself on a subscription: %s", h.status("T1"))
+	}
+	h.m.sel = "T1"
+	h.m.focus = wsFocusGraph
+	h.key("r")
+	if h.status("T1") != workspace.StatusRunning {
+		t.Fatalf("r did not retry: %s", h.status("T1"))
+	}
+}
+
+func TestLimitAutoRetryOnWithAPIKey(t *testing.T) {
+	withClaudeAuth(t, runner.AuthAPIKey)
+	reset := limitBase.Add(time.Hour)
+	h, _, clock := limitHarness(t, autoAssisted, reset)
+	if !h.m.limitAutoRetries(h.m.g.Node("T1")) {
+		t.Fatal("limitAutoRetries is false with an API key")
+	}
+	h.tick(clock, reset.Add(time.Minute))
+	if h.status("T1") != workspace.StatusRunning {
+		t.Fatalf("no automatic retry with an API key: %s", h.status("T1"))
+	}
+}
+
+func TestLimitAutoRetrySettingOverrides(t *testing.T) {
+	withClaudeAuth(t, runner.AuthSubscription)
+	h, _, _ := limitHarness(t, autoAssisted, limitBase.Add(time.Hour))
+	n := h.m.g.Node("T1")
+	h.m.cfg.Workspace.LimitAutoRetry = boolPtr(true)
+	if !h.m.limitAutoRetries(n) {
+		t.Error("limit_auto_retry: true did not turn the retry on for a subscription")
+	}
+	if h.m.limitAutoOffNote(n) != "" {
+		t.Error("an explaining note with the retry on")
+	}
+	withClaudeAuth(t, runner.AuthAPIKey)
+	h.m.cfg.Workspace.LimitAutoRetry = boolPtr(false)
+	if h.m.limitAutoRetries(n) {
+		t.Error("limit_auto_retry: false did not turn the retry off for an API key")
+	}
+}

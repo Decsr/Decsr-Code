@@ -92,6 +92,8 @@ func main() {
 		connectCmd(os.Args[2:])
 	case "disconnect":
 		disconnectCmd(os.Args[2:])
+	case "models":
+		modelsCmd(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 	default:
@@ -123,7 +125,9 @@ func usage() {
 	  connect <deepseek|openai|openrouter|groq|custom> [--no-test]
 	                                      Save an API key (hidden input, or piped on stdin) and pick the roles that use it
 	  connect --list                      List saved providers (masked keys) and API keys set in the environment
+	  connect artificialanalysis          Save the Artificial Analysis key used by "models rank" (not an LLM provider)
 	  disconnect <name> [--yes]           Delete a saved API key
+	  models rank [--json]                Fetch model rankings from Artificial Analysis, save them and print the table
 	  report                              Summarize last run artifacts
 	  monitor                             Open the control TUI against a running bus
 	  approve                             Create approval marker

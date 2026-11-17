@@ -17,6 +17,7 @@ automations:
     autonomy: 3                # required: 2 or 3
     budget_usd: 2.5            # required: greater than 0
     timeout: 2h                # optional, default 2h
+    allow_subscription: false  # optional, see "Claude subscription logins"
 
   - name: triage
     schedule: "30 6 * * *"
@@ -42,7 +43,7 @@ automations:
 ```
 decsr automation list
 decsr automation run <name> [--tmux]
-decsr automation install [name]
+decsr automation install [name] [--yes]
 decsr automation uninstall [name]
 ```
 
@@ -55,7 +56,10 @@ decsr automation uninstall [name]
   this is what cron uses, because cron has no terminal.
 - `install` writes one crontab line per automation (or just `name`) and shows
   it. It is idempotent: a line with the same marker is replaced, other lines
-  are not touched, and the crontab is only rewritten when it changes.
+  are not touched, and the crontab is only rewritten when it changes. On a
+  Claude subscription login it warns and asks `[y/N]` first (see below);
+  `--yes` (or `-y`) accepts without asking, and without a terminal `install`
+  refuses unless `--yes` is given.
   `uninstall` removes the marked lines. Neither works on Windows.
 
 The crontab line:
@@ -82,6 +86,36 @@ when an installed line points at a missing binary.
 - Level 3 never merges the pull request, like a normal level 3 session.
 - The budget and the timeout end the run: `budget reached` or `timed out`
   (notification `automation <name> timed out`).
+
+## Claude subscription logins
+
+The `claude` runner starts your own `claude` CLI with your own login; decsr
+never reads or stores Claude credentials. Unattended runs should use an API
+key. Anthropic's [Consumer Terms](https://www.anthropic.com/legal/consumer-terms)
+(section 3) do not allow access through automated or non-human means such as a
+bot or a script, except with an Anthropic API key, and the advertised Pro, Max
+and Ultra usage limits assume ordinary, individual usage ([legal and
+compliance](https://code.claude.com/docs/en/legal-and-compliance)).
+
+decsr counts the login as an API key when `ANTHROPIC_API_KEY`,
+`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or
+`CLAUDE_CODE_USE_FOUNDRY` is set, or a claude settings file sets
+`apiKeyHelper` (only the presence of the setting is read). Otherwise it is a
+subscription login. When any role of the project runs on `claude` and the login
+is a subscription:
+
+- `install` prints the warning and asks `[y/N]`. `--yes` accepts it; without a
+  terminal and without `--yes` it refuses.
+- `run` is refused with a `refused: ...` line in the run log and a failed
+  notification, and nothing starts. Set `ANTHROPIC_API_KEY` in the cron
+  environment, or set `allow_subscription: true` on that automation to accept
+  the risk (the install question is then skipped too).
+- `decsr doctor` shows a `claude auth` line, with a warning when such
+  automations are installed.
+
+After a usage limit, a node of the `claude` runner on a subscription login is
+not retried by itself (press `r`); `workspace.limit_auto_retry: true` turns it
+back on. See [workspace.md](workspace.md#usage-limits).
 
 ## When a run is done
 

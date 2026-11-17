@@ -49,6 +49,7 @@ Output exactly this, with valid JSON, no markdown fences and no other text:
 Use `[]` under NEW_ROLES when every role already exists. The PLUGINS section is optional:
 use `[]` or leave it out when you suggest no plugin.
 
+{{ROUTING}}
 ## Available roles
 
 {{ROLES}}

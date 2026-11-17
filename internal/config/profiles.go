@@ -36,8 +36,20 @@ func ValidName(s string) bool { return nameRe.MatchString(s) }
 
 // Profile is a named set of role settings that can be applied to a project.
 type Profile struct {
-	Name   string                 `yaml:"-"`
-	Agents map[string]AgentConfig `yaml:"agents"`
+	Name    string                 `yaml:"-"`
+	Agents  map[string]AgentConfig `yaml:"agents"`
+	Routing *RoutingProfile        `yaml:"routing,omitempty"`
+}
+
+// RoutingProfile is the part of the routing settings a profile stores.
+type RoutingProfile struct {
+	Mode        string `yaml:"mode,omitempty"`
+	AutoApprove *bool  `yaml:"auto_approve,omitempty"`
+}
+
+// ProfileRouting is the routing part of c as a profile stores it.
+func ProfileRouting(c RoutingConfig) RoutingProfile {
+	return RoutingProfile{Mode: c.Mode, AutoApprove: c.AutoApprove}
 }
 
 // ProfilesDir is ~/.decsr/profiles ("" when the home directory is unknown).
@@ -116,11 +128,21 @@ func LoadProfile(name string) (Profile, error) {
 // description, read_only, mode and skills are kept; roles with none of them set are
 // left out.
 func SaveProfile(name string, agents map[string]AgentConfig) error {
+	return SaveProfileRouting(name, agents, RoutingProfile{})
+}
+
+// SaveProfileRouting is SaveProfile with the routing settings; an empty
+// routing is left out of the file.
+func SaveProfileRouting(name string, agents map[string]AgentConfig, routing RoutingProfile) error {
 	dir, file, err := profileFile(name)
 	if err != nil {
 		return err
 	}
 	p := Profile{Agents: make(map[string]AgentConfig, len(agents))}
+	if routing.Mode != "" || routing.AutoApprove != nil {
+		routing.Mode = NormalizeRoutingMode(routing.Mode)
+		p.Routing = &routing
+	}
 	for role, ac := range agents {
 		ac = profileAgent(ac)
 		if ac.Runner == "" && ac.Model == "" && ac.Effort == "" && ac.BaseURL == "" && ac.APIKeyEnv == "" && ac.Description == "" && ac.Mode == "" && !ac.ReadOnly && len(ac.UserSkills) == 0 {
@@ -195,6 +217,15 @@ func ApplyProfile(root, name string) error {
 		}
 		existing.ReadOnly, existing.UserSkills = pa.ReadOnly, pa.UserSkills
 		cfg.Agents[role] = existing
+	}
+	if p.Routing != nil {
+		if p.Routing.Mode != "" {
+			cfg.Routing.Mode = NormalizeRoutingMode(p.Routing.Mode)
+		}
+		if p.Routing.AutoApprove != nil {
+			v := *p.Routing.AutoApprove
+			cfg.Routing.AutoApprove = &v
+		}
 	}
 	cfg.Project.Profile = name
 	return Save(root, cfg)

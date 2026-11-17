@@ -53,6 +53,9 @@ type Session struct {
 	AutoFixes  int        `json:"auto_fixes,omitempty"`    // fix nodes added automatically after a failed Build & test
 	// Coordinator is the /coordinator override of workspace.coordinator; nil = use the config.
 	Coordinator *bool `json:"coordinator,omitempty"`
+	// RoutingMode is the routing mode frozen at the first split of the session
+	// ("" = not frozen yet: the config applies).
+	RoutingMode string `json:"routing_mode,omitempty"`
 	// Reviews are the lead's batch reviews, oldest first, at most MaxReviews.
 	Reviews []Review `json:"reviews,omitempty"`
 	// InboxDismissed are the IDs of the inbox info items the user cleared with x.

@@ -32,6 +32,7 @@ type Config struct {
 	Notifications  NotifyConfig           `yaml:"notifications,omitempty"`
 	Workspace      WorkspaceConfig        `yaml:"workspace,omitempty"`
 	UI             UIConfig               `yaml:"ui,omitempty"`
+	Routing        RoutingConfig          `yaml:"routing,omitempty"`
 
 	// Pricing is the USD price per million tokens, keyed by a model id or a
 	// glob (path.Match) such as "deepseek-*". There are no built-in prices.
@@ -87,6 +88,71 @@ type WorkspaceConfig struct {
 	// proposes adding, changing or cancelling nodes. Off by default; the
 	// session's /coordinator overrides it.
 	Coordinator bool `yaml:"coordinator,omitempty"`
+
+	// LimitAutoRetry turns the automatic retry of a node after a usage limit
+	// on or off. nil = on, except for the claude runner on a subscription
+	// login, where it is off and the node waits for the user's retry.
+	LimitAutoRetry *bool `yaml:"limit_auto_retry,omitempty"`
+}
+
+// RoutingConfig tunes the model rankings used to pick an agent per node.
+type RoutingConfig struct {
+	// Mode is how a split picks the agent of each node: "manual" (default,
+	// nodes use the role's agent), "auto-role" (a cheaper model of the role's
+	// own runner) or "auto-connected" (any connected runner).
+	Mode string `yaml:"mode,omitempty"`
+	// AutoApprove approves the picks of an unattended run without asking;
+	// nil = true. false makes the run wait for the approval.
+	AutoApprove *bool `yaml:"auto_approve,omitempty"`
+	// Aliases map an Artificial Analysis model name to runner models:
+	// "Some Model": "runner/model-id[,runner/model-id]".
+	Aliases map[string]string `yaml:"aliases,omitempty"`
+	// Weights are the shares of the balance score; all zero = 50/30/10/10.
+	Weights RoutingWeights `yaml:"weights,omitempty"`
+	// Fallback overrides the built-in relative-tier table, keyed "runner/model"
+	// or "model".
+	Fallback map[string]FallbackTier `yaml:"fallback,omitempty"`
+}
+
+// Routing modes.
+const (
+	RoutingManual        = "manual"
+	RoutingAutoRole      = "auto-role"
+	RoutingAutoConnected = "auto-connected"
+)
+
+// NormalizeRoutingMode returns the mode in its canonical form; an empty or
+// unknown value is "manual".
+func NormalizeRoutingMode(s string) string {
+	switch m := strings.ToLower(strings.TrimSpace(s)); m {
+	case RoutingAutoRole, RoutingAutoConnected:
+		return m
+	}
+	return RoutingManual
+}
+
+// EffectiveMode is Mode, normalized.
+func (r RoutingConfig) EffectiveMode() string { return NormalizeRoutingMode(r.Mode) }
+
+// ApproveUnattended reports whether an unattended run approves the picks by
+// itself (the default).
+func (r RoutingConfig) ApproveUnattended() bool { return r.AutoApprove == nil || *r.AutoApprove }
+
+// RoutingWeights are the balance score shares.
+type RoutingWeights struct {
+	Intelligence float64 `yaml:"intelligence,omitempty"`
+	Cost         float64 `yaml:"cost,omitempty"`
+	Time         float64 `yaml:"time,omitempty"`
+	Context      float64 `yaml:"context,omitempty"`
+}
+
+// FallbackTier is a relative tier used when there is no ranking data:
+// intelligence 0-100, cost and time as relative numbers (for the highest effort).
+type FallbackTier struct {
+	Intelligence float64 `yaml:"intelligence"`
+	Cost         float64 `yaml:"cost"`
+	Time         float64 `yaml:"time"`
+	Context      int     `yaml:"context,omitempty"`
 }
 
 // UIConfig holds presentation settings.
@@ -615,6 +681,36 @@ func merge(dst *Config, src Config) {
 	if src.Workspace.Coordinator {
 		dst.Workspace.Coordinator = true
 	}
+	if src.Workspace.LimitAutoRetry != nil {
+		v := *src.Workspace.LimitAutoRetry
+		dst.Workspace.LimitAutoRetry = &v
+	}
+	if len(src.Routing.Aliases) > 0 {
+		if dst.Routing.Aliases == nil {
+			dst.Routing.Aliases = make(map[string]string, len(src.Routing.Aliases))
+		}
+		for k, v := range src.Routing.Aliases {
+			dst.Routing.Aliases[k] = v
+		}
+	}
+	if len(src.Routing.Fallback) > 0 {
+		if dst.Routing.Fallback == nil {
+			dst.Routing.Fallback = make(map[string]FallbackTier, len(src.Routing.Fallback))
+		}
+		for k, v := range src.Routing.Fallback {
+			dst.Routing.Fallback[k] = v
+		}
+	}
+	if src.Routing.Mode != "" {
+		dst.Routing.Mode = src.Routing.Mode
+	}
+	if src.Routing.AutoApprove != nil {
+		v := *src.Routing.AutoApprove
+		dst.Routing.AutoApprove = &v
+	}
+	if src.Routing.Weights != (RoutingWeights{}) {
+		dst.Routing.Weights = src.Routing.Weights
+	}
 	if len(src.Pricing) > 0 {
 		if dst.Pricing == nil {
 			dst.Pricing = make(map[string]ModelPrice, len(src.Pricing))
@@ -725,6 +821,18 @@ func SaveProjectRole(root, name string, ac AgentConfig) error {
 		existing.UserSkills = ac.UserSkills
 	}
 	cfg.Agents[name] = existing
+	return Save(root, cfg)
+}
+
+// SaveProjectRoutingMode sets routing.mode in <root>/.decsr/project.yaml,
+// keeping the rest of the project settings. It fails without touching the file
+// when project.yaml exists but cannot be parsed.
+func SaveProjectRoutingMode(root, mode string) error {
+	cfg, err := loadFile(filepath.Join(root, GlobalDir), ProjectFilename)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", ProjectFilename, err)
+	}
+	cfg.Routing.Mode = NormalizeRoutingMode(mode)
 	return Save(root, cfg)
 }
 

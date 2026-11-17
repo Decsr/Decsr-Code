@@ -70,7 +70,7 @@ func loadEntries(extra ...providerEntry) []providerEntry {
 	saved := map[string]bool{}
 	if list, err := credentials.List(); err == nil {
 		for _, e := range list {
-			if runner.IsPreset(e.Name) {
+			if runner.IsPreset(e.Name) || !credentials.IsProvider(e.Name) {
 				continue
 			}
 			saved[e.Name] = true

@@ -20,6 +20,9 @@ type AutomationOptions struct {
 	Task      string  // task text; "" when WorkspaceOptions.Issue is used
 	Autonomy  int     // 2 or 3
 	BudgetUSD float64 // budget of the session
+	// AllowSubscription accepts the claude runner on a subscription login;
+	// without it routing never picks claude in this run.
+	AllowSubscription bool
 }
 
 // AutomationResult is how an automation run ended.

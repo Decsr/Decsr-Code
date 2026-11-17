@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -20,6 +22,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/logging"
 	"github.com/Decsr/Decsr-Code/internal/multiplexer"
 	"github.com/Decsr/Decsr-Code/internal/notify"
+	"github.com/Decsr/Decsr-Code/internal/runner"
 	"github.com/Decsr/Decsr-Code/internal/tui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
@@ -27,7 +30,7 @@ import (
 const automationUsage = `usage:
   decsr automation list
   decsr automation run <name> [--tmux]
-  decsr automation install [name]
+  decsr automation install [name] [--yes]
   decsr automation uninstall [name]`
 
 // autoSessionPrefix starts the tmux session name of an automation run.
@@ -47,6 +50,11 @@ type autoDeps struct {
 	pid     int
 	alive   func(pid int) bool
 	isTTY   func() bool
+	in      io.Reader
+	// authMode is the claude login mode (runner.AuthAPIKey or AuthSubscription).
+	authMode func() string
+	// claudeRoles lists the roles of the project that run on the claude runner.
+	claudeRoles func(root string) []string
 	// runWorkspace opens the Workspace for the run and returns how it ended.
 	runWorkspace func(root string, opts tui.WorkspaceOptions) (tui.AutomationResult, error)
 	// notify sends a note through the configured channels.
@@ -67,6 +75,9 @@ func defaultAutoDeps(root string) autoDeps {
 		pid:          os.Getpid(),
 		alive:        automation.ProcessAlive,
 		isTTY:        stdinIsTerminal,
+		in:           os.Stdin,
+		authMode:     runner.ClaudeAuthMode,
+		claudeRoles:  projectClaudeRoles,
 		runWorkspace: runAutomationWorkspace,
 		notify:       sendAutomationNote,
 	}
@@ -109,19 +120,37 @@ func automationMain(d autoDeps, args []string) error {
 		}
 		return automationRun(d, name, useTmux)
 	case "install", "uninstall":
-		if len(args) > 2 {
+		rest, yes := args[1:], false
+		if args[0] == "install" {
+			rest, yes = stripYesFlag(rest)
+		}
+		if len(rest) > 1 {
 			return errors.New(automationUsage)
 		}
 		name := ""
-		if len(args) == 2 {
-			name = args[1]
+		if len(rest) == 1 {
+			name = rest[0]
 		}
 		if args[0] == "install" {
-			return automationInstall(d, name)
+			return automationInstall(d, name, yes)
 		}
 		return automationUninstall(d, name)
 	}
 	return errors.New(automationUsage)
+}
+
+// stripYesFlag removes --yes / -y and reports whether it was there.
+func stripYesFlag(args []string) ([]string, bool) {
+	var rest []string
+	yes := false
+	for _, a := range args {
+		if a == "--yes" || a == "-y" {
+			yes = true
+			continue
+		}
+		rest = append(rest, a)
+	}
+	return rest, yes
 }
 
 func parseAutomationRun(args []string) (name string, useTmux bool, err error) {
@@ -184,7 +213,70 @@ func clip(s string, n int) string {
 
 // ── install / uninstall ──────────────────────────────────────────────────────
 
-func automationInstall(d autoDeps, name string) error {
+// subscriptionTermsWarning is shown before an automation that runs the claude
+// runner is installed on a subscription login.
+const subscriptionTermsWarning = `warning: these automations run the claude runner unattended on a Claude subscription login:
+  %s
+Anthropic's Consumer Terms (section 3) do not allow access to the Services through
+automated or non-human means such as a bot or a script, except with an Anthropic
+API key: https://www.anthropic.com/legal/consumer-terms
+Advertised Pro, Max and Ultra usage limits assume ordinary, individual usage:
+https://code.claude.com/docs/en/legal-and-compliance
+Set ANTHROPIC_API_KEY for the cron environment to use the API instead.`
+
+// subscriptionRisk reports whether a runs claude on a subscription login
+// without having accepted it with allow_subscription.
+func (d autoDeps) subscriptionRisk(a automation.Automation) bool {
+	if a.AllowSubscription || d.authMode() != runner.AuthSubscription {
+		return false
+	}
+	return len(d.claudeRoles(d.root)) > 0
+}
+
+// confirmSubscription warns about the automations in list that run claude on a
+// subscription login and asks for a yes. yes skips the question; without a
+// terminal and without yes it refuses.
+func confirmSubscription(d autoDeps, list []automation.Automation, yes bool) error {
+	var names []string
+	for _, a := range list {
+		if d.subscriptionRisk(a) {
+			names = append(names, a.Name)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	_, _ = fmt.Fprintf(d.out, subscriptionTermsWarning+"\n", strings.Join(names, ", "))
+	if yes {
+		return nil
+	}
+	if !d.isTTY() {
+		return errors.New("refusing to install without a terminal to confirm; use --yes to accept this, or set ANTHROPIC_API_KEY")
+	}
+	_, _ = fmt.Fprint(d.out, "Install anyway? [y/N] ")
+	line, _ := bufio.NewReader(d.in).ReadString('\n')
+	if ans := strings.ToLower(strings.TrimSpace(line)); ans != "y" && ans != "yes" {
+		return errors.New("not installed")
+	}
+	return nil
+}
+
+// projectClaudeRoles are the roles of the project that run on the claude runner.
+func projectClaudeRoles(root string) []string {
+	cfg, err := config.Load(root)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, r := range workspace.Roles(cfg) {
+		if r.Agent.Runner == "claude" {
+			out = append(out, r.Name)
+		}
+	}
+	return out
+}
+
+func automationInstall(d autoDeps, name string, yes bool) error {
 	if d.goos == "windows" {
 		return errors.New("automation install needs cron and is not supported on Windows")
 	}
@@ -198,6 +290,9 @@ func automationInstall(d autoDeps, name string) error {
 			return fmt.Errorf("no automation named %q in .decsr/automations.yaml", name)
 		}
 		list = []automation.Automation{a}
+	}
+	if err := confirmSubscription(d, list, yes); err != nil {
+		return err
 	}
 	project, err := d.abs()
 	if err != nil {
@@ -284,6 +379,12 @@ func automationRun(d autoDeps, name string, useTmux bool) error {
 	}
 	// Load validates, so L2/L3 and a budget are known to be set here.
 	start := d.now()
+	if d.subscriptionRisk(a) {
+		msg := "claude runs on a subscription login, which does not allow unattended use: set ANTHROPIC_API_KEY for the cron environment, or set allow_subscription: true in .decsr/automations.yaml to accept the risk"
+		d.logRun(name, start, "refused: "+msg, 0)
+		d.notify(d.root, notify.Failed, fmt.Sprintf("automation %s refused: %s", name, msg))
+		return nil
+	}
 	locker := d.locker(a.Timeout)
 	if locker.Active(name) {
 		d.logRun(name, start, "skipped: previous run still active", 0)
@@ -306,7 +407,7 @@ func automationRun(d autoDeps, name string, useTmux bool) error {
 	defer release()
 
 	opts := tui.WorkspaceOptions{Automation: tui.AutomationOptions{
-		Name: a.Name, Timeout: a.Timeout, Autonomy: a.Autonomy, BudgetUSD: a.BudgetUSD,
+		Name: a.Name, Timeout: a.Timeout, Autonomy: a.Autonomy, BudgetUSD: a.BudgetUSD, AllowSubscription: a.AllowSubscription,
 	}}
 	if a.IssueQuery != "" {
 		num, err := oldestIssue(d, a.IssueQuery)
@@ -456,4 +557,44 @@ func automationDoctor(root string, ct automation.Crontab) *doctor.Result {
 			Hint: "run `decsr automation install` again with the current decsr binary"}
 	}
 	return &doctor.Result{Name: name, Status: doctor.OK, Detail: detail}
+}
+
+// claudeAuthDoctor is the "claude auth" line of `decsr doctor`; nil when no
+// role runs on the claude runner. It warns when an installed automation runs
+// claude unattended on a subscription login.
+func claudeAuthDoctor(root string, ct automation.Crontab, mode func() string, roles []string) *doctor.Result {
+	const name = "claude auth"
+	if len(roles) == 0 {
+		return nil
+	}
+	m := mode()
+	ok := &doctor.Result{Name: name, Status: doctor.OK, Detail: m}
+	if m != runner.AuthSubscription {
+		return ok
+	}
+	list, err := automation.Load(root)
+	if err != nil {
+		return ok
+	}
+	project, err := filepath.Abs(root)
+	if err != nil {
+		return ok
+	}
+	lines, err := automation.InstalledLines(ct, project)
+	if err != nil {
+		return ok
+	}
+	var risky []string
+	for _, a := range list {
+		if _, in := lines[a.Name]; in && !a.AllowSubscription {
+			risky = append(risky, a.Name)
+		}
+	}
+	if len(risky) == 0 {
+		return ok
+	}
+	sort.Strings(risky)
+	return &doctor.Result{Name: name, Status: doctor.Warn,
+		Detail: m + "; installed automations use claude unattended: " + strings.Join(risky, ", "),
+		Hint:   "set ANTHROPIC_API_KEY for the cron environment (subscription logins are for ordinary, individual use: https://code.claude.com/docs/en/legal-and-compliance)"}
 }

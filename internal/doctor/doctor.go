@@ -76,6 +76,10 @@ type Deps struct {
 	// no .decsr/automations.yaml.
 	Automations *Result
 
+	// ClaudeAuth is the optional "claude auth" line; nil when no role runs on
+	// the claude runner.
+	ClaudeAuth *Result
+
 	// Theme is the ui.theme setting; "" is auto.
 	Theme string
 }
@@ -103,6 +107,9 @@ func Run(d Deps) []Result {
 	rs = append(rs, checkOptional(d)...)
 	if d.Automations != nil {
 		rs = append(rs, *d.Automations)
+	}
+	if d.ClaudeAuth != nil {
+		rs = append(rs, *d.ClaudeAuth)
 	}
 	if r, ok := checkTheme(d); ok {
 		rs = append(rs, r)

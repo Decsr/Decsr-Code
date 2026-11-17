@@ -857,3 +857,46 @@ func TestMerge_ProjectAllowedCommands(t *testing.T) {
 		t.Fatalf("got %v", dst.Project.AllowedCommands)
 	}
 }
+
+func TestRoutingMerge(t *testing.T) {
+	dst := Config{Routing: RoutingConfig{
+		Aliases:  map[string]string{"A": "claude/a", "B": "claude/b"},
+		Weights:  RoutingWeights{Intelligence: 1},
+		Fallback: map[string]FallbackTier{"x": {Intelligence: 1}},
+	}}
+	merge(&dst, Config{Routing: RoutingConfig{
+		Aliases:  map[string]string{"B": "dsh/b2", "C": "dsh/c"},
+		Weights:  RoutingWeights{Cost: 5},
+		Fallback: map[string]FallbackTier{"y": {Intelligence: 2}},
+	}})
+	if dst.Routing.Aliases["A"] != "claude/a" || dst.Routing.Aliases["B"] != "dsh/b2" || dst.Routing.Aliases["C"] != "dsh/c" {
+		t.Fatalf("aliases: %v", dst.Routing.Aliases)
+	}
+	if dst.Routing.Weights != (RoutingWeights{Cost: 5}) {
+		t.Fatalf("weights: %+v", dst.Routing.Weights)
+	}
+	if len(dst.Routing.Fallback) != 2 {
+		t.Fatalf("fallback: %v", dst.Routing.Fallback)
+	}
+	merge(&dst, Config{})
+	if dst.Routing.Weights.Cost != 5 {
+		t.Fatal("an empty layer must not reset the weights")
+	}
+}
+
+func TestMerge_WorkspaceLimitAutoRetry(t *testing.T) {
+	var dst Config
+	merge(&dst, Config{})
+	if dst.Workspace.LimitAutoRetry != nil {
+		t.Fatal("unset setting became set")
+	}
+	off := false
+	merge(&dst, Config{Workspace: WorkspaceConfig{LimitAutoRetry: &off}})
+	if dst.Workspace.LimitAutoRetry == nil || *dst.Workspace.LimitAutoRetry {
+		t.Fatal("false was not merged")
+	}
+	merge(&dst, Config{})
+	if dst.Workspace.LimitAutoRetry == nil || *dst.Workspace.LimitAutoRetry {
+		t.Fatal("an unset layer cleared the setting")
+	}
+}

@@ -156,11 +156,16 @@ func renderInspector(g *workspace.Graph, n *workspace.Node, cfg config.Config, p
 		runner, mode := "", ""
 		if r, ok := workspace.FindRole(cfg, n.Role); ok {
 			runner, mode = r.Agent.Runner, roleModeLabel(r.Agent)
-			if m := modelOnly(r.Agent.Model); m != "" {
+			a, _ := nodeAgent(cfg, n)
+			runner = a.Runner
+			if m := modelOnly(a.Model); m != "" {
+				if a.Mark != "" {
+					m += " " + a.Mark
+				}
 				meta = append(meta, m)
 			}
-			if r.Agent.Effort != "" {
-				meta = append(meta, r.Agent.Effort)
+			if a.Effort != "" {
+				meta = append(meta, a.Effort)
 			}
 			if r.ReadOnly {
 				meta = append(meta, "read-only")
@@ -803,7 +808,8 @@ func workspaceHelp(cmds []wsCommand) []helpSection {
 			{"f", "add a fix node after a failed Build & test"},
 			{"m", "reply to the node (fills the prompt with @T3); a waiting node (◇) needs it"},
 			{"N", "inbox: what needs you (Enter goes to it, x clears an info item)"},
-			{"y / n", "apply or reject the lead review that waits (coordinator mode, level 1)"},
+			{"y / n", "approve or cancel the agents of a split (the approval card), else apply or reject the lead review that waits"},
+			{"e", "edit the agent (runner, model, effort) of the selected node on the approval card"},
 			{"!", "open a shell in the node's worktree (a tmux split under tmux)"},
 			{"q", "quit (asks first while nodes run)"},
 		}},

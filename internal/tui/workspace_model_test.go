@@ -80,6 +80,8 @@ type wsHarness struct {
 	summary   func() string // session summary hook given to the engine
 	recent    []RecentProject
 	splitCmd  tea.Cmd // command of the split that started last
+	// keepPending leaves the proposed agents of a split unapproved.
+	keepPending bool
 }
 
 func wsFixtureGraph() *workspace.Graph {
@@ -118,7 +120,7 @@ func newWSHarnessAt(t *testing.T, root string) *wsHarness {
 	t.Helper()
 	h := &wsHarness{t: t, root: root, exec: &wsFakeExec{}, graph: wsFixtureGraph, checks: []string{"go build ./...", "go test ./..."}}
 	deps := wsDeps{
-		split: func(_ context.Context, task, earlier string, existing []string, next int, _ func(string)) (*workspace.Graph, runner.TokenUsage, error) {
+		split: func(_ context.Context, task, earlier string, existing []string, next int, _ bool, _ func(string)) (*workspace.Graph, runner.TokenUsage, error) {
 			h.tasks = append(h.tasks, task)
 			h.existing = append(h.existing, existing)
 			h.nexts = append(h.nexts, next)
@@ -205,6 +207,10 @@ func (h *wsHarness) send(msg tea.Msg) tea.Cmd {
 	was := h.m.splitting
 	next, cmd := h.m.Update(msg)
 	h.m = next.(workspaceModel)
+	if _, ok := msg.(wsSplitDoneMsg); ok && !h.keepPending && h.m.eng != nil && len(h.m.eng.PendingApproval()) > 0 {
+		h.m.eng.ApproveAssignments() // the tests that are not about the approval start from approved agents
+		h.m.g = h.m.eng.Snapshot()
+	}
 	if h.m.splitting && !was {
 		h.splitCmd = cmd
 	}
@@ -657,7 +663,7 @@ func TestWorkspaceSlashPaletteFilters(t *testing.T) {
 	h.key("q")
 	h.want("/quit")
 	h.wantNot("/compact")
-	h.key("backspace", "r", "o")
+	h.key("backspace", "r", "o", "l")
 	h.want("/roles")
 	h.wantNot("/quit")
 	h.key("enter")

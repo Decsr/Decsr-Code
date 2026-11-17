@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/runner"
 	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
@@ -114,11 +115,11 @@ func runningLine(n *workspace.Node, runnerName, roleModel, spin string, now time
 
 // nodeLooks is the runner name and the effective model of the role of n.
 func (m workspaceModel) nodeLooks(n *workspace.Node) (runnerName, roleModel string) {
-	r, ok := workspace.FindRole(m.cfg, n.Role)
+	a, ok := nodeAgent(m.cfg, n)
 	if !ok {
 		return "", ""
 	}
-	return runnerKey(r.Agent.Runner), effectiveModel(m.cfg, r.Agent)
+	return runnerKey(a.Runner), effectiveModel(m.cfg, config.AgentConfig{Runner: a.Runner, Model: a.Model})
 }
 
 // runLine is the running line of n with the current spinner frame, cut to w.

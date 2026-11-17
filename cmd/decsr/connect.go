@@ -22,7 +22,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/runner"
 )
 
-const connectUsage = "usage: decsr connect <deepseek|openai|openrouter|groq|custom> [--no-test] [--name N --base-url URL]\n       decsr connect --list"
+const connectUsage = "usage: decsr connect <deepseek|openai|openrouter|groq|artificialanalysis|custom> [--no-test] [--name N --base-url URL]\n       decsr connect --list"
 
 var customNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
@@ -115,6 +115,10 @@ func runConnect(args []string, c connectIO) error {
 	in := lineReader{bufio.NewReader(c.In)}
 	choice := pos[0]
 
+	if choice == credentials.ArtificialAnalysis {
+		return connectRankings(c, in)
+	}
+
 	var name, baseURL, runnerName, provider string
 	var preset runner.Preset
 	if p, ok := runner.PresetByName(choice); ok {
@@ -163,6 +167,21 @@ func runConnect(args []string, c connectIO) error {
 	_, _ = fmt.Fprintf(c.Out, "Saved %s key (%s) to %s\n", name, credentials.Mask(key), credentials.DisplayPath)
 
 	return askRoles(c, in, name, runnerName, provider, preset.DefaultModel, models)
+}
+
+// connectRankings saves the Artificial Analysis key. It is a data source, not
+// an LLM provider, so no role is changed and the key is not tested: a test
+// would use one of the 100 daily requests.
+func connectRankings(c connectIO, in lineReader) error {
+	key, err := readKey(c, in, credentials.ArtificialAnalysis)
+	if err != nil {
+		return err
+	}
+	if err := credentials.Set(credentials.ArtificialAnalysis, credentials.Cred{APIKey: key}); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(c.Out, "Saved %s key (%s) to %s\nRun: decsr models rank\n", credentials.ArtificialAnalysis, credentials.Mask(key), credentials.DisplayPath)
+	return nil
 }
 
 // askCustom collects the name and base URL of a custom provider.

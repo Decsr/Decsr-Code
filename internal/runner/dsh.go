@@ -225,6 +225,9 @@ func (r DshRunner) run(ctx context.Context, prompt, dir string, o dshOptions, on
 	return p.failure(waitErr, strings.TrimSpace(stderr.String()))
 }
 
+// MapDshEffort is mapDshEffort for callers outside the package.
+func MapDshEffort(effort string) string { return mapDshEffort(effort) }
+
 // mapDshEffort maps a decsr effort to the DeepSeek vocabulary (off, low, high,
 // max); "" stays unset.
 func mapDshEffort(effort string) string {

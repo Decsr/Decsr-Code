@@ -667,6 +667,9 @@ func (m workspaceModel) feedLayout(pw int) (lines []string, spans map[string][2]
 			o := cardOpts{g: m.g, n: n, width: cw, selected: n.ID == m.sel, expanded: m.feedExpanded[n.ID],
 				now: m.now(), spin: spin, icons: m.cfg.UI.Icons, iso: m.iso != nil,
 				runner: runners[n.Role], model: models[n.Role]}
+			if rn, md := m.nodeLook(n); rn != "" {
+				o.runner, o.model = rn, md
+			}
 			if n.Status == workspace.StatusRunning || o.expanded || n.Status == workspace.StatusDone || n.Status == workspace.StatusFailed || n.Status == workspace.StatusWaiting {
 				o.out = m.outputs[n.ID]
 				if p := cleanOutputLine(m.partial[n.ID]); p != "" && n.Status == workspace.StatusRunning {
@@ -696,6 +699,14 @@ func (m workspaceModel) feedLayout(pw int) (lines []string, spans map[string][2]
 			spans[revKey] = [2]int{start, len(lines)}
 		}
 		prevSystem = isSystem
+	}
+	if card, ok := m.approvalCardData(); ok && !m.splitting {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		for _, l := range renderApprovalCard(card, cw) {
+			lines = append(lines, pad+l)
+		}
 	}
 	if m.splitting {
 		spin := pixelSpinner.Frames[m.spin%len(pixelSpinner.Frames)]

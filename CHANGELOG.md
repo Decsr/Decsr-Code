@@ -7,7 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- claude runner on a subscription login: `decsr automation install` prints a
+  warning that cites Anthropic's Consumer Terms and usage policy and asks for
+  confirmation (`--yes` accepts it; without a terminal it refuses without
+  `--yes`), and `automation run` is refused unless the automation sets
+  `allow_subscription: true`. A node that hit a usage limit is no longer
+  retried by itself on a subscription login (press `r`);
+  `workspace.limit_auto_retry` overrides this. `decsr doctor` has a `claude
+  auth` line. An API key, Bedrock, Vertex, Foundry or `apiKeyHelper` counts as
+  API use and keeps the old behaviour.
+
 ### Added
+- Workspace: approval card for agent routing. After a split one card lists
+  each node with its grade, `runner · model · effort`, a marker against the
+  role's agent, the estimated cost and the reason. `y` approves and starts the
+  runnable nodes, `n` cancels the split, `↑↓` select and `e` edits the agent
+  of a node (runner, model, effort, with the balance and cost of each choice
+  and a warning, not a block, when a pick costs more than the role's agent).
+  `/approve` and `/reject` do the same from the prompt, and `/routing [mode]`
+  shows or sets the routing mode for the session and `project.yaml`.
+- Workspace: agent routing. `routing.mode` is `manual` (default: nodes use the
+  role's agent), `auto-role` (a cheaper model or effort of the role's own
+  runner) or `auto-connected` (any connected runner). In the two auto modes
+  the lead grades each sub-task small, medium or large with a one-line reason,
+  and decsr picks the (runner, model, effort) pair with the best balance score
+  that costs no more than the role's own pair per task, keeps at least 30
+  intelligence for small and 85% of the role's for medium, and leaves large
+  nodes on the role's agent. Every split, in all three modes, waits for the
+  approval of the proposed agents before anything starts (`y` approves, `n`
+  cancels the split); unattended runs approve by themselves unless
+  `routing.auto_approve` is `false`. A node whose picked runner is not
+  connected, or that hits a rate limit on its first call, runs on the role's
+  agent and records why. The mode is saved in the profile, `project.yaml` and
+  the session, and each node keeps its pick.
+- Model rankings: `decsr connect artificialanalysis` saves an Artificial
+  Analysis key, `decsr models rank [--json]` and `/rank` in the Workspace fetch
+  the rankings on demand, save them to `~/.decsr/rankings.json` and show every
+  (model, effort) pair with a balance score, the request count and the models
+  that map to no runner. Missing efforts are estimated (`~`); without a key a
+  built-in relative-tier table is shown. New config: `routing.aliases`,
+  `routing.weights`, `routing.fallback`. Data: Artificial Analysis
+  (artificialanalysis.ai).
 - Workspace: a live view of a running node. A pane under the graph shows the
   running line (runner, model, effort, time, tokens in and out), the last steps
   and the files edited so far; `v` hides it. `Enter` on a node now opens a
@@ -38,6 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its Mode field.
 
 ### Fixed
+- `decsr models rank` and `/rank` print the Artificial Analysis credit only when
+  the table shows Artificial Analysis data, not for the built-in fallback tiers.
 - Claude agent mode no longer refuses `cmake --preset ...`, a cmake or ctest
   called by absolute path, or chains such as `ls; cat file | head`. The allow
   list now holds the program of each part of the build and test commands plus

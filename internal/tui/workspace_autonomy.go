@@ -181,6 +181,10 @@ func (m workspaceModel) autoAfterGraph() (workspaceModel, tea.Cmd) {
 		return m, nil
 	}
 	m.g = m.eng.Snapshot()
+	var wait bool
+	if m, wait = m.autoApproveAgents(); wait {
+		return m, nil
+	}
 	before := unassignedWork(m.g)
 	m = m.acceptRoles()
 	left := unassignedWork(m.g)

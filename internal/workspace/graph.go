@@ -67,18 +67,25 @@ type Node struct {
 	Commit        string     `json:"commit,omitempty"`     // the node's own commit when it ran in a worktree; reachable through the session branch
 	Warnings      []string   `json:"warnings,omitempty"`
 	Skills        []string   `json:"skills,omitempty"` // plugin skill ids the lead chose for this node
-	Spec          *SpecRef   `json:"spec,omitempty"`   // the Spec Kit task this node was imported from
-	Error         string     `json:"error,omitempty"`
-	InputTokens   int        `json:"input_tokens,omitempty"`  // the whole prompt, cached part included; live while the node runs
-	CachedTokens  int        `json:"cached_tokens,omitempty"` // part of InputTokens served from or written to a prompt cache
-	OutputTokens  int        `json:"output_tokens,omitempty"`
-	Model         string     `json:"model,omitempty"`  // model of the current attempt: the role's, replaced by the one the runner reports
-	Effort        string     `json:"effort,omitempty"` // reasoning effort of the role; "" = provider default
-	Estimated     bool       `json:"estimated,omitempty"`
-	CostUSD       float64    `json:"cost_usd,omitempty"`   // priced from the configured prices, added up over every attempt; 0 when unknown
-	CostKnown     bool       `json:"cost_known,omitempty"` // a price was found for the node's model
-	StartedAt     time.Time  `json:"started_at,omitempty"`
-	EndedAt       time.Time  `json:"ended_at,omitempty"`
+	// Difficulty is the lead's grade (small, medium or large) and
+	// DifficultyReason its one-line reason; both are set only when routing is on.
+	Difficulty       string `json:"difficulty,omitempty"`
+	DifficultyReason string `json:"difficulty_reason,omitempty"`
+	// Assign is the agent chosen for this node by routing (or by hand). nil =
+	// the role's own agent. Model and Effort below are what the runner reported.
+	Assign       *AgentAssign `json:"assign,omitempty"`
+	Spec         *SpecRef     `json:"spec,omitempty"` // the Spec Kit task this node was imported from
+	Error        string       `json:"error,omitempty"`
+	InputTokens  int          `json:"input_tokens,omitempty"`  // the whole prompt, cached part included; live while the node runs
+	CachedTokens int          `json:"cached_tokens,omitempty"` // part of InputTokens served from or written to a prompt cache
+	OutputTokens int          `json:"output_tokens,omitempty"`
+	Model        string       `json:"model,omitempty"`  // model of the current attempt: the role's, replaced by the one the runner reports
+	Effort       string       `json:"effort,omitempty"` // reasoning effort of the role; "" = provider default
+	Estimated    bool         `json:"estimated,omitempty"`
+	CostUSD      float64      `json:"cost_usd,omitempty"`   // priced from the configured prices, added up over every attempt; 0 when unknown
+	CostKnown    bool         `json:"cost_known,omitempty"` // a price was found for the node's model
+	StartedAt    time.Time    `json:"started_at,omitempty"`
+	EndedAt      time.Time    `json:"ended_at,omitempty"`
 
 	// Activity is the journal of the current attempt: at most maxNodeActivity
 	// items, each Detail clipped to maxStoredDetail runes. ActivityDropped counts
@@ -364,7 +371,19 @@ func (g *Graph) Assigned(n *Node) bool {
 func (g *Graph) Runnable() []*Node {
 	var out []*Node
 	for _, n := range g.Nodes {
-		if n.Status == StatusTodo && g.Assigned(n) && len(g.Blockers(n.ID)) == 0 {
+		if n.Status == StatusTodo && g.Assigned(n) && !n.AwaitingApproval() && len(g.Blockers(n.ID)) == 0 {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// PendingApproval returns the work nodes whose agent assignment waits for the
+// user's approval, in Nodes order.
+func (g *Graph) PendingApproval() []*Node {
+	var out []*Node
+	for _, n := range g.Nodes {
+		if n.AwaitingApproval() {
 			out = append(out, n)
 		}
 	}
@@ -451,6 +470,7 @@ func (g *Graph) Clone() *Graph {
 			sr := *n.Spec
 			nn.Spec = &sr
 		}
+		nn.Assign = n.Assign.clone()
 		if n.Limit != nil {
 			l := *n.Limit
 			nn.Limit = &l
@@ -652,6 +672,7 @@ func (g *Graph) Append(add *Graph, nextID int) (newNext int, idMap map[string]st
 		c.Activity = append([]runner.Activity(nil), n.Activity...)
 		c.Attempts = cloneAttempts(n.Attempts)
 		c.Report = cloneReport(n.Report)
+		c.Assign = n.Assign.clone()
 		g.Nodes = append(g.Nodes, &c)
 	}
 	g.ReviewRounds = 0
