@@ -59,7 +59,7 @@ func (g *Graph) SpentUSD() float64 {
 
 // BudgetReachedMsg is the message shown when the budget stops new nodes.
 func BudgetReachedMsg(spent, limit float64) string {
-	return fmt.Sprintf("Budget reached: $%.2f of $%.2f — raise workspace.budget_usd or /budget <amount> to continue", spent, limit)
+	return fmt.Sprintf("Budget reached: $%.2f of $%.2f — raise workspace.budget_usd or /usage budget <amount> to continue", spent, limit)
 }
 
 // budgetStateLocked is the budget in force and the known cost so far.

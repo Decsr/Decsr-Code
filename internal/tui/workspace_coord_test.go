@@ -271,16 +271,16 @@ func TestCoordRoundLimitAndManualReview(t *testing.T) {
 	if r.m.reviewing || r.eng.ReviewRounds() != 5 {
 		t.Fatal("a sixth review started by itself")
 	}
-	if !r.notes.has(notify.NeedsYou, "5 lead reviews done for this task — /review to continue") {
+	if !r.notes.has(notify.NeedsYou, "5 lead reviews done for this task — /coordinator now to continue") {
 		t.Errorf("no NeedsYou note: %+v", r.notes.notes)
 	}
-	r.want("5 lead reviews done for this task — /review to continue")
-	// /review runs one anyway and counts it.
+	r.want("5 lead reviews done for this task — /coordinator now to continue")
+	// /coordinator now runs one anyway and counts it.
 	r.m.setFocus(wsFocusPrompt)
-	r.m.input.SetValue("/review")
+	r.m.input.SetValue("/coordinator now")
 	cmd := r.key("enter")
 	if !r.m.reviewing || r.eng.ReviewRounds() != 6 {
-		t.Fatalf("/review did not start (reviewing %v, rounds %d)", r.m.reviewing, r.eng.ReviewRounds())
+		t.Fatalf("/coordinator now did not start (reviewing %v, rounds %d)", r.m.reviewing, r.eng.ReviewRounds())
 	}
 	msg := runForReview(t, cmd)
 	if r.calls() != 1 {
@@ -292,10 +292,8 @@ func TestCoordRoundLimitAndManualReview(t *testing.T) {
 		t.Error("the bypass lasted longer than one review")
 	}
 	// Manual review is refused while one waits, runs, or the budget is reached.
-	r.typeCmd("/review y")
+	r.answerReview("y")
 	r.want("No lead review is waiting")
-	r.typeCmd("/review x")
-	r.want("usage: /review [y|n]")
 }
 
 func TestCoordRoundsResetOnNewTask(t *testing.T) {
@@ -391,16 +389,16 @@ func TestCoordYNKeysOnlyWhilePending(t *testing.T) {
 	}
 	r.settle(workspace.EventFailed, "T2")
 	r.deliver(workspace.ReviewResult{Proposals: coordProposals})
-	// From the prompt the keys are text; /review y answers.
+	// From the prompt the keys are text.
 	r.m.setFocus(wsFocusPrompt)
 	r.key("y")
 	if r.m.input.Value() != "y" || r.m.pendingReview() < 0 {
 		t.Fatal("y in the prompt must stay text")
 	}
 	r.m.input.Reset()
-	r.typeCmd("/review y")
+	r.answerReview("y")
 	if r.m.pendingReview() >= 0 || r.m.g.Node("T4") == nil {
-		t.Error("/review y did not apply")
+		t.Error("the review was not applied")
 	}
 }
 
@@ -485,7 +483,7 @@ func TestCoordReviewErrorAndCancel(t *testing.T) {
 		t.Fatal("a failed review must not start again by itself")
 	}
 	r.m.setFocus(wsFocusPrompt)
-	r.typeCmd("/review")
+	r.typeCmd("/coordinator now")
 	if !r.m.reviewing {
 		t.Fatal("no review")
 	}
@@ -586,4 +584,12 @@ func TestRemovedCostCountsInSpendAndBudget(t *testing.T) {
 	if r.m.use().spent < 2 || !r.m.budgetReached() {
 		t.Errorf("spent after compact = %v", r.m.use().spent)
 	}
+}
+
+// answerReview applies ("y") or rejects ("n") the waiting lead review the way
+// the y and n keys do.
+func (h *coordRig) answerReview(arg string) {
+	h.t.Helper()
+	m, _ := h.m.cmdReview(arg)
+	h.m = m.(workspaceModel)
 }

@@ -20,17 +20,7 @@ type OpenCodeRunner struct {
 
 // Complete implements LLMRunner by running the OpenCode CLI with `opencode run`.
 func (r OpenCodeRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan Token, error) {
-	var sb strings.Builder
-	if req.SystemPrompt != "" {
-		sb.WriteString(req.SystemPrompt)
-		sb.WriteString("\n\n")
-	}
-	for _, m := range req.Messages {
-		sb.WriteString(strings.ToUpper(m.Role))
-		sb.WriteString(":\n")
-		sb.WriteString(m.Content)
-		sb.WriteString("\n\n")
-	}
+	prompt := cliPrompt(req)
 
 	model := req.Model
 	if model == "" {
@@ -40,9 +30,8 @@ func (r OpenCodeRunner) Complete(ctx context.Context, req CompletionRequest) (<-
 	ch := make(chan Token, 16)
 	go func() {
 		defer close(ch)
-		prompt := sb.String()
 		parser := newOpenCodeParser()
-		raw, err := r.runStream(ctx, prompt, model, NormalizeEffort(req.Effort), req.Dir, func(line []byte) {
+		raw, err := r.runStream(ctx, prompt, model, NormalizeEffort(req.Effort), req.Dir, req.ResumeID, func(line []byte) {
 			for _, tok := range parser.feed(line) {
 				ch <- tok
 			}
@@ -58,17 +47,20 @@ func (r OpenCodeRunner) Complete(ctx context.Context, req CompletionRequest) (<-
 		}
 		ch <- Token{Done: true, Usage: &usage}
 	}()
+	if req.ResumeID != "" {
+		return resumeGuard(ch), nil
+	}
 	return ch, nil
 }
 
 // runRaw runs opencode to completion and returns its whole stdout.
 func (r OpenCodeRunner) runRaw(ctx context.Context, prompt, model, effort, dir string) ([]byte, error) {
-	return r.runStream(ctx, prompt, model, effort, dir, nil)
+	return r.runStream(ctx, prompt, model, effort, dir, "", nil)
 }
 
 // runStream runs opencode and calls onLine for every stdout line as soon as it
 // is written. It returns the whole stdout once the process has exited.
-func (r OpenCodeRunner) runStream(ctx context.Context, prompt, model, effort, dir string, onLine func([]byte)) ([]byte, error) {
+func (r OpenCodeRunner) runStream(ctx context.Context, prompt, model, effort, dir, resumeID string, onLine func([]byte)) ([]byte, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "opencode"
@@ -93,6 +85,9 @@ func (r OpenCodeRunner) runStream(ctx context.Context, prompt, model, effort, di
 	}
 
 	args = append(args, "-m", model)
+	if resumeID != "" {
+		args = append(args, "--session", resumeID)
+	}
 	// Prompt is piped via stdin to avoid macOS ARG_MAX limits on large prompts.
 	args = append(args, "-")
 

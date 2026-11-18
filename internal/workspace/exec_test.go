@@ -298,7 +298,7 @@ func TestExecCurrentFilesBudgets(t *testing.T) {
 	}
 	i := strings.Index(p, "## Current files")
 	section := p[i:]
-	if len(section) > 125*1024 {
+	if len(section) > 26*1024 {
 		t.Errorf("section is %d bytes, over the budget", len(section))
 	}
 	if !strings.Contains(section, "not shown") || !strings.Contains(section, "f7.txt") {
@@ -884,5 +884,22 @@ func TestExecAgentModeAddsTheNodesExtraAllowedCommands(t *testing.T) {
 	}
 	if len(ex.cfg.Project.AllowedCommands) != 1 {
 		t.Errorf("the project list was changed: %v", ex.cfg.Project.AllowedCommands)
+	}
+}
+
+func TestExecContextDependsOnRunnerAndMode(t *testing.T) {
+	f := &execFake{text: "x"}
+	ex := newTestExec(t, config.DefaultConfig(), f, nil)
+	var gotMode []bool
+	ex.contextFor = func(_ string, agentMode bool) string {
+		gotMode = append(gotMode, agentMode)
+		return "CTX-FOR-NODE"
+	}
+	g := &Graph{Nodes: []*Node{{ID: "T1", Title: "t", Kind: KindWork, Role: "coder"}}}
+	if _, err := ex.Run(context.Background(), g, g.Nodes[0], func(Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	if len(gotMode) != 1 || !strings.Contains(f.reqs[0].SystemPrompt, "CTX-FOR-NODE") {
+		t.Fatalf("modes %v, prompt lacks the node's context", gotMode)
 	}
 }

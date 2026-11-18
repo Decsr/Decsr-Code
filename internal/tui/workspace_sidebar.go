@@ -110,7 +110,7 @@ func (m workspaceModel) nodeRows(n *workspace.Node, w int, on bool, models, runn
 		l2 = sbSeg("    checks", ui.Muted, false, on)
 	case n.Role == "":
 		if n.SuggestedRole != "" {
-			l2 = sbSeg("    → "+n.SuggestedRole, ui.Muted, false, on)
+			l2 = sbSeg("    → ", ui.Muted, false, on) + sbSeg(n.SuggestedRole, ui.RoleColor(n.SuggestedRole), false, on)
 		} else {
 			l2 = sbSeg("    unassigned", ui.Warn, false, on)
 		}

@@ -28,16 +28,20 @@ type ClaudeRunner struct {
 func (r ClaudeRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan Token, error) {
 	prompt := buildClaudePrompt(req.Messages)
 
-	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, prompt, req.SystemPrompt, NormalizeEffort(req.Effort), req.Dir, req.Agent, req.MCP, req.AllowedTools)
+	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, prompt, req.SystemPrompt, NormalizeEffort(req.Effort), req.Dir, req.Agent, req.MCP, req.AllowedTools, req.KeepSession || req.ResumeID != "", req.ResumeID)
 	if err != nil {
 		return nil, err
 	}
 
 	ch := make(chan Token, 16)
 	go streamClaudeOutput(cmd, stdout, stderr, req, prompt, ch)
+	var out <-chan Token = ch
+	if req.ResumeID != "" {
+		out = resumeGuard(out)
+	}
 	// Claude streams tool-use steps, but stretches of silent work still happen;
 	// a heartbeat keeps the UI alive so the run never looks frozen.
-	return withHeartbeat(ch, defaultHeartbeatInterval), nil
+	return withHeartbeat(out, defaultHeartbeatInterval), nil
 }
 
 // claudeBaseArgs is the fixed part of the argument list. Text mode turns every
@@ -49,14 +53,20 @@ func (r ClaudeRunner) Complete(ctx context.Context, req CompletionRequest) (<-ch
 // own servers load) and only the project and local settings, so a worker does
 // not pay for the user's global setup. --bare is not used: it breaks
 // subscription logins.
-func claudeBaseArgs(agent, mcp bool, allowed []string) []string {
-	args := []string{"--output-format", "stream-json", "--verbose", "--no-session-persistence"}
+//
+// A one-shot call does not keep its session (--no-session-persistence); a call
+// with keep set does, so a later one can resume it with --resume.
+func claudeBaseArgs(agent, mcp bool, allowed []string, keep bool) []string {
+	args := []string{"--output-format", "stream-json", "--verbose"}
+	if !keep {
+		args = append(args, "--no-session-persistence")
+	}
 	if !mcp {
 		args = append(args, "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`)
 	}
 	args = append(args, "--setting-sources", "project,local")
 	if !agent {
-		return append(args, "--allowedTools", "")
+		return append(args, "--tools", "")
 	}
 	return append(args,
 		"--tools", strings.Join(claudeToolNames(allowed), ","),
@@ -164,13 +174,16 @@ func buildClaudePrompt(messages []ConvMessage) string {
 	return sb.String()
 }
 
-func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, effort, dir string, agent, mcp bool, allowed []string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
+func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, effort, dir string, agent, mcp bool, allowed []string, keep bool, resumeID string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "claude"
 	}
 
-	args := claudeBaseArgs(agent, mcp, allowed)
+	args := claudeBaseArgs(agent, mcp, allowed, keep)
+	if resumeID != "" {
+		args = append(args, "--resume", resumeID)
+	}
 	args = append(args, "--model", EffectiveModel("claude", r.Model))
 	args = append(args, "--effort", mapClaudeEffort(EffectiveEffort("claude", effort)))
 	if systemPrompt != "" {
@@ -234,8 +247,8 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 		}
 		switch evt.Type {
 		case "system":
-			if evt.Subtype == "init" && evt.Model != "" {
-				ch <- Token{Model: evt.Model}
+			if evt.Subtype == "init" && (evt.Model != "" || evt.SessionID != "") {
+				ch <- Token{Model: evt.Model, SessionID: evt.SessionID}
 			}
 		case "assistant":
 			if p := liveUsage.add(evt.Message); p != nil {
@@ -351,13 +364,15 @@ func computeDelta(already, next string) string {
 
 // claudeStreamEvent is one NDJSON line from `--output-format stream-json`.
 type claudeStreamEvent struct {
-	Type    string                  `json:"type"`
-	Subtype string                  `json:"subtype"` // "init" on a system event
-	Model   string                  `json:"model"`   // system init: the model in use
-	Message claudeStreamMessage     `json:"message"`
-	Result  string                  `json:"result"`
-	IsError bool                    `json:"is_error"`
-	Usage   claudeStreamUsageFields `json:"usage"`
+	Type    string `json:"type"`
+	Subtype string `json:"subtype"` // "init" on a system event
+	Model   string `json:"model"`   // system init: the model in use
+	// SessionID is set on the system init event: the id --resume takes.
+	SessionID string                  `json:"session_id"`
+	Message   claudeStreamMessage     `json:"message"`
+	Result    string                  `json:"result"`
+	IsError   bool                    `json:"is_error"`
+	Usage     claudeStreamUsageFields `json:"usage"`
 	// PermissionDenials is set on the result event: the tool calls the
 	// permission mode refused.
 	PermissionDenials []claudePermissionDenial `json:"permission_denials"`

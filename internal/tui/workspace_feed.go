@@ -188,19 +188,32 @@ func renderFeedMsg(who, text string, at time.Time, w int) []string {
 		for _, l := range hardWrap(text, w-2) {
 			out = append(out, "  "+lipgloss.NewStyle().Foreground(ui.Text).Render(l))
 		}
-	case "system":
+	case "system", "ok", "warn":
+		kind := ui.ResultInfo
+		if who != "system" {
+			kind = who
+		}
+		glyph, col := ui.ResultGlyph(kind)
+		body := dim
+		switch kind {
+		case ui.ResultOK:
+			body = lipgloss.NewStyle().Foreground(ui.Text)
+		case ui.ResultWarn:
+			body = lipgloss.NewStyle().Foreground(ui.Warn)
+		}
 		for i, l := range hardWrap(text, w-2) {
-			p := "  "
 			if i == 0 {
-				p = "· "
+				out = append(out, lipgloss.NewStyle().Foreground(col).Bold(true).Render(glyph)+" "+body.Render(l))
+			} else {
+				out = append(out, body.Render("  "+l))
 			}
-			out = append(out, dim.Render(p+l))
 		}
 	default:
+		glyph, _ := ui.ResultGlyph(ui.ResultError)
 		for i, l := range hardWrap(text, w-2) {
 			p := "  "
 			if i == 0 {
-				p = "! "
+				p = glyph + " "
 			}
 			out = append(out, lipgloss.NewStyle().Foreground(ui.Fail).Render(p+l))
 		}
@@ -662,7 +675,7 @@ func (m workspaceModel) feedLayout(pw int) (lines []string, spans map[string][2]
 				body = renderFeedMsg(it.Who, it.Text, it.At, cw)
 				m.feedCache.put(key, body)
 			}
-			isSystem = it.Who == "system"
+			isSystem = it.Who == "system" || it.Who == "ok" || it.Who == "warn"
 		case feedNode:
 			n := m.g.Node(it.Node)
 			if n == nil {

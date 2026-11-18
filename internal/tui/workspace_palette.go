@@ -266,8 +266,8 @@ func (m workspaceModel) paletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // information or open a list. Every other command, including all that push,
 // merge, install, delete, clear, write or call a model, is put in the prompt.
 var palRunNow = map[string]bool{
-	"/help": true, "/status": true, "/cost": true, "/budget": true,
-	"/roles": true, "/resume": true, "/project": true, "/profile": true,
+	"/help": true, "/status": true, "/usage": true,
+	"/roles": true, "/resume": true, "/project": true,
 }
 
 // runsNow reports whether the palette may run c without the user pressing

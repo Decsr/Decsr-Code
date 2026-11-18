@@ -103,6 +103,12 @@ func parseCodexConfigModel(data string) string {
 func (r CodexRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan Token, error) {
 	var userContent strings.Builder
 	for _, m := range req.Messages {
+		if req.ResumeID != "" {
+			// The conversation has the roles already: only the new message.
+			userContent.WriteString(m.Content)
+			userContent.WriteString("\n")
+			continue
+		}
 		userContent.WriteString(strings.ToUpper(m.Role))
 		userContent.WriteString(":\n")
 		userContent.WriteString(m.Content)
@@ -114,18 +120,26 @@ func (r CodexRunner) Complete(ctx context.Context, req CompletionRequest) (<-cha
 		model = r.Model
 	}
 
-	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, userContent.String(), req.SystemPrompt, model, NormalizeEffort(req.Effort), req.Dir, req.Agent)
+	sys := req.SystemPrompt
+	if req.ResumeID != "" {
+		// codex stored the system prompt in the first message of the thread.
+		sys = ""
+	}
+	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, userContent.String(), sys, model, NormalizeEffort(req.Effort), req.Dir, req.Agent, req.ResumeID)
 	if err != nil {
 		return nil, err
 	}
 
 	ch := make(chan Token, 16)
-	fullInput := req.SystemPrompt + "\n\n" + userContent.String()
+	fullInput := sys + "\n\n" + userContent.String()
 	go streamCodexOutput(cmd, stdout, stderr, model, fullInput, ch)
+	if req.ResumeID != "" {
+		return resumeGuard(ch), nil
+	}
 	return ch, nil
 }
 
-func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, model, effort, dir string, agent bool) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
+func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, model, effort, dir string, agent bool, resumeID string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "codex"
@@ -143,12 +157,15 @@ func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPr
 	if agent {
 		sandbox = "workspace-write"
 	}
-	args := []string{"exec", "--sandbox", sandbox, "--json"}
+	args := codexArgs(sandbox, resumeID)
 	if model != "" {
 		args = append(args, "--model", model)
 	}
 	if effort != "" {
 		args = append(args, "-c", `model_reasoning_effort="`+mapCodexEffort(effort)+`"`)
+	}
+	if resumeID != "" {
+		args = append(args, resumeID, "-")
 	}
 	// Prompt is piped via stdin to avoid macOS ARG_MAX limits on large prompts.
 
@@ -168,6 +185,15 @@ func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPr
 	return cmd, stdout, stderr, nil
 }
 
+// codexArgs is the start of the argument list. `codex exec resume` takes no
+// --sandbox flag, so a resumed run sets the sandbox through -c.
+func codexArgs(sandbox, resumeID string) []string {
+	if resumeID == "" {
+		return []string{"exec", "--sandbox", sandbox, "--json"}
+	}
+	return []string{"exec", "resume", "--json", "-c", `sandbox_mode="` + sandbox + `"`}
+}
+
 // streamCodexOutput reads the JSONL event stream of `codex exec --json` while
 // the CLI runs, emits an Activity per item, and delivers the last agent message
 // (what plain `codex exec` prints) as Text when the stream ends. The final
@@ -177,11 +203,16 @@ func streamCodexOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffer
 
 	p := newCodexParser()
 	br := bufio.NewReader(stdout)
+	sentSession := false
 	for {
 		line, readErr := br.ReadBytes('\n')
 		if t := bytes.TrimSpace(line); len(t) > 0 {
 			for _, a := range p.feed(t, time.Now()) {
 				ch <- Token{Activity: a}
+			}
+			if p.threadID != "" && !sentSession {
+				sentSession = true
+				ch <- Token{SessionID: p.threadID}
 			}
 			if p.progress != nil {
 				ch <- Token{Progress: p.progress}

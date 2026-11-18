@@ -95,7 +95,7 @@ func TestRenderFeedMsgWrapsAndLabels(t *testing.T) {
 	if !strings.HasPrefix(you, "You") || !strings.HasPrefix(lead, "Lead") || !strings.Contains(you, feedClock(feedT0)) {
 		t.Errorf("labels: %q %q", you, lead)
 	}
-	if sys := ansi.Strip(renderFeedMsg("system", "note", feedT0, 40)[0]); !strings.HasPrefix(sys, "· note") {
+	if sys := ansi.Strip(renderFeedMsg("system", "note", feedT0, 40)[0]); !strings.HasPrefix(sys, "› note") {
 		t.Errorf("system = %q", sys)
 	}
 }

@@ -137,22 +137,17 @@ func TestEditorEscCancelsAndShowsRankings(t *testing.T) {
 	}
 }
 
-func TestApproveAndRejectCommands(t *testing.T) {
-	h := routingHarness(t, config.RoutingAutoRole)
-	h.toGraph()
-	h.key("A")
-	h.key("c")
-	h.typeCmd("/approve")
-	if len(pendingIDs(h)) != 0 || h.status("T1") != workspace.StatusRunning {
-		t.Fatalf("/approve: pending %v, T1 %s", pendingIDs(h), h.status("T1"))
-	}
-
-	h = routingHarness(t, config.RoutingAutoRole)
-	h.toGraph()
-	h.key("c")
-	h.typeCmd("/reject")
-	if h.m.g.Node("T1") != nil || len(pendingIDs(h)) != 0 {
-		t.Fatal("/reject did not cancel the split")
+func TestApproveAndRejectCommandsMoved(t *testing.T) {
+	for _, c := range []string{"/approve", "/reject"} {
+		h := routingHarness(t, config.RoutingAutoRole)
+		h.toGraph()
+		h.key("A")
+		h.key("c")
+		h.typeCmd(c)
+		h.want(c + " has moved: use y / n on the plan card")
+		if len(pendingIDs(h)) == 0 {
+			t.Fatalf("%s must run nothing", c)
+		}
 	}
 }
 

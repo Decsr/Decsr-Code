@@ -33,18 +33,7 @@ const (
 // Complete implements LLMRunner. The system prompt and the messages go to dsh
 // as one task on stdin, like the opencode runner.
 func (r DshRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan Token, error) {
-	var sb strings.Builder
-	if req.SystemPrompt != "" {
-		sb.WriteString(req.SystemPrompt)
-		sb.WriteString("\n\n")
-	}
-	for _, m := range req.Messages {
-		sb.WriteString(strings.ToUpper(m.Role))
-		sb.WriteString(":\n")
-		sb.WriteString(m.Content)
-		sb.WriteString("\n\n")
-	}
-	prompt := sb.String()
+	prompt := cliPrompt(req)
 
 	model := req.Model
 	if model == "" {
@@ -52,7 +41,7 @@ func (r DshRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan 
 	}
 	effort := NormalizeEffort(req.Effort)
 
-	opts := dshOptions{Agent: req.Agent, ReadOnly: req.ReadOnly}
+	opts := dshOptions{Agent: req.Agent, ReadOnly: req.ReadOnly, ResumeID: req.ResumeID}
 	if req.Agent && !req.ReadOnly {
 		opts.GitDir = dshGitCommonDir(req.Dir)
 	}
@@ -99,7 +88,11 @@ func (r DshRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan 
 	}()
 	// A step's text arrives only when the step commits, so a long step is
 	// silent; a heartbeat keeps the UI alive.
-	return withHeartbeat(ch, defaultHeartbeatInterval), nil
+	var out <-chan Token = ch
+	if req.ResumeID != "" {
+		out = resumeGuard(out)
+	}
+	return withHeartbeat(out, defaultHeartbeatInterval), nil
 }
 
 // dshOptions are the inputs of the dsh argument list.
@@ -108,6 +101,7 @@ type dshOptions struct {
 	ReadOnly  bool   // the role reports only
 	GitDir    string // absolute shared git directory granted to a writing agent; "" = none
 	PatchFile string // YAML patch overlay; "" = none
+	ResumeID  string // persisted session to adopt; "" = a new session
 }
 
 // dshArgs builds the argument list. --profile and --patch belong to the
@@ -121,6 +115,9 @@ func dshArgs(o dshOptions) []string {
 		args = append(args, "--patch", o.PatchFile)
 	}
 	args = append(args, "--json")
+	if o.ResumeID != "" {
+		args = append(args, "--session-id", o.ResumeID)
+	}
 	if o.Agent && !o.ReadOnly {
 		args = append(args, "--permission-mode", "workspace-write", "--approval-policy", "never")
 		if o.GitDir != "" {

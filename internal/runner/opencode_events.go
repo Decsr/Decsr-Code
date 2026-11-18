@@ -34,6 +34,8 @@ type openCodeParser struct {
 	stepIn     int
 	stepCached int
 	stepOut    int
+
+	sessionID string // sessionID of the events: the id --session takes
 }
 
 func newOpenCodeParser() *openCodeParser { return &openCodeParser{} }
@@ -42,8 +44,9 @@ func newOpenCodeParser() *openCodeParser { return &openCodeParser{} }
 // and unknown lines return nothing.
 func (p *openCodeParser) feed(line []byte) []Token {
 	var event struct {
-		Type string `json:"type"`
-		Part struct {
+		Type      string `json:"type"`
+		SessionID string `json:"sessionID"`
+		Part      struct {
 			Text string `json:"text"`
 		} `json:"part"`
 		Usage *struct {
@@ -53,6 +56,10 @@ func (p *openCodeParser) feed(line []byte) []Token {
 	}
 	if err := json.Unmarshal(line, &event); err != nil {
 		return nil
+	}
+	if p.sessionID == "" && event.SessionID != "" && event.Type != "error" {
+		p.sessionID = event.SessionID
+		return append([]Token{{SessionID: p.sessionID}}, p.feed(line)...)
 	}
 	now := time.Now()
 

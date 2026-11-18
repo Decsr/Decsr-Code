@@ -56,7 +56,7 @@ func TestWorkspaceConnectFlow(t *testing.T) {
 		probed = append(probed, base+"|"+key)
 		return []string{"deepseek-v4-flash", "deepseek-v4-pro"}, nil
 	}
-	h.m.input.SetValue("/connect")
+	h.m.input.SetValue("/provider add")
 	h.key("enter")
 	if h.m.overlay != wsOverlayConnect {
 		t.Fatalf("overlay = %v\n%s", h.m.overlay, h.view())
@@ -93,7 +93,7 @@ func TestWorkspaceConnectFlow(t *testing.T) {
 func TestWorkspaceConnectRejectedAndCancel(t *testing.T) {
 	h := newWSHarness(t)
 	h.m.deps.probeKey = func(string, string) ([]string, error) { return nil, &runner.KeyRejectedError{Status: 401} }
-	h.m.input.SetValue("/connect groq")
+	h.m.input.SetValue("/provider add groq")
 	h.key("enter")
 	h.typeKey(tuiKey)
 	h.settle(h.key("enter"))
@@ -114,7 +114,7 @@ func TestWorkspaceConnectRejectedAndCancel(t *testing.T) {
 func TestWorkspaceConnectNetworkErrorSaveAnyway(t *testing.T) {
 	h := newWSHarness(t)
 	h.m.deps.probeKey = func(string, string) ([]string, error) { return nil, errors.New("dial tcp: no route") }
-	h.m.input.SetValue("/connect openrouter")
+	h.m.input.SetValue("/provider add openrouter")
 	h.key("enter")
 	h.typeKey(tuiKey)
 	h.settle(h.key("enter"))
@@ -128,7 +128,7 @@ func TestWorkspaceConnectNetworkErrorSaveAnyway(t *testing.T) {
 func TestWorkspaceConnectCustomValidation(t *testing.T) {
 	h := newWSHarness(t)
 	h.m.deps.probeKey = func(string, string) ([]string, error) { return []string{"x"}, nil }
-	h.m.input.SetValue("/connect custom")
+	h.m.input.SetValue("/provider add custom")
 	h.key("enter")
 	h.typeKey("deepseek")
 	h.key("enter")

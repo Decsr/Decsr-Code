@@ -69,6 +69,13 @@ func runSummary(g *workspace.Graph, ended []string, iso bool, width int) string 
 			lines = append(lines, "· Build & test not run")
 		}
 	}
+	if fu := followUps(g, ended); len(fu) > 0 {
+		lines = append(lines, "Suggested follow-ups")
+		for i, f := range fu {
+			lines = append(lines, fmt.Sprintf("  %d. %s", i+1, f))
+		}
+		lines = append(lines, "  y plan them · n drop")
+	}
 	var next []string
 	if len(waiting) > 0 {
 		next = append(next, "answer "+strings.Join(waiting, ", "))
@@ -90,6 +97,51 @@ func runSummary(g *workspace.Graph, ended []string, iso bool, width int) string 
 		lines[i] = truncateOneLine(l, width)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// followUps are the follow-ups suggested by the nodes in ended (their reports'
+// next lines), each as "T2: <text>", in graph order, a text suggested twice
+// once. A node that failed has no report to read.
+func followUps(g *workspace.Graph, ended []string) []string {
+	in := make(map[string]bool, len(ended))
+	for _, id := range ended {
+		in[id] = true
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, n := range g.Nodes {
+		if n.Kind != workspace.KindWork || !in[n.ID] || n.Report == nil {
+			continue
+		}
+		for _, f := range n.Report.Next {
+			f = oneLine(workspace.SanitizeText(f))
+			key := strings.ToLower(f)
+			if f == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, n.ID+": "+f)
+		}
+	}
+	return out
+}
+
+// followUpTask is the task sent to the lead for the suggested follow-ups.
+func followUpTask(followups []string) string {
+	return "Follow-ups suggested by the finished nodes:\n- " + strings.Join(followups, "\n- ")
+}
+
+// followCard is the card that asks whether to plan the suggested follow-ups.
+func followCard(followups []string, seq int) askCard {
+	c := askCard{
+		Key: fmt.Sprintf("follow:%d", seq), Head: "Suggested follow-ups", Rec: -1,
+		Hint: "y plan them · n drop · Esc later",
+		Opts: []askOpt{{Label: "Plan them", Act: askActPlan, Hot: "y"}, {Label: "Drop them", Act: askActDrop, Hot: "n"}},
+	}
+	for i, f := range followups {
+		c.Body = append(c.Body, fmt.Sprintf("%d. %s", i+1, f))
+	}
+	return c
 }
 
 // summaryText is the one-line summary of a node: its report's, else its own.
@@ -137,6 +189,8 @@ func (m workspaceModel) summaryAfterEvent(ev workspace.Event) workspaceModel {
 	}
 	if text := runSummary(m.g, m.runEnded, m.iso != nil, max(m.mainWidth()-8, 40)); text != "" {
 		m.say("system", text)
+		m.followups = followUps(m.g, m.runEnded)
+		m.followSeq++
 	}
 	m.runEnded = nil
 	return m

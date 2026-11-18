@@ -79,11 +79,12 @@ type wsHarness struct {
 	splitErr  error
 	graph     func() *workspace.Graph
 	checks    []string
-	tasks     []string      // task text of every split call
-	earlier   []string      // "earlier in this session" text of every split call
-	existing  [][]string    // node IDs passed to every split call
-	nexts     []int         // first new number passed to every split call
-	summary   func() string // session summary hook given to the engine
+	tasks     []string               // task text of every split call
+	earlier   []string               // "earlier in this session" text of every split call
+	live      [][]workspace.LiveNode // the live graph handed to every split call
+	existing  [][]string             // node IDs passed to every split call
+	nexts     []int                  // first new number passed to every split call
+	summary   func() string          // session summary hook given to the engine
 	recent    []RecentProject
 	splitCmd  tea.Cmd // command of the split that started last
 	// keepPending leaves the proposed agents of a split unapproved.
@@ -126,11 +127,12 @@ func newWSHarnessAt(t *testing.T, root string) *wsHarness {
 	t.Helper()
 	h := &wsHarness{t: t, root: root, exec: &wsFakeExec{}, graph: wsFixtureGraph, checks: []string{"go build ./...", "go test ./..."}}
 	deps := wsDeps{
-		split: func(_ context.Context, task, earlier string, existing []string, next int, _ bool, _ func(string)) (*workspace.Graph, runner.TokenUsage, error) {
+		split: func(_ context.Context, task, earlier string, existing []string, live []workspace.LiveNode, next int, _ bool, _ func(string)) (*workspace.Graph, runner.TokenUsage, error) {
 			h.tasks = append(h.tasks, task)
 			h.existing = append(h.existing, existing)
 			h.nexts = append(h.nexts, next)
 			h.earlier = append(h.earlier, earlier)
+			h.live = append(h.live, live)
 			if h.splitErr != nil {
 				return nil, runner.TokenUsage{}, h.splitErr
 			}
@@ -378,7 +380,7 @@ func TestWorkspaceSplitErrorKeepsInput(t *testing.T) {
 	h.m.input.SetValue("Build a todo CLI")
 	h.key("enter")
 	h.send(wsSplitDoneMsg{gen: h.m.splitGen, err: errors.New("split: no sub-tasks found")})
-	h.want("! split: no sub-tasks found")
+	h.want("✗ split: no sub-tasks found")
 	if h.m.hasNodes() || h.m.input.Value() != "Build a todo CLI" {
 		t.Fatalf("nodes=%v input=%q", h.m.hasNodes(), h.m.input.Value())
 	}
@@ -642,12 +644,12 @@ func TestWorkspaceOutputKeepsTwoThousandLines(t *testing.T) {
 }
 
 func TestWorkspaceSlashMenuOpensMenu(t *testing.T) {
-	for _, line := range []string{"/menu", "/config"} {
+	for _, line := range []string{"/menu"} {
 		h := newWSHarness(t)
 		for _, r := range line {
 			h.key(string(r))
 		}
-		h.want("/config")
+		h.want("/menu")
 		cmd := h.key("enter")
 		if !h.m.openMenu {
 			t.Fatalf("%s: OpenMenu not set", line)
@@ -684,11 +686,11 @@ func TestWorkspaceUnknownCommand(t *testing.T) {
 	h := newWSHarness(t)
 	h.key("/", "z")
 	h.key("enter")
-	h.want("! unknown command /z — /help lists them")
+	h.want("✗ unknown command /z — /help lists them")
 	h.m.input.Reset()
 	h.m.input.SetValue("/nope with args")
 	h.key("enter")
-	h.want("! unknown command /nope — /help lists them")
+	h.want("✗ unknown command /nope — /help lists them")
 }
 
 func TestWorkspaceResumeLoadsSaved(t *testing.T) {
@@ -882,14 +884,14 @@ func TestWorkspaceViewsFitSize(t *testing.T) {
 			h.typeCmd("/resume")
 		},
 		"project": func(h *wsHarness) { h.key("/", "p", "r", "o", "j", "enter") },
-		"profile": func(h *wsHarness) { h.typeCmd("/profile") },
+		"profile": func(h *wsHarness) { h.typeCmd("/model profile") },
 		"profile-name": func(h *wsHarness) {
-			h.typeCmd("/profile")
+			h.typeCmd("/model profile")
 			h.key("enter")
 			h.key("x", "enter")
 		},
 		"status": func(h *wsHarness) { h.toGraph(); h.key("tab"); h.typeCmd("/status") },
-		"cost":   func(h *wsHarness) { h.toGraph(); h.key("tab"); h.typeCmd("/cost") },
+		"cost":   func(h *wsHarness) { h.toGraph(); h.key("tab"); h.typeCmd("/usage cost") },
 		"plugin": func(h *wsHarness) { h.typeCmd("/plugin") },
 		"custom": func(h *wsHarness) {
 			wsWriteCommand(t, h.root, "review", "# Review the change\nReview $ARGUMENTS")

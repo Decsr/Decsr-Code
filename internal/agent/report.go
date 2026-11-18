@@ -23,7 +23,13 @@ type Report struct {
 	// index of the advised one, 0 for none.
 	Options     []string `json:"options,omitempty"`
 	Recommended int      `json:"recommended,omitempty"`
+	// Next are follow-up tasks outside the node's own sub-task, at most
+	// MaxNext, each "<short imperative title> - <one sentence>".
+	Next []string `json:"next,omitempty"`
 }
+
+// MaxNext is the most follow-ups a report keeps.
+const MaxNext = 3
 
 // Waits reports whether the node must wait for the user: a question or a
 // blocked report.
@@ -40,11 +46,11 @@ func (r Report) Ask() string {
 }
 
 // reportInstruction is appended to every worker prompt.
-const reportInstruction = "\n\nAfter that, END your reply with exactly this block (the last lines of the reply, nothing after it):\n\nREPORT\nstatus: done | blocked | question\nsummary: <one or two sentences>\nquestion: <only when status is question: the exact question for the user>\noptions: <only when status is question: 2 to 4 numbered lines, one per answer>\n1. <option> - <one-line reason or trade-off>\n2. <option> - <...>\nrecommended: <number of the option you recommend>\n\nFor a question, give 2 to 4 options, put the recommended option first and state its number after \"recommended:\". Options are optional for \"blocked\".\n\nUse \"done\" when the sub-task is complete, \"blocked\" when you cannot continue without outside\nhelp (say what in the summary), and \"question\" when you need an answer from the user first."
+const reportInstruction = "\n\nAfter that, END your reply with exactly this block (the last lines of the reply, nothing after it):\n\nREPORT\nstatus: done | blocked | question\nsummary: <one or two sentences>\nquestion: <only when status is question: the exact question for the user>\noptions: <only when status is question: 2 to 4 numbered lines, one per answer>\n1. <option> - <one-line reason or trade-off>\n2. <option> - <...>\nrecommended: <number of the option you recommend>\nnext: <optional, at most 3 lines, one follow-up each: <short imperative title> - <one sentence>>\n\nFor a question, give 2 to 4 options, put the recommended option first and state its number after \"recommended:\". Options are optional for \"blocked\".\n\nUse \"done\" when the sub-task is complete, \"blocked\" when you cannot continue without outside\nhelp (say what in the summary), and \"question\" when you need an answer from the user first."
 
 var (
 	reportMark = regexp.MustCompile("(?i)^[\\s>*_`#-]*report[\\s*_`:#]*$")
-	reportKey  = regexp.MustCompile("(?i)^[\\s>*_`-]*(status|summary|question|options|recommended)[\\s*_`]*:[\\s*_`]*(.*)$")
+	reportKey  = regexp.MustCompile("(?i)^[\\s>*_`-]*(status|summary|question|options|recommended|next)[\\s*_`]*:[\\s*_`]*(.*)$")
 	optionLine = regexp.MustCompile(`^\s*(?:\d+[.)]|[-*])\s+(.+)$`)
 	fenceLine  = regexp.MustCompile("^\\s*(```|~~~)")
 )
@@ -113,6 +119,15 @@ func parseReportBlock(lines []string) (Report, bool) {
 			if o := strings.Trim(strings.TrimSpace(m[1]), "*_` "); o != "" {
 				rep.Options = append(rep.Options, o)
 			}
+		}
+	}
+	for _, l := range vals["next"] {
+		t := strings.TrimSpace(l)
+		if m := optionLine.FindStringSubmatch(l); m != nil {
+			t = m[1]
+		}
+		if t = strings.Trim(strings.TrimSpace(t), "*_` "); t != "" && !strings.HasPrefix(t, "<") && len(rep.Next) < MaxNext {
+			rep.Next = append(rep.Next, t)
 		}
 	}
 	if n, err := strconv.Atoi(strings.Trim(strings.TrimSpace(join("recommended")), ".)")); err == nil && n >= 1 && n <= len(rep.Options) {

@@ -226,8 +226,8 @@ func TestWorkspaceSecondTaskAppends(t *testing.T) {
 		t.Fatalf("sel=%q focus=%v", h.m.sel, h.m.focus)
 	}
 	h.want("split into 2 nodes: T6, T7")
-	if !strings.Contains(h.earlier[1], "T1 Data model [done]") {
-		t.Fatalf("the lead was not told about the current nodes: %q", h.earlier[1])
+	if len(h.live[1]) != 5 || h.live[1][0].ID != "T1" || h.live[1][0].Status != "done" {
+		t.Fatalf("the lead was not told about the current nodes: %+v", h.live[1])
 	}
 	ids := h.sessionIDs()
 	s, _ := workspace.LoadSession(h.root, ids[0])
@@ -236,7 +236,7 @@ func TestWorkspaceSecondTaskAppends(t *testing.T) {
 	}
 }
 
-func TestWorkspaceTaskRefusedWhileRunning(t *testing.T) {
+func TestWorkspaceTaskSentWhileRunning(t *testing.T) {
 	h := newWSHarness(t)
 	h.toGraph()
 	h.key("A", "r")
@@ -244,12 +244,16 @@ func TestWorkspaceTaskRefusedWhileRunning(t *testing.T) {
 	h.key("tab")
 	h.m.input.SetValue("more")
 	h.key("enter")
-	if h.m.splitting {
-		t.Fatal("a task must not be sent while nodes run")
+	if !h.m.splitting {
+		t.Fatal("a task must reach the lead while nodes run")
 	}
-	h.want("Stop the running nodes first")
-	if h.m.input.Value() != "more" {
-		t.Fatal("the text must stay in the box")
+	h.finishSplit()
+	var running bool
+	for _, n := range h.live[len(h.live)-1] {
+		running = running || n.Status == "running"
+	}
+	if !running {
+		t.Fatalf("the lead got no running node in the live graph: %+v", h.live)
 	}
 }
 
@@ -282,8 +286,11 @@ func TestWorkspaceCompactFoldsAndFeedsNextSplit(t *testing.T) {
 	}
 	h.graph = wsSmallGraph
 	h.sendTask("Add search")
-	if !strings.Contains(h.earlier[1], "finished T1") || !strings.Contains(h.earlier[1], "T2 Write docs") {
+	if !strings.Contains(h.earlier[1], "finished T1") {
 		t.Fatalf("the split prompt lacks the summary: %q", h.earlier[1])
+	}
+	if len(h.live[1]) == 0 || h.live[1][0].Title != "Write docs" {
+		t.Fatalf("the split prompt lacks the live nodes: %+v", h.live[1])
 	}
 	if g := h.eng.Snapshot(); g.Node("T6") == nil || g.Node("T1") != nil {
 		t.Fatalf("IDs must continue after compaction: %+v", g.Nodes)
@@ -312,7 +319,7 @@ func TestWorkspaceBusyCommandsRefused(t *testing.T) {
 	h.key("tab")
 	for _, c := range []string{"/compact", "/clear", "/resume", "/project"} {
 		h.typeCmd(c)
-		h.want("! stop the running nodes first")
+		h.want("✗ stop the running nodes first")
 		if h.m.overlay != wsOverlayNone || !h.m.hasNodes() || h.m.quitting {
 			t.Fatalf("%s was not refused", c)
 		}
@@ -441,7 +448,7 @@ func TestWorkspaceLegacyGraphMigratesToASession(t *testing.T) {
 func TestWorkspaceProfileSaveAndApplyRoundTrip(t *testing.T) {
 	h := newWSHarness(t)
 	// Save the current roles.
-	h.typeCmd("/profile")
+	h.typeCmd("/model profile")
 	h.want("save current roles as…")
 	h.key("enter")
 	h.want("Save profile")
@@ -464,7 +471,7 @@ func TestWorkspaceProfileSaveAndApplyRoundTrip(t *testing.T) {
 	h.key("A")
 	h.wantNot("claude:haiku-x")
 	h.key("tab")
-	h.typeCmd("/profile")
+	h.typeCmd("/model profile")
 	h.want("base")
 	h.want("cheap")
 	h.key("down") // base, cheap
@@ -485,17 +492,17 @@ func TestWorkspaceProfileUnknownRunnerRejectedAndDelete(t *testing.T) {
 	if err := config.SaveProfile("bad", map[string]config.AgentConfig{"coder": {Runner: "nope"}}); err != nil {
 		t.Fatal(err)
 	}
-	h.typeCmd("/profile")
+	h.typeCmd("/model profile")
 	h.key("enter")
 	h.want(`unknown runner "nope"`)
 	if h.m.cfg.Project.Profile != "" {
 		t.Fatal("a rejected profile must not be recorded")
 	}
-	h.typeCmd("/profile")
+	h.typeCmd("/model profile")
 	h.key("d")
 	h.want(`Delete profile "bad"? y/n`)
 	h.key("y")
-	if len(config.ListProfiles()) != 0 || h.m.overlay != wsOverlayProfiles {
+	if len(config.ListProfiles()) != 0 || h.m.overlay != wsOverlayPanel {
 		t.Fatalf("profiles = %v overlay=%v", config.ListProfiles(), h.m.overlay)
 	}
 }
@@ -584,21 +591,16 @@ func TestWorkspaceStatusCostExport(t *testing.T) {
 
 	h.typeCmd("/status")
 	h.want("Status")
-	h.want(h.root)
-	h.want("5 todo")
+	h.want("RUNNERS")
 	h.want("Parallel")
-	h.want("/audit (project)")
-	h.want("style")
-	h.want("coder")
+	h.want("shared checkout")
 	h.key("esc")
 
-	h.typeCmd("/cost")
-	h.want("Cost")
+	h.typeCmd("/usage cost")
+	h.want("Usage")
 	h.want("T1")
-	h.want("~1.2k")
-	h.want("By role")
-	h.want("Lead")
-	h.want("Total")
+	h.want("~1,200")
+	h.want("total")
 	h.want("~ marks estimates")
 	h.key("esc")
 
@@ -649,7 +651,7 @@ func TestWorkspaceCustomCommandCannotShadowBuiltin(t *testing.T) {
 	h := newWSHarness(t)
 	wsWriteCommand(t, h.root, "help", "# Fake help\nshadow")
 	h.typeCmd("/help")
-	if !h.m.showHelp || h.m.splitting {
+	if h.m.overlay != wsOverlayHelp || h.m.splitting {
 		t.Fatal("/help must stay the built-in")
 	}
 }

@@ -31,6 +31,8 @@ type codexParser struct {
 	gotUsage  bool
 	progress  *TokenUsage // cumulative usage after the last turn.completed, until taken
 	errorMsgs []string
+
+	threadID string // thread.started: the id `codex exec resume` takes
 }
 
 func newCodexParser() *codexParser {
@@ -74,8 +76,9 @@ func (p *codexParser) feed(line []byte, now time.Time) []*Activity {
 			CachedInputTokens int `json:"cached_input_tokens"`
 			OutputTokens      int `json:"output_tokens"`
 		} `json:"usage"`
-		Message string `json:"message"`
-		Error   *struct {
+		Message  string `json:"message"`
+		ThreadID string `json:"thread_id"`
+		Error    *struct {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
@@ -86,6 +89,10 @@ func (p *codexParser) feed(line []byte, now time.Time) []*Activity {
 	}
 	p.sawJSON = true
 	switch ev.Type {
+	case "thread.started":
+		if p.threadID == "" {
+			p.threadID = ev.ThreadID
+		}
 	case "turn.completed":
 		if ev.Usage != nil {
 			p.usage.InputTokens += ev.Usage.InputTokens

@@ -72,7 +72,7 @@ func (m workspaceModel) requestedAutonomy() int {
 func (m workspaceModel) level3Blocker() string {
 	c, s := m.liveCfg(), m.sess.snapshot()
 	if limit, _ := budgetOf(c, s); limit <= 0 {
-		return "needs a budget: set workspace.budget_usd or /budget first"
+		return "needs a budget: set workspace.budget_usd or /usage budget first"
 	}
 	if m.iso == nil && (m.eng != nil || c.Workspace.Isolation == workspace.IsolationShared) {
 		return "needs worktree isolation: this session works in your checkout directly"

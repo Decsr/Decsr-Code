@@ -256,6 +256,10 @@ func (e *Engine) Assign(id, role string) error {
 			n.Assign.Pending = pending
 		}
 	}
+	if n.Role != role {
+		// The conversation belongs to the old role.
+		n.SessionID, n.SessionRunner, n.SessionAttempt = "", "", 0
+	}
 	n.Role = role
 	err := e.saveLocked()
 	e.mu.Unlock()
@@ -635,6 +639,16 @@ func (e *Engine) runNode(s started) {
 				n.Assign.FallbackNote = ev.Text
 			}
 			e.mu.Unlock()
+			e.emit(ev)
+		case EventSession:
+			e.mu.Lock()
+			if n := e.g.Node(id); n != nil && ev.Text != "" {
+				n.SessionID, n.SessionRunner, n.SessionAttempt = ev.Text, ev.Runner, n.AttemptNumber()
+			}
+			serr := e.saveLocked()
+			e.mu.Unlock()
+			e.reportSave(serr)
+		case EventResumeFailed:
 			e.emit(ev)
 		case EventContext:
 			e.mu.Lock()

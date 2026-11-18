@@ -13,8 +13,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Decsr/Decsr-Code/internal/config"
-	"github.com/Decsr/Decsr-Code/internal/lang"
-	"github.com/Decsr/Decsr-Code/internal/plugins"
 	"github.com/Decsr/Decsr-Code/internal/runner"
 	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
@@ -26,67 +24,29 @@ const msgStopFirst = "stop the running nodes first"
 type wsCommand struct {
 	name    string
 	aliases []string
-	args    string // shown after the name, e.g. "[args]"
-	desc    string
-	hint    string // argument hint from the command file, shown in the palette
-	tag     string // "(project)" | "(user)" | "(plugin:<name>)" for custom commands
+	group   string   // Session | Run | Agents | Usage | Project | Plugin commands
+	args    string   // shown after the name, e.g. "[args]"
+	desc    string   // one line
+	forms   []wsForm // the ways to call it, for /help <command>
+	example string   // one example, for /help <command>
+	hint    string   // argument hint from the command file, shown in the palette
+	tag     string   // "(project)" | "(user)" | "(plugin:<name>)" for custom commands
 	run     func(m workspaceModel, args string) (tea.Model, tea.Cmd)
 }
 
-// commandList is the registry: built-ins first, then custom commands that do
-// not shadow a built-in name or alias.
+// commandList is the registry: the built-in commands by group, then custom
+// commands that do not shadow a built-in name or alias.
 func (m workspaceModel) commandList() []wsCommand {
-	cmds := []wsCommand{
-		{name: "/help", desc: "keys and commands", run: func(m workspaceModel, _ string) (tea.Model, tea.Cmd) {
-			m.showHelp = true
-			return m, nil
-		}},
-		{name: "/clear", desc: "save this session and start a new one", run: workspaceModel.cmdClear},
-		{name: "/compact", desc: "fold finished nodes into the session summary", run: workspaceModel.cmdCompact},
-		{name: "/merge", desc: "merge this session's worktree branch into your branch", run: workspaceModel.cmdMerge},
-		{name: "/pr", args: "[watch|stop]", desc: "push the session branch and open a pull request; watch fixes CI and review comments", run: workspaceModel.cmdPR},
-		{name: "/issue", args: "<number|URL|bead-id> [--force]", desc: "start a task from a GitHub issue or a bead", run: workspaceModel.cmdIssue},
-		{name: "/import", args: "speckit [--phase N] [path]", desc: "add the open tasks of a Spec Kit tasks.md to the graph", run: workspaceModel.cmdImport},
-		{name: "/resume", desc: "continue a saved session of this project", run: workspaceModel.cmdResume},
-		{name: "/project", desc: "switch to another project", run: workspaceModel.cmdProject},
-		{name: "/profile", desc: "save or apply a set of role settings", run: workspaceModel.cmdProfile},
-		{name: "/roles", aliases: []string{"/agents"}, args: "[save <name>]", desc: "list roles, create a new one; save keeps a role of this session in project.yaml", run: func(m workspaceModel, args string) (tea.Model, tea.Cmd) {
-			if args != "" {
-				return m.cmdRolesSave(args)
-			}
-			m.overlay = wsOverlayRoles
-			m.pickIdx = 0
-			m.pickNode = ""
-			return m, nil
-		}},
-		{name: "/connect", args: "[provider]", desc: "save an API key for DeepSeek, OpenAI, OpenRouter, Groq or a custom provider", run: workspaceModel.cmdConnect},
-		{name: "/plugin", aliases: []string{"/plugins"}, args: "[available|install <name>|enable|disable <name>|reload]", desc: "list plugins, see or install catalog plugins, enable, disable or reload", run: workspaceModel.cmdPlugin},
-		{name: "/status", desc: "project, session, roles and limits", run: workspaceModel.cmdStatus},
-		{name: "/cost", desc: "tokens per node and per role", run: workspaceModel.cmdCost},
-		{name: "/approve", desc: "approve the agents of the split and start the runnable nodes (the same as y)", run: workspaceModel.cmdApprove},
-		{name: "/answer", desc: "show the question or refused command that waits for you", run: workspaceModel.cmdAnswer},
-		{name: "/check", desc: "run Build & test now, even when nothing changed", run: workspaceModel.cmdCheck},
-		{name: "/reject", desc: "cancel the split that waits for approval (the same as n)", run: workspaceModel.cmdReject},
-		{name: "/routing", args: "[auto-connected|auto-role|manual]", desc: "show or set how agents are picked for the nodes of a split", run: workspaceModel.cmdRouting},
-		{name: "/rank", desc: "fetch model rankings from Artificial Analysis and show them", run: workspaceModel.cmdRank},
-		{name: "/autonomy", args: "[1|2|3]", desc: "how much runs by itself: 1 manual, 2 assisted, 3 unattended", run: workspaceModel.cmdAutonomy},
-		{name: "/coordinator", args: "[on|off]", desc: "let the lead review each finished batch and propose changes to the graph", run: workspaceModel.cmdCoordinator},
-		{name: "/review", args: "[y|n]", desc: "run one lead review now; y applies the waiting proposals, n rejects them", run: workspaceModel.cmdReview},
-		{name: "/budget", args: "[amount|off]", desc: "spending per runner; set this session's budget", run: workspaceModel.cmdBudget},
-		{name: "/export", desc: "write this session to a markdown file", run: workspaceModel.cmdExport},
-		{name: "/config", aliases: []string{"/menu"}, desc: "settings, project setup, classic pipeline", run: func(m workspaceModel, _ string) (tea.Model, tea.Cmd) {
-			return m.requestQuit(true)
-		}},
-		{name: "/quit", aliases: []string{"/exit"}, desc: "leave the workspace", run: func(m workspaceModel, _ string) (tea.Model, tea.Cmd) {
-			return m.requestQuit(false)
-		}},
-	}
+	cmds := builtinCommands()
 	taken := map[string]bool{}
 	for _, c := range cmds {
 		taken[c.name] = true
 		for _, a := range c.aliases {
 			taken[a] = true
 		}
+	}
+	for n := range removedCommands {
+		taken[n] = true
 	}
 	for _, cc := range append(append([]workspace.CustomCommand(nil), m.custom...), workspace.PluginCommands(m.plug)...) {
 		name := "/" + cc.Name
@@ -99,7 +59,7 @@ func (m workspaceModel) commandList() []wsCommand {
 		if desc == "" {
 			desc = "custom command"
 		}
-		cmds = append(cmds, wsCommand{name: name, args: "[args]", hint: cc.ArgHint, desc: desc, tag: "(" + cc.Source + ")",
+		cmds = append(cmds, wsCommand{name: name, group: ui.GroupNamePlugin, args: "[args]", hint: cc.ArgHint, desc: desc, tag: "(" + cc.Source + ")",
 			run: func(m workspaceModel, args string) (tea.Model, tea.Cmd) {
 				return m.sendTask(cc.Expand(args), strings.TrimSpace(name+" "+args))
 			}})
@@ -122,23 +82,15 @@ func (m workspaceModel) lookup(name string) (wsCommand, bool) {
 	return wsCommand{}, false
 }
 
-// cmdMatches lists the commands whose name or alias starts with prefix.
+// cmdMatches lists the commands that match what is typed after the slash,
+// best first: names that start with it, then names that contain it, then names
+// that hold its letters in order. A bare "/" lists every command, by group.
 func (m workspaceModel) cmdMatches(prefix string) []wsCommand {
 	prefix = strings.ToLower(strings.TrimSpace(prefix))
 	if !strings.HasPrefix(prefix, "/") {
 		return nil
 	}
-	var out []wsCommand
-	for _, c := range m.commandList() {
-		ok := strings.HasPrefix(c.name, prefix)
-		for _, a := range c.aliases {
-			ok = ok || strings.HasPrefix(a, prefix)
-		}
-		if ok {
-			out = append(out, c)
-		}
-	}
-	return out
+	return rankCommands(m.commandList(), prefix)
 }
 
 // busy is true while any node is running; some commands refuse then.
@@ -384,13 +336,6 @@ func (m workspaceModel) switchProject(path string) (tea.Model, tea.Cmd) {
 
 // ── /profile ─────────────────────────────────────────────────────────────────
 
-func (m workspaceModel) cmdProfile(string) (tea.Model, tea.Cmd) {
-	m.profiles = m.deps.listProfiles()
-	m.listIdx = 0
-	m.overlay = wsOverlayProfiles
-	return m, nil
-}
-
 func (m workspaceModel) applyProfile(name string) (tea.Model, tea.Cmd) {
 	m.overlay = wsOverlayNone
 	if m.busy() { // roles would change under the running nodes
@@ -418,8 +363,21 @@ func (m workspaceModel) doDeleteProfile(name string) workspaceModel {
 	}
 	m.profiles = m.deps.listProfiles()
 	m.listIdx = min(m.listIdx, len(m.profiles))
-	m.overlay = wsOverlayProfiles
+	m.panel.sel = min(m.panel.sel, len(m.profiles))
+	m.overlay = wsOverlayPanel
 	return m
+}
+
+// saveProfileAs saves the current roles as a profile and returns the problem,
+// or "" when it is saved.
+func (m workspaceModel) saveProfileAs(name string) string {
+	if !config.ValidName(name) {
+		return "Name must be 1-32 characters: lowercase letters, digits, - and _, starting with a letter or digit"
+	}
+	if err := m.deps.saveProfile(name, m.effectiveAgents(), config.ProfileRouting(m.cfg.Routing)); err != nil {
+		return oneLine(err.Error())
+	}
+	return ""
 }
 
 // effectiveAgents are the roles' own configured values, for SaveProfile.
@@ -542,16 +500,12 @@ func (m workspaceModel) submitText() (tea.Model, tea.Cmd) {
 	val := strings.TrimRight(m.textIn.Value(), "\r\n") // spaces in a path are meaningful
 	if m.textKind == "profile" {
 		val = strings.TrimSpace(val)
-		if !config.ValidName(val) {
-			m.textErr = "Name must be 1-32 characters: lowercase letters, digits, - and _, starting with a letter or digit"
-			return m, nil
-		}
-		if err := m.deps.saveProfile(val, m.effectiveAgents(), config.ProfileRouting(m.cfg.Routing)); err != nil {
-			m.textErr = oneLine(err.Error())
+		if errText := m.saveProfileAs(val); errText != "" {
+			m.textErr = errText
 			return m, nil
 		}
 		m.overlay = wsOverlayNone
-		m.say("system", fmt.Sprintf("profile %q saved", val))
+		m.say("ok", fmt.Sprintf("profile %q saved", val))
 		return m, nil
 	}
 	path := val
@@ -745,114 +699,7 @@ func listUserSkills(root string) []string {
 	return out
 }
 
-func (m workspaceModel) cmdStatus(string) (tea.Model, tea.Cmd) {
-	s := m.sess.snapshot()
-	profile := m.cfg.Project.Profile
-	if profile == "" {
-		profile = "(none)"
-	}
-	title := s.Title
-	if title == "" {
-		title = "(untitled)"
-	}
-	todo, running, done, failed := m.g.Counts()
-	lines := []string{
-		kv("Project", m.root),
-		kv("Language", orDefault(lang.Resolve(m.cfg.Project.Language, m.root), "(not detected)")),
-		kv("Profile", profile),
-		kv("Session", s.ID+" · "+title),
-		kv("Nodes", fmt.Sprintf("%d: %d todo · %d running · %d done · %d waiting · %d failed", len(m.g.Nodes), todo, running, done, m.g.CountWaiting(), failed)),
-		kv("Parallel", fmt.Sprintf("%d nodes at once", workspace.MaxParallel(m.cfg))),
-		"",
-		"Roles",
-	}
-	for _, r := range workspace.Roles(m.cfg) {
-		meta := shortModel(r.Agent.Runner, r.Agent.Model)
-		if meta == "" {
-			meta = "(runner not set)"
-		}
-		if r.Agent.Effort != "" {
-			meta += " / " + r.Agent.Effort
-		}
-		if r.ReadOnly {
-			meta += " / read-only"
-		}
-		lines = append(lines, "  "+padRight(r.Name, 13)+meta)
-	}
-	lines = append(lines, "")
-	if len(m.custom) == 0 {
-		lines = append(lines, kv("Commands", "no custom commands"))
-	} else {
-		var names []string
-		for _, c := range m.custom {
-			names = append(names, fmt.Sprintf("/%s (%s)", c.Name, c.Source))
-		}
-		lines = append(lines, kv("Commands", strings.Join(names, ", ")))
-	}
-	if sk := listUserSkills(m.root); len(sk) == 0 {
-		lines = append(lines, kv("Skills", "no skill files"))
-	} else {
-		lines = append(lines, kv("Skills", strings.Join(sk, ", ")))
-	}
-	return m.openInfo("Status", lines), nil
-}
-
-func (m workspaceModel) cmdCost(string) (tea.Model, tea.Cmd) {
-	est := func(e bool) string {
-		if e {
-			return "~"
-		}
-		return ""
-	}
-	tok := func(mark string, n int) string { return mark + formatTokensCompact(n) }
-	row := func(name, role, in, out string) string {
-		return padRight(name, 8) + padRight(role, 14) + padRight(in, 10) + out
-	}
-	lines := []string{row("NODE", "ROLE", "IN", "OUT")}
-	type sum struct{ in, out int }
-	roles := map[string]*sum{}
-	var order []string
-	totIn, totOut := 0, 0
-	anyEst := false
-	for _, n := range m.g.Nodes {
-		if n.InputTokens == 0 && n.OutputTokens == 0 {
-			continue
-		}
-		mark := est(n.Estimated)
-		anyEst = anyEst || n.Estimated
-		role := n.Role
-		if role == "" {
-			role = "-"
-		}
-		lines = append(lines, row(n.ID, role, tok(mark, n.InputTokens), tok(mark, n.OutputTokens)))
-		if roles[role] == nil {
-			roles[role] = &sum{}
-			order = append(order, role)
-		}
-		roles[role].in += n.InputTokens
-		roles[role].out += n.OutputTokens
-		totIn += n.InputTokens
-		totOut += n.OutputTokens
-	}
-	if len(lines) == 1 {
-		lines = append(lines, "no node has used tokens yet")
-	}
-	lines = append(lines, "", "By role")
-	for _, r := range order {
-		lines = append(lines, "  "+padRight(r, 20)+padRight(tok("", roles[r].in), 10)+tok("", roles[r].out))
-	}
-	s := m.sess.snapshot()
-	lines = append(lines, "", row("Lead", "", tok("", s.In), tok("", s.Out)))
-	mark := est(anyEst)
-	lines = append(lines, row("Total", "", tok(mark, totIn+s.In), tok(mark, totOut+s.Out)))
-	if strings.TrimSpace(s.Summary) != "" {
-		lines = append(lines, "", "Tokens of nodes folded by /compact or cancelled are not listed; their cost still counts toward the budget.")
-	}
-	if anyEst {
-		lines = append(lines, "~ marks estimates")
-	}
-	return m.openInfo("Cost", lines), nil
-}
+func (m workspaceModel) cmdStatus(string) (tea.Model, tea.Cmd) { return m.openStatus() }
 
 // ── /export ──────────────────────────────────────────────────────────────────
 
@@ -944,132 +791,6 @@ func (m workspaceModel) reloadPlugins() workspaceModel {
 		m.g = m.eng.Snapshot()
 	}
 	return m
-}
-
-func (m workspaceModel) cmdPlugin(args string) (tea.Model, tea.Cmd) {
-	f := strings.Fields(args)
-	if len(f) == 0 {
-		return m.openInfo("Plugins", m.pluginLines()), nil
-	}
-	if m.installing != "" && f[0] != "available" {
-		m.say("error", "a plugin install is running; try again when it is done")
-		return m, nil
-	}
-	switch {
-	case f[0] == "available" && len(f) == 1:
-		return m.openInfo("Plugin catalog", m.catalogLines()), nil
-	case f[0] == "install" && len(f) == 2:
-		return m.cmdPluginInstall(f[1])
-	case f[0] == "reload" && len(f) == 1:
-		if m.busy() {
-			return m.refuseBusy()
-		}
-		m = m.reloadPlugins()
-		m.say("system", fmt.Sprintf("plugins reloaded: %d found", len(m.plug.Plugins)))
-		return m, nil
-	case (f[0] == "enable" || f[0] == "disable") && len(f) == 2:
-		if m.busy() { // roles would change under the running nodes
-			return m.refuseBusy()
-		}
-		found := false
-		for _, p := range m.plug.Plugins {
-			found = found || p.Name == f[1]
-		}
-		if !found {
-			m.say("error", fmt.Sprintf("no plugin named %q (see /plugin)", workspace.Sanitize(f[1])))
-			return m, nil
-		}
-		on := f[0] == "enable"
-		if err := plugins.SetEnabled(f[1], on); err != nil {
-			m.say("error", oneLine(err.Error()))
-			return m, nil
-		}
-		m = m.reloadPlugins()
-		m.say("system", fmt.Sprintf("plugin %s %sd", f[1], f[0]))
-		return m, nil
-	}
-	m.say("error", "usage: /plugin [available | install <name> | enable <name> | disable <name> | reload]")
-	return m, nil
-}
-
-// pluginListWidth is the width the ids of a /plugin list wrap at, so a line
-// fits the 80-column overlay after the 11-cell label.
-const pluginListWidth = 60
-
-// pluginLines is the text of the /plugin overlay.
-func (m workspaceModel) pluginLines() []string {
-	if len(m.plug.Plugins) == 0 {
-		lines := []string{
-			"No plugins found.",
-			"",
-			"Put a plugin folder (with .claude-plugin/plugin.json) in",
-			"  " + filepath.Join(m.root, config.GlobalDir, "plugins") + " (this project) or",
-			"  ~/" + config.GlobalDir + "/plugins (all projects).",
-			"scripts/install-plugins.sh installs a recommended set;",
-			"/plugin available lists the plugins decsr can install.",
-		}
-		if w := m.pluginWarnings(); len(w) > 0 {
-			lines = append(append(lines, ""), w...)
-		}
-		return lines
-	}
-	// list wraps the ids under the label instead of cutting them off.
-	list := func(label string, items []string) []string {
-		if len(items) == 0 {
-			return []string{kv("  "+label, "none")}
-		}
-		var out []string
-		for i, l := range wrapText(strings.Join(items, ", "), pluginListWidth) {
-			if i == 0 {
-				out = append(out, kv("  "+label, l))
-			} else {
-				out = append(out, strings.Repeat(" ", 11)+l)
-			}
-		}
-		return out
-	}
-	var lines []string
-	for i, p := range m.plug.Plugins {
-		if i > 0 {
-			lines = append(lines, "")
-		}
-		state := "enabled"
-		if !p.Enabled {
-			state = "disabled"
-		}
-		head := p.Name
-		if p.Version != "" {
-			head += " " + p.Version
-		}
-		lines = append(lines, head+" · "+p.Scope+" · "+state)
-		if p.Description != "" {
-			lines = append(lines, "  "+p.Description)
-		}
-		if !p.Enabled {
-			lines = append(lines, "  (not loaded; /plugin enable "+p.Name+")")
-		} else {
-			var cmds, skills, agents []string
-			for _, c := range p.Commands {
-				cmds = append(cmds, "/"+p.Name+":"+c.Name)
-			}
-			for _, s := range p.Skills {
-				skills = append(skills, s.ID)
-			}
-			for _, a := range p.Agents {
-				agents = append(agents, a.Role())
-			}
-			lines = append(lines, list("Commands", cmds)...)
-			lines = append(lines, list("Skills", skills)...)
-			lines = append(lines, list("Agents", agents)...)
-		}
-		if p.HasHooks || p.HasMCP {
-			lines = append(lines, "  Note: hooks and MCP servers are not used by decsr")
-		}
-	}
-	if w := m.pluginWarnings(); len(w) > 0 {
-		lines = append(append(lines, ""), w...)
-	}
-	return lines
 }
 
 func (m workspaceModel) pluginWarnings() []string {

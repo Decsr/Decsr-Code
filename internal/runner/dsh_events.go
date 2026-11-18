@@ -88,9 +88,10 @@ func (p *dshParser) feed(line []byte) []Token {
 			Code   string `json:"code"`
 			Reason string `json:"reason"`
 		} `json:"error"`
-		Message string `json:"message"`
-		Model   string `json:"model"`
-		Usage   *struct {
+		Message   string `json:"message"`
+		Model     string `json:"model"`
+		SessionID string `json:"sessionId"`
+		Usage     *struct {
 			InputTokens      int `json:"inputTokens"`
 			OutputTokens     int `json:"outputTokens"`
 			CacheReadTokens  int `json:"cacheReadTokens"`
@@ -114,8 +115,8 @@ func (p *dshParser) feed(line []byte) []Token {
 		if ev.Model != "" {
 			p.model = ev.Model
 		}
-		if p.model != "" {
-			return []Token{{Model: p.model}}
+		if p.model != "" || ev.SessionID != "" {
+			return []Token{{Model: p.model, SessionID: ev.SessionID}}
 		}
 	case "status":
 		if ev.Phase == "step_end" && ev.Usage != nil {

@@ -32,6 +32,11 @@ func doctorCmd(_ []string) {
 	}
 }
 
+// workspaceDoctor gives the Workspace the doctor checks of /status and /doctor.
+func workspaceDoctor(root string) func() []doctor.Result {
+	return func() []doctor.Result { return doctor.Run(buildDoctorDeps(root)) }
+}
+
 func buildDoctorDeps(root string) doctor.Deps {
 	home, _ := os.UserHomeDir()
 	cfg, cfgErr := config.Load(root)

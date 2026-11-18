@@ -134,6 +134,29 @@ func SessionDiff(root, session string) (Diff, error) {
 	return Diff{Files: ParseDiff(out)}, nil
 }
 
+// WorkingTreeDiff is every change of the working tree of root against HEAD,
+// untracked files included: the session diff of a shared checkout.
+func WorkingTreeDiff(root string) (Diff, error) {
+	if _, err := git(root, "rev-parse", "--is-inside-work-tree"); err != nil {
+		return Diff{}, errors.New("the project is not a git repository, so there is no diff")
+	}
+	args := []string{"diff", "--no-color", "--relative", "-U3"}
+	if _, err := git(root, "rev-parse", "--verify", "-q", "HEAD"); err == nil {
+		args = append(args, "HEAD")
+	}
+	out, err := gitOut(root, false, args...)
+	if err != nil {
+		return Diff{}, fmt.Errorf("diff: %s", oneLineErr(err))
+	}
+	d := Diff{Note: "Shared checkout: the working tree compared with HEAD.", Files: ParseDiff(out)}
+	more, err := untrackedDiff(root, nil)
+	if err != nil {
+		return Diff{}, err
+	}
+	d.Files = append(d.Files, more...)
+	return d, nil
+}
+
 // worktreeDiff compares a node's worktree with the point it started from (the
 // merge base with the session branch, or HEAD when that is unknown).
 // Untracked files are added with "git diff --no-index /dev/null <file>", which

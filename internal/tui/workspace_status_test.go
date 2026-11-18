@@ -153,16 +153,16 @@ func TestParseBudget(t *testing.T) {
 
 func TestBudgetCommandSetsOverrideAndLists(t *testing.T) {
 	h := statusHarness(t, 120, 40)
-	h.typeCmd("/budget 12")
+	h.typeCmd("/usage budget 12")
 	if got := h.m.sess.snapshot().BudgetUSD; got != 12 {
 		t.Fatalf("override %v", got)
 	}
 	if limit, _ := budgetOf(h.m.cfg, h.m.sess.snapshot()); limit != 12 {
 		t.Fatalf("limit %v", limit)
 	}
-	h.typeCmd("/budget nonsense")
-	h.want("usage: /budget")
-	h.typeCmd("/budget")
+	h.typeCmd("/usage budget nonsense")
+	h.want("usage: /usage budget")
+	h.typeCmd("/usage budget")
 	h.want("this session")
 	h.want("By runner")
 	h.want("opencode")
@@ -173,7 +173,7 @@ func TestBudgetCommandSetsOverrideAndLists(t *testing.T) {
 func TestBudgetOffRemovesOverride(t *testing.T) {
 	h := statusHarness(t, 120, 40)
 	h.m.sess.update(func(s *workspace.Session) { s.BudgetUSD = 9 })
-	h.typeCmd("/budget off")
+	h.typeCmd("/usage budget off")
 	if h.m.sess.snapshot().BudgetUSD != 0 {
 		t.Fatal("override kept")
 	}

@@ -46,6 +46,16 @@ type WorkerRequest struct {
 	// OnModel, when set, receives the model the runner reports it is using,
 	// once. Nil-safe.
 	OnModel func(model string)
+	// KeepSession keeps the runner's own conversation so a later call can
+	// resume it; OnSession, when set, receives its id once the runner reports
+	// it. Nil-safe.
+	KeepSession bool
+	OnSession   func(id string)
+	// ResumeID resumes the runner's conversation with this id. The call then
+	// sends ResumeMessage only: the conversation already holds the task and the
+	// context.
+	ResumeID      string
+	ResumeMessage string
 }
 
 // WorkerResult is what a worker produced.
@@ -112,6 +122,9 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 	).Replace(prompts.MustLoad("ws-worker"))
 
 	msgs := []runner.ConvMessage{{Role: "user", Content: task}}
+	if req.ResumeID != "" {
+		msgs = []runner.ConvMessage{{Role: "user", Content: req.ResumeMessage}}
+	}
 	if req.OnContext != nil {
 		total := tokenutil.EstimateTokens(sys)
 		for _, m := range msgs {
@@ -128,6 +141,8 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		Agent:        agentMode,
 		MCP:          req.MCP,
 		ReadOnly:     req.ReadOnly,
+		KeepSession:  req.KeepSession,
+		ResumeID:     req.ResumeID,
 	}
 	if agentMode {
 		creq.AllowedTools = runner.AgentTools(req.BuildCommands, req.AllowedCommands, req.ReadOnly)
@@ -150,6 +165,9 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		}
 		if tok.Activity != nil && req.OnActivity != nil {
 			req.OnActivity(*tok.Activity)
+		}
+		if tok.SessionID != "" && req.OnSession != nil {
+			req.OnSession(tok.SessionID)
 		}
 		if tok.Model != "" && req.OnModel != nil {
 			req.OnModel(tok.Model)

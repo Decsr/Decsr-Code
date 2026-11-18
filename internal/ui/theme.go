@@ -27,6 +27,19 @@ var (
 	// Brand colours of runner glyphs.
 	Claude   = lipgloss.AdaptiveColor{Dark: "#D97757", Light: "#c15f3c"}
 	DeepSeek = lipgloss.AdaptiveColor{Dark: "#4D6BFE", Light: "#3b54d9"}
+	Codex    = lipgloss.AdaptiveColor{Dark: "#10a37f", Light: "#0c7a5f"}
+	OpenCode = lipgloss.AdaptiveColor{Dark: "#f5c542", Light: "#a67c00"}
+	Local    = lipgloss.AdaptiveColor{Dark: "#a8a2d0", Light: "#6b6598"} // ollama, mlx, lmstudio
+
+	// Colours of the command groups (palette, /help, panels).
+	GroupSession = lipgloss.AdaptiveColor{Dark: "#5ee0ff", Light: "#0e7490"}
+	GroupRun     = lipgloss.AdaptiveColor{Dark: "#b48cff", Light: "#6d3fd1"}
+	GroupAgents  = lipgloss.AdaptiveColor{Dark: "#ff7ac6", Light: "#c2255c"}
+	GroupUsage   = lipgloss.AdaptiveColor{Dark: "#ffb86b", Light: "#b45309"}
+	GroupProject = lipgloss.AdaptiveColor{Dark: "#4fd6b0", Light: "#0f766e"}
+
+	// PanelInk is the dark text on a filled tab pill.
+	PanelInk = lipgloss.AdaptiveColor{Dark: "#0b1426", Light: "#ffffff"}
 
 	// Diff tints: the background of added and removed lines.
 	DiffAdd = lipgloss.AdaptiveColor{Dark: lerpHex("#0b1426", "#6ff2b4", 0.16), Light: lerpHex("#ffffff", "#2f9e44", 0.16)}

@@ -96,24 +96,24 @@ func (m workspaceModel) pluginAnswer(k string) (tea.Model, tea.Cmd) {
 	name := workspace.Sanitize(c.arg)
 	switch k {
 	case "y", "Y":
-		m.overlay = wsOverlayNone
+		m.overlay = c.back
+		if c.verb == "enable" {
+			if err := plugins.SetEnabled(c.arg, true); err != nil {
+				m.pluginSay("error", oneLine(err.Error()))
+				return m, nil
+			}
+			m = m.reloadPlugins()
+			m, _ = m.markPlugin(c.arg, workspace.PluginInstalled)
+			m.pluginSay("ok", fmt.Sprintf("plugin %s enabled", name))
+			return m.askPlugins(), m.pluginRefreshCmd()
+		}
 		e, ok := plugins.FindCatalog(c.arg)
 		if !ok { // the dialog is only built for catalog plugins
 			return m, nil
 		}
-		if c.verb == "enable" {
-			if err := plugins.SetEnabled(e.Name, true); err != nil {
-				m.say("error", oneLine(err.Error()))
-				return m, nil
-			}
-			m = m.reloadPlugins()
-			m, _ = m.markPlugin(e.Name, workspace.PluginInstalled)
-			m.say("system", fmt.Sprintf("plugin %s enabled", name))
-			return m.askPlugins(), nil
-		}
 		return m.startInstall(e)
 	case "n", "N", "esc":
-		m.overlay = wsOverlayNone
+		m.overlay = c.back
 		m, _ = m.markPlugin(c.arg, workspace.PluginDeclined)
 		m.say("system", fmt.Sprintf("skipped plugin %s", name))
 		return m.askPlugins(), nil
@@ -135,16 +135,22 @@ func (m workspaceModel) pluginAnswer(k string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// startInstall installs e in the background; wsInstallMsg reports the result.
+// startInstall installs the catalog plugin e in the background; wsInstallMsg
+// reports the result.
 func (m workspaceModel) startInstall(e plugins.CatalogEntry) (tea.Model, tea.Cmd) {
+	install := m.deps.installPlugin
+	return m.runInstall(e, func(ctx context.Context) error { return install(ctx, e) })
+}
+
+func (m workspaceModel) runInstall(e plugins.CatalogEntry, do func(ctx context.Context) error) (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(m.runCtx)
 	m.installGen++
 	gen := m.installGen
 	m.installing = e.Name
+	m.instEntry = e
 	m.cancelInstall = cancel
-	install := m.deps.installPlugin
 	cmd := func() tea.Msg {
-		err := install(ctx, e)
+		err := do(ctx)
 		cancel()
 		return wsInstallMsg{gen: gen, name: e.Name, err: err}
 	}
@@ -159,7 +165,7 @@ func (m workspaceModel) onInstalled(msg wsInstallMsg) (tea.Model, tea.Cmd) {
 	name := workspace.Sanitize(msg.name)
 	if msg.err != nil {
 		m, _ = m.markPlugin(msg.name, workspace.PluginDeclined)
-		m.say("error", fmt.Sprintf("could not install %s: %s (try again with /plugin install %s)", name, oneLine(workspace.SanitizeText(msg.err.Error())), name))
+		m.pluginSay("error", fmt.Sprintf("could not install %s: %s (try again with /plugin install %s)", name, oneLine(workspace.SanitizeText(msg.err.Error())), name))
 		return m.askPlugins(), nil
 	}
 	m = m.reloadPlugins()
@@ -171,48 +177,18 @@ func (m workspaceModel) onInstalled(msg wsInstallMsg) (tea.Model, tea.Cmd) {
 				len(p.Agents), pluralize(len(p.Agents), "agent", "agents"), len(p.Commands), pluralize(len(p.Commands), "command", "commands"))
 		}
 	}
-	m.say("system", sum)
-	return m.askPlugins(), nil
+	m.pluginSay("ok", sum)
+	return m.askPlugins(), m.pluginRefreshCmd()
 }
 
 // installLine is the status text while an install runs.
 func (m workspaceModel) installLine() string {
 	spin := pixelSpinner.Frames[m.spin%len(pixelSpinner.Frames)]
 	line := spin + " Installing plugin " + workspace.Sanitize(m.installing)
-	if e, ok := plugins.FindCatalog(m.installing); ok {
-		line += " from github.com/" + e.Repo
+	if m.instEntry.Name == m.installing && m.instEntry.Repo != "" {
+		line += " from github.com/" + m.instEntry.Repo
 	}
 	return line + "…"
-}
-
-// cmdPluginInstall is /plugin install <name>: only catalog plugins, after the
-// same question the lead's requests get.
-func (m workspaceModel) cmdPluginInstall(name string) (tea.Model, tea.Cmd) {
-	if m.busy() {
-		return m.refuseBusy()
-	}
-	if m.installing != "" {
-		m.say("error", "an install is already running")
-		return m, nil
-	}
-	e, ok := plugins.FindCatalog(name)
-	if !ok {
-		m.say("error", fmt.Sprintf("plugin %q is not in the catalog (see /plugin available)", cutText(workspace.Sanitize(name), 40)))
-		return m, nil
-	}
-	switch m.plug.State(name) {
-	case plugins.StateEnabled:
-		m.say("system", fmt.Sprintf("plugin %s is already installed", name))
-		return m, nil
-	case plugins.StateDisabled:
-		m.confirm = pluginConfirm(e, "", true)
-		m.confirm.text = fmt.Sprintf("Plugin %s is installed but disabled. Enable it?", name)
-	default:
-		m.confirm = pluginConfirm(e, "", false)
-		m.confirm.text = fmt.Sprintf("Install plugin %s from github.com/%s?", name, e.Repo)
-	}
-	m.overlay = wsOverlayConfirm
-	return m, nil
 }
 
 func cutText(s string, n int) string {
@@ -220,45 +196,6 @@ func cutText(s string, n int) string {
 		return string(r[:n-1]) + "…"
 	}
 	return s
-}
-
-// catalogLines is the text of /plugin available: every catalog plugin with its
-// state spelled out.
-func (m workspaceModel) catalogLines() []string {
-	var lines []string
-	for i, e := range plugins.Catalog() {
-		if i > 0 {
-			lines = append(lines, "")
-		}
-		state := "not installed"
-		switch m.plug.State(e.Name) {
-		case plugins.StateEnabled:
-			state = "installed"
-		case plugins.StateDisabled:
-			state = "installed, disabled"
-		}
-		lines = append(lines, e.Name+" · "+state)
-		for _, l := range wrapText(e.Description, pluginListWidth+9) {
-			lines = append(lines, "  "+l)
-		}
-		for _, part := range []struct {
-			label string
-			items []string
-		}{{"Skills", e.Skills}, {"Agents", e.Agents}} {
-			if len(part.items) == 0 {
-				continue
-			}
-			for j, l := range wrapText(strings.Join(part.items, ", "), pluginListWidth) {
-				if j == 0 {
-					lines = append(lines, kv("  "+part.label, l))
-				} else {
-					lines = append(lines, strings.Repeat(" ", 11)+l)
-				}
-			}
-		}
-	}
-	lines = append(lines, "", "/plugin install <name> installs one after you confirm.")
-	return lines
 }
 
 // ── Skill picker ─────────────────────────────────────────────────────────────
@@ -379,7 +316,7 @@ func renderSkillPicker(title string, items []wsSkillItem, sel map[string]bool, i
 	}
 	var body []string
 	if len(items) == 0 {
-		body = append(body, styleWsSkillNote.Render("No skills installed. /plugin available lists plugins you can install."))
+		body = append(body, styleWsSkillNote.Render("No skills installed. /plugin search lists plugins you can install."))
 	}
 	for i := start; i < start+rows && i < len(items); i++ {
 		body = append(body, renderSkillRow(items[i], sel[items[i].id] || items[i].role, i == idx, inner))

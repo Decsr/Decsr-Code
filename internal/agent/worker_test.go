@@ -404,3 +404,15 @@ func TestRunWorkerDoneWithoutUsageKeepsUsage(t *testing.T) {
 		t.Errorf("usage = %+v", res.Usage)
 	}
 }
+
+func TestRunWorkerResumeSendsOnlyTheNewMessage(t *testing.T) {
+	f := &workerFake{chunks: []string{"ok\n===SUMMARY===\nfine\n"}}
+	_, err := RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(),
+		WorkerRequest{Title: "T", Description: "the task", Mode: config.ModeAgent, ResumeID: "S1", ResumeMessage: "now the docs", KeepSession: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.got.ResumeID != "S1" || !f.got.KeepSession || len(f.got.Messages) != 1 || f.got.Messages[0].Content != "now the docs" {
+		t.Errorf("request = %+v", f.got)
+	}
+}

@@ -27,7 +27,8 @@ Code, QA and so on) is unchanged; see [Reaching the classic pipeline](#reaching-
    start; the lead only gets a cheap, locally collected project summary (plus
    `.decsr/context_pack.md` if one already exists). Type a task and press
    `Enter` (`Alt+Enter` adds a new line). A second task in the same session is
-   added to the existing graph (see [Sessions](#sessions)).
+   added to the existing graph (see [Sessions](#sessions)); you can send it
+   while nodes run (see [Chatting while nodes run](#chatting-while-nodes-run)).
 2. **Split.** The lead (the `pm` agent's runner and model) splits the task into
    nodes. Each node has a title, a description, the nodes it depends on, the
    role the lead gives it and a `writes` flag (see [Lean runs](#lean-runs)).
@@ -372,7 +373,7 @@ an ID that contains the value, so a new budget level (the percent in steps of
 | Key | Action |
 |---|---|
 | `Up` / `Down`, `k` / `j` | Move |
-| `Enter` | Go to the item: a node is selected and the feed scrolls to it; a review is focused in the feed; a plugin question opens; a budget item opens `/budget`; an automation opens the last 20 lines of its log |
+| `Enter` | Go to the item: a node is selected and the feed scrolls to it; a review is focused in the feed; a plugin question opens; a budget item opens `/usage budget`; an automation opens the last 20 lines of its log |
 | `x` | Clear the selected info item |
 | `Esc`, `N` | Close |
 
@@ -401,7 +402,7 @@ or a path matches only when it contains the query.
 | Key | Action |
 |---|---|
 | `Up` / `Down` | Move |
-| `Enter` | Inbox item: the same as in the inbox. Command: runs now only if it is on a fixed list of read-only ones (`/help`, `/status`, `/cost`, `/budget`, `/roles`, `/resume`, `/project`, `/profile`); every other command, such as `/pr`, `/merge`, `/clear`, `/compact`, `/plugin`, `/review` or a custom one, is put into the prompt as `/cmd ` for you to complete and send. Node: select it. Session: load it, as `/resume` does. Project: switch to it, as `/project` does |
+| `Enter` | Inbox item: the same as in the inbox. Command: runs now only if it is on a fixed list of read-only ones (`/help`, `/status`, `/usage`, `/roles`, `/resume`, `/project`); every other command, such as `/pr`, `/merge`, `/clear`, `/compact`, `/plugin`, `/coordinator` or a custom one, is put into the prompt as `/cmd ` for you to complete and send. Node: select it. Session: load it, as `/resume` does. Project: switch to it, as `/project` does |
 | `Esc`, `Ctrl+K` | Close |
 
 Loading a session and switching project are refused while nodes run
@@ -410,13 +411,34 @@ and `@` lists in the prompt are unchanged.
 
 ## Commands
 
-Type `/` at the start of the prompt to filter the list by prefix, move with
-`Up`/`Down`, complete with `Tab`, run with `Enter`. `Enter` runs a command only
+Type `/` at the start of the prompt to open the command list. A bare `/` shows
+every command under its group header (Session, Run, Agents, Usage, Project and,
+last, Plugin commands). While you type, the list keeps the commands that match
+and ranks them: names that start with what you typed first, then names that
+contain it, then names that hold the letters in order. Each row shows the
+name (the matched letters underlined in the group colour), a short args hint,
+the description and, at the right, the group. Eight rows show at once; the
+last line says `↓ N more · ↑↓ Tab`. Move with `Up`/`Down`, complete with `Tab`,
+run with `Enter`. `Enter` runs a command only
 when the text is an exact command name or alias, when you moved the highlight
 with `Up`/`Down` (or completed with `Tab`), or when exactly one command matches
-the prefix. Otherwise it prints `! /co matches several commands: /compact,
-/config, /cost - keep typing or press Tab` and leaves the text alone. An
-unknown command prints `unknown command /x - /help lists them`.
+the prefix. Otherwise it prints `✗ /co matches several commands: /compact,
+/config, /context, /coordinator, /copy, /doctor - keep typing or press Tab` and leaves the text
+alone. An unknown command prints `unknown command /x - /help lists them`.
+
+`/help` opens a panel with the groups, one line each, and `/help <command>`
+shows the forms of one command and an example. Command results are one line
+that starts with a glyph: `✓` done, `✗` error, `⚠` warning, `›` information.
+With `NO_COLOR` set no colour is used and the glyphs still carry the meaning.
+
+A command that manages something opens a panel when it has no arguments and
+acts directly when it has. A panel is a box in the colour of the command's
+group (Usage amber, Agents pink, Project teal) with the keys in its bottom
+border. `Tab` and `Shift+Tab` (or `Left` and `Right`) switch tabs, `Up`/`Down`
+and `PgUp`/`PgDn` scroll or move the cursor, `Esc` closes. Panels that read
+files, probe the machine or run the doctor checks do it in the background and
+fill in when they are done. With `NO_COLOR` the active tab is shown in
+brackets.
 
 **Tasks that start with a slash.** A single line whose first word contains a
 second `/` (for example `/usr/lib is missing libfoo, fix the build`) is sent as
@@ -426,34 +448,80 @@ into the prompt (or typed in one burst) is inserted as text; it is never sent or
 run until you press `Enter`. With graph focus, a paste moves the focus to the
 prompt and lands there.
 
+**Session**
+
 | Command | What it does |
 |---|---|
-| `/help` | Keys and the full command list, including custom commands |
+| `/help [command]` | The commands by group; `/help <command>` shows its forms and an example |
 | `/clear` | Save this session and start a new, empty one (asks first when nodes are unfinished) |
 | `/compact` | Fold finished nodes into the session summary (see [Compact](#compact)) |
+| `/resume` | Pick a saved session of this project |
+| `/rename <title>` | Set the title of this session (saved) |
+| `/export` | Write the session to `.decsr/exports/<session id>.md` (title, transcript, summary, each node with role, status, files and summary) |
+| `/copy` | Copy the last answer of the lead or of a node to the clipboard with OSC 52, which works over SSH and tmux (tmux needs `set-clipboard on`); at most 100 KB |
+| `/quit` (`/exit`) | Leave the Workspace (asks first while nodes run) |
+
+**Run**
+
+| Command | What it does |
+|---|---|
+| `/answer` | Show the question or refused-command card that was hidden with `Esc` (see [Question cards](#question-cards)) |
+| `/check` | Run Build & test now, even when nothing changed: adds the node when the graph has none, or resets it to todo (see [Build & test and fix nodes](#build--test-and-fix-nodes)) |
+| `/stop [node]` | Stop one running node (the `s` key), or every node without an argument (the `S` key) |
+| `/retry <node>` | Run a node again (the `r` key) |
 | `/merge` | Merge the session's branch into your current branch (see [Isolation](#isolation)) |
+| `/diff` | The full diff of this session in the diff view: the session branch against its base in a worktree session, the working tree against `HEAD` (untracked files included) in a shared checkout. The notes and keys are those of [Diff and review notes](#diff-and-review-notes) |
 | `/pr` | Push the session branch and open (or update) a pull request; `/pr watch` also turns failing CI and review comments into fix nodes, `/pr stop` ends it (see [Pull requests](#pull-requests)) |
+
+Approving or cancelling a plan is `y` and `n` on the plan card; `/approve` and
+`/reject` print that hint (see [Approval](#approval)).
+
+**Agents**
+
+| Command | What it does |
+|---|---|
+| `/roles` (`/agents`) | List all roles, with their skills, and create a new one; `/roles save <name>` writes a role created from a plan card for this session to `project.yaml` |
+| `/model` | Panel with the tabs Roles, Rankings and Profiles. Roles lists every role with its runner, model and effort; `Enter` edits the row (`Tab` picks the field, `Left`/`Right` cycle through the connected runners, the ranked models of the runner and its effort levels, `Enter` ends the edit) and `s` saves the changed roles in `project.yaml` (refused while nodes run; plugin roles are not edited here). Rankings is the table of `/model rank`; `r` fetches it again. Profiles is the list of `/model profile`: `Enter` applies one, `d` deletes one, the last row saves the current roles |
+| `/model rank` | Open the Rankings tab and fetch the model rankings from Artificial Analysis with the key saved by `decsr connect artificialanalysis`, save them to `~/.decsr/rankings.json` and show the table (sorted by balance score, with the request count and the models that map to no runner). The fetch runs in the background; with no key the view says how to connect and shows the built-in fallback tiers. Data: Artificial Analysis (artificialanalysis.ai) |
+| `/model profile [save <name>\|apply <name>]` | The Profiles tab, or save the current roles as a profile, or apply one (see [Profiles](#profiles)) |
+| `/routing [auto-connected\|auto-role\|manual]` | Show the routing mode and where it comes from (this session, a profile, the project or the default); with a mode, set it for this session and save it to `project.yaml` (see [Agent routing](#agent-routing)) |
+| `/autonomy [1\|2\|3]` | How much runs by itself (see [Autonomy](#autonomy)) |
+| `/coordinator [on\|off\|now]` | Show or set, for this session, whether the lead reviews each finished batch; `now` runs one review now (see [Coordinator mode](#coordinator-mode)) |
+
+**Usage**
+
+| Command | What it does |
+|---|---|
+| `/usage` | Panel with the tabs Session, Budget, History and Limits. Session: tokens in and out and the cost per role with its agent (`runner · model · effort`), a total row and the budget meter; `n` switches to one row per node. Budget: the spending per runner, the models without a price and the budget; `Enter` types an amount or `off`. History: sessions, tokens and cost of today, 7 days and 30 days, a sparkline of the daily tokens and the table by agent, read from the saved sessions of this project; a cost is only what the configured prices give, `–` when there is no price. Limits: the last limit each runner printed when it limited a node, with its reset time, read from the saved sessions. decsr asks no account or usage service for it |
+| `/usage cost` | The Session tab with a row per node |
+| `/usage budget [amount\|off]` | The Budget tab; `/usage budget 10` sets this session's budget, `/usage budget off` removes that override (see [Cost and budget](#cost-and-budget)) |
+| `/status` | One panel: version, project and language, session title and whether it works in a worktree or the shared checkout; the runners with how they are available (claude shows `subscription (unattended runs need a key)` or `API key`); the providers with masked keys; plugins on and off; routing, autonomy, coordinator, parallel limit and the budget used; today's sessions, tokens and cost; and `⚠ N warnings · /doctor for details` from the doctor checks |
+| `/context` | What the lead and the workers receive: the project overview, the context pack, the session summary, the lead prompt and the worker prompt of a sample role, each with its size in characters and about as many tokens (one per four characters). The Workspace does not send project memory, so that row is marked as not sent |
+
+**Project**
+
+| Command | What it does |
+|---|---|
+| `/project` | Switch to another project (see [Switching project](#switching-project)) |
+| `/config [list\|get <key>\|set <key> <value>]` | Panel of the settings by section with their values; `Enter` edits one with the same checks as `set`. `get` shows one, or `set` changes one and save it in `project.yaml`. Keys are dotted, such as `workspace.max_parallel`, `workspace.isolation`, `workspace.budget_usd`, `workspace.coordinator`, `routing.mode`, `ui.theme`, `ui.icons`, `project.language`, `project.build_cmd`; a value is checked before it is saved. `ui.theme` and `ui.tmux` apply at the next start. `/config` and `/config list` open the panel; `/menu` opens the classic menu |
+| `/provider [list\|add <name>\|remove <name>\|test <name>]` | Panel of the saved providers and the keys set in the environment, masked: `a` adds, `x` removes (asks first), `t` tests the key under the cursor; `list` prints them in the chat; `add` opens the key entry (see [Connect a provider](#connect-a-provider)); `remove` asks first and deletes the saved key; `test` lists the models of the provider with its key |
+| `/memory [search <query>\|add <text>]` | Panel of the project memory (`MEMORY.md`, the pinned facts); `search` shows the best matches of the memory index and `add` appends a fact |
+| `/doctor` | Runs the setup checks of `decsr doctor` in the background and lists each as `✓`, `⚠` or `✗` with the fix hint |
+| `/plugin` (`/plugins`) | Plugin manager panel (Installed, Discover, Marketplaces, Stats); direct forms `list`, `search <q>`, `info`, `install`, `enable`, `disable`, `remove`, `import`, `reload`, `stats` and `marketplace add\|remove <owner/repo>` (see [Plugins](#plugins)) |
 | `/issue <N\|URL\|bead-id> [--force]` | Fetch a GitHub issue or a bead and send it to the lead as the task (see [Start from an issue](#start-from-an-issue)) |
 | `/import speckit [--phase N] [path]` | Add the open tasks of a Spec Kit `tasks.md` to the graph (see [Import from Spec Kit](#import-from-spec-kit)) |
-| `/resume` | Pick a saved session of this project |
-| `/project` | Switch to another project (see [Switching project](#switching-project)) |
-| `/profile` | Save or apply a profile of role settings (see [Profiles](#profiles)) |
-| `/connect [provider]` | Save an API key for DeepSeek, OpenAI, OpenRouter, Groq or a custom provider (see [Connect a provider](#connect-a-provider)) |
-| `/roles` (`/agents`) | List all roles, with their skills, and create a new one; `/roles save <name>` writes a role created from a plan card for this session to `project.yaml` |
-| `/check` | Run Build & test now, even when nothing changed: adds the node when the graph has none, or resets it to todo (see [Build & test and fix nodes](#build--test-and-fix-nodes)) |
-| `/plugin` (`/plugins`) | List plugins; `/plugin available`, `/plugin install <name>`, `/plugin enable <name>`, `/plugin disable <name>` and `/plugin reload` (see [Plugins](#plugins)) |
-| `/status` | Project path, language, profile, session, node counts, roles with runner/model/effort, parallel limit, custom commands and skills found |
-| `/cost` | Tokens in and out per node and per role, the lead's usage, and the total |
-| `/approve`, `/reject` | The same as `y` and `n` on the approval card: approve the proposed agents and start the runnable nodes, or cancel the split (see [Approval](#approval)) |
-| `/answer` | Show the question or refused-command card that was hidden with `Esc` (see [Question cards](#question-cards)) |
-| `/routing [auto-connected\|auto-role\|manual]` | Show the routing mode and where it comes from (this session, a profile, the project or the default); with a mode, set it for this session and save it to `project.yaml` (see [Agent routing](#agent-routing)) |
-| `/rank` | Fetch the model rankings from Artificial Analysis with the key saved by `decsr connect artificialanalysis`, save them to `~/.decsr/rankings.json` and show the table (sorted by balance score, with the request count and the models that map to no runner). The fetch runs in the background; with no key the view says how to connect and shows the built-in fallback tiers. Data: Artificial Analysis (artificialanalysis.ai) |
-| `/coordinator [on\|off]` | Show or set, for this session, whether the lead reviews each finished batch (see [Coordinator mode](#coordinator-mode)) |
-| `/review [y\|n]` | Run one lead review now; `y` applies the waiting proposals, `n` rejects them (see [Coordinator mode](#coordinator-mode)) |
-| `/budget [amount\|off]` | Spending per runner and the models without a price; `/budget 10` sets this session's budget, `/budget off` removes that override (see [Cost and budget](#cost-and-budget)) |
-| `/export` | Write the session to `.decsr/exports/<session id>.md` (title, transcript, summary, each node with role, status, files and summary) |
-| `/config` (`/menu`) | Leave for the Home launcher: settings, project setup, classic pipeline |
-| `/quit` (`/exit`) | Leave the Workspace (asks first while nodes run) |
+| `/menu` | Leave for the Home launcher: settings, project setup, classic pipeline |
+
+**Moved.** `/cost` is `/usage cost`, `/budget` is `/usage budget`, `/rank` is
+`/model rank`, `/connect` is `/provider add <name>`, `/review` is
+`/coordinator now` (`y` and `n` answer a waiting review) and `/profile` is
+`/model profile save|apply <name>`. Typing an old name prints one line with
+the new one and runs nothing.
+
+**Plugin and custom commands**
+
+| Command | What it does |
+|---|---|
 | `/<name> [args]` | A [custom command](#custom-commands-and-skills) |
 | `/<plugin>:<name> [args]` | A command of a [plugin](#plugins) |
 
@@ -533,7 +601,7 @@ agents:
     read_only: true
 ```
 
-`/profile` opens a list of saved profiles. `Enter` applies one: its roles are
+`/model profile` opens a list of saved profiles. `Enter` applies one: its roles are
 written into the current project's `.decsr/project.yaml` (roles not in the
 profile are left alone; an empty runner, model, effort or description in the
 profile keeps the project's value), `profile: <name>` is recorded under `project:`, and
@@ -552,9 +620,9 @@ clear a globally configured `skills` list (a non-empty list replaces it) or a
 
 ## Connect a provider
 
-`/connect` opens a list of the API providers (DeepSeek, OpenAI, OpenRouter, Groq,
+`/provider add` opens a list of the API providers (DeepSeek, OpenAI, OpenRouter, Groq,
 saved custom providers and "custom provider…"), each marked `✓ saved`, `✓ env`
-or `not set`. `/connect deepseek` skips the list. After you choose one, paste
+or `not set`. `/provider add deepseek` skips the list. After you choose one, paste
 the key into the masked input (it shows dots, never the key). `Enter` tests the
 key with `GET <base_url>/models` and saves it to `~/.decsr/credentials.json`;
 `Esc` cancels. A rejected key (401 or 403) is not saved; when the provider
@@ -659,12 +727,61 @@ frontmatter works in `.decsr/commands/*.md`. A header that is not valid YAML is
 read line by line instead: each `key: value` line at the start of a line is used
 as it is. Only a header with no closing `---` is left in the text.
 
-`/plugin` lists each plugin with its version, scope, state, commands, skills and
-agent roles. A plugin with `hooks/`, `.mcp.json` or `mcpServers` is marked:
-hooks and MCP servers are not used by decsr. `/plugin disable <name>` and
-`/plugin enable <name>` change `~/.decsr/plugins/disabled` (one name per line)
-and reload; `/plugin reload` rescans the folders. These are refused while nodes
-are running, and a node assigned a role that is gone loses that assignment.
+### The plugin manager
+
+`/plugin` opens a panel (teal, like the other Project commands) with four tabs.
+
+- **Installed.** One row per plugin: `●` on, `○` off, and `◌` for a plugin Claude
+  Code has installed that decsr does not load. The columns are the name, the
+  source (`decsr` or `claude`), how many skills, roles and commands it has, and
+  when it was last used (`used 2h ago`, `used today`, `never used`, and
+  `unused 34d ⚠` for an enabled plugin nobody used for 30 days). The line under
+  the list shows what the plugin under the cursor holds. `Space` turns it on or
+  off, `i` shows its info (for a `◌` row it imports the plugin), `x` removes it
+  after a y/n question. A plugin with `hooks/`, `.mcp.json` or `mcpServers` is
+  marked: hooks and MCP servers are not used by decsr. On and off change
+  `~/.decsr/plugins/disabled` (one name per line); they and remove are refused
+  while nodes are running, and a node assigned a role that is gone loses that
+  assignment.
+- **Discover.** The curated catalog, then the plugins of the marketplaces you
+  added. Type to filter (name, description, tags, skills, agents, marketplace);
+  the first line shows `N of M`. `Enter` installs the plugin under the cursor
+  after a question; the install runs in the background. A plugin of a
+  marketplace shows `⚠ untrusted` until you trust that marketplace.
+- **Marketplaces.** `a` adds a marketplace, `x` removes it (after a question),
+  `r` reads it again. A marketplace is a GitHub repository with
+  `.claude-plugin/marketplace.json` in Claude's format: a `plugins` list whose
+  `source` is a relative path inside the repo (`"./plugins/x"`) or
+  `{"source":"github","repo":"owner/repo"}`. Other source kinds are skipped and
+  the result line says how many. The repo is read with a shallow `git clone`
+  into a temporary directory off the UI thread, with a time limit; nothing in
+  it is run. The list is kept in `~/.decsr/marketplaces.yaml` (repo, trusted,
+  fetched_at and the entries). The first install from a marketplace asks
+  `Trust <owner/repo>? Plugins can add skills, roles and commands that agents
+  will follow. y/n`; a yes is recorded and the install question follows. If a
+  marketplace lists a name the curated catalog has, the catalog entry is shown.
+  The curated catalog itself still installs only its exact entries.
+- **Stats.** Per plugin: the nodes that ran with one of its skills
+  (`<plugin>:<skill>` in the node's skills) or one of its roles
+  (`<plugin>:<agent>`), their tokens and cost, and the last use, from the saved
+  sessions of this project (the last year) and the live session. The same data
+  gives the last-used column of the Installed tab.
+
+Claude Code plugins: the Installed tab lists what Claude Code has installed on
+this machine, read from `~/.claude/plugins/installed_plugins.json`. Only the
+`~/.claude/plugins` folder is read (an install path outside
+`~/.claude/plugins/cache` is ignored); login files and settings under `~/.claude`
+are never opened. `/plugin import <name>` (or `i` on a `◌` row) copies the plugin
+directory to `~/.decsr/plugins/<name>` in the layout above (a plugin without a
+`plugin.json` gets one written) and reloads. Hooks and MCP servers stay unused.
+An existing `~/.decsr/plugins/<name>` is never replaced.
+
+Direct forms, each printing one result line:
+`/plugin list`, `search <q>`, `info <name>`, `install <name>`, `enable <name>`,
+`disable <name>`, `remove <name>`, `import <name>`, `reload`, `stats`,
+`marketplace add <owner/repo>` and `marketplace remove <owner/repo>`. `install`
+and `remove` ask first. `/plugin available` prints a hint to `/plugin search`.
+
 ### How the lead picks skills
 
 When the lead splits a task it is told which skills the enabled plugins offer
@@ -709,9 +826,10 @@ and the nodes keep the skill id (the inspector shows `(not installed)`). A
 request left pending (for example in a resumed session) shows as the ghost
 prompt `/plugin install <name>`.
 
-`/plugin available` lists the catalog (name, installed or disabled or not
-installed, description, skills, agents). `/plugin install <name>` asks the same
-question and installs one; a name outside the catalog is refused.
+The Discover tab and `/plugin search` list the catalog. `/plugin install <name>`
+asks the same question and installs one; the lead's requests only ever name
+catalog plugins, and a name that is neither in the catalog nor in an added
+marketplace is refused.
 
 ### Recommended set
 
@@ -734,7 +852,7 @@ The profile lists only `skills` (the role's existing skills from
 `~/.decsr/config.yaml`, then the plugin ones) and `read_only` (copied when
 true). It has no runner, model, effort or description, and an empty value in a
 profile keeps what the project already has, so applying it only adds skills.
-Open decsr, run `/plugin` to see the plugins and `/profile plugins` to apply
+Open decsr, run `/plugin` to see the plugins and `/model profile apply plugins` to apply
 the profile.
 
 ## Lean runs
@@ -757,12 +875,87 @@ A task runs only what it needs.
   rendered as Markdown like the lead's messages. The run summary line for the
   node says `answer above`. The output screen keeps the full output as before.
 
+## Chatting while nodes run
+
+The prompt stays usable while nodes run: a task you type goes to the lead at
+once and running nodes are never stopped. The lead is told the live graph:
+for each work node its ID, title, status, role, a one-line description and the
+files it touched so far (for a running node, whatever is known yet). Only two
+things make it say `wait for the lead`: it is still planning a split or running
+the coordinator review, or an earlier plan card has changes you have not
+answered yet (`y` or `n` first).
+
+The lead keeps the rules of a follow-up: a new sub-task that touches a file a
+running node touches, or needs its result, depends on that node, so it waits in
+the queue. Besides new sub-tasks it may return a `===CHANGES===` section to
+change existing nodes the new task affects:
+
+```
+===CHANGES===
+[{"node":"T3","action":"update","description":"...","depends_on":["T1"],"reason":"..."},
+ {"node":"T4","action":"cancel","reason":"..."},
+ {"node":"T2","action":"note","message":"...","reason":"..."}]
+```
+
+- `update` (a new description, and optionally a new `depends_on`) and `cancel`
+  are only valid for a node that has not started (todo, or waiting without a
+  run). A cancelled node is removed and the dependencies on it with it.
+- `note` is for a node that ran. A running node keeps the note in its pending
+  reply and continues with it after its current attempt. A finished node starts
+  a new attempt, which resumes its conversation, as soon as it can start.
+
+Entries that are not valid (unknown node or action, an update of a node that
+already ran, an empty note, a dependency that does not exist) are dropped, and
+a warning line says why.
+
+The plan card shows one line per change with the lead's reason:
+
+```
+Approve plan · 1 node · mode auto-connected · 3 changes
+  ...
+~ T3 changed: also handle the --port flag (new task needs it)
+✗ T4 cancelled: replaced by T7
+↻ T2 after it finishes: keep the old flag name as an alias
+```
+
+A note to a finished node reads `starts again` instead of
+`after it finishes`. The card is needed whenever there is any change or any new
+node writes; a plan of only new read-only nodes and no changes starts at once.
+`y` applies the changes and approves the new nodes, `e` edits the agent of a
+new node and `n` drops the changes and the new nodes. A change that cannot be
+applied any more (the node started in the meantime, or the new dependencies
+would make a cycle) is reported in the chat and the rest still applies. The
+pending changes are not saved: leave the Workspace and they are gone. In an
+unattended run (autonomy level 2 or 3, an automation) the changes are applied
+with the nodes, with an `auto ›` line, unless `routing.auto_approve` is `false`.
+
+## What the lead and the workers receive
+
+Every prompt is kept small, because the agent steps send it again and again.
+
+- **One-shot calls** (the lead's split, a direct answer, the coordinator
+  review) run claude with all built-in tools off (`--tools ""`), so no tool
+  schemas are sent. Other runners have no such switch.
+- **The lead** gets the roles (each description cut to one short line), the
+  installed skills (id and a description of at most 80 characters), the
+  plugin catalog on one line per plugin, the project overview (structure, file
+  list, recent commits, capped at 10K characters, without source excerpts),
+  the summary of the finished work and, for a follow-up, the live graph.
+- **A worker** gets the project context, the summaries and files of its
+  dependencies, the skills of its role and its task. It does not get the source
+  excerpts when it runs as an agent (it can read the files), nor the text its
+  runner loads by itself (`CLAUDE.md` for claude, `AGENTS.md` for codex and
+  opencode). The saved context pack is cut at 4K characters, the session
+  summary at 2K characters and the contents of the dependency files at 24K
+  characters in all (10K for one file); the files that do not fit are listed by
+  name, and the agent reads them when it needs them.
+
 ## Agent routing
 
 By default each node runs on the agent of its role. Routing lets the lead's
 split hand small and medium nodes to a cheaper agent. It is set by
 `routing.mode` in `~/.decsr/config.yaml`, `.decsr/project.yaml` or a profile
-(a profile saved with `/profile` stores the mode, and applying it writes the
+(a profile saved with `/model profile` stores the mode, and applying it writes the
 mode to `project.yaml`); the session freezes the mode at its first split.
 
 | Mode | Behaviour |
@@ -780,7 +973,7 @@ routing:
 In the two auto modes the lead adds a `difficulty` (`small`, `medium`, `large`)
 and a one-line `reason` to every sub-task, in the same call as the split. The
 lead only grades: decsr picks the agent itself, from the saved rankings (see
-`/rank`) or the built-in fallback tiers, so the same grade gives the same pick.
+`/model rank`) or the built-in fallback tiers, so the same grade gives the same pick.
 
 - The pick never costs more per task than the role's own (model, effort) pair.
 - `small` needs an intelligence index of at least 30; `medium` needs at least
@@ -832,8 +1025,8 @@ instead.
 
 | Key | Action |
 |-----|--------|
-| `y` (or `/approve`) | Approve every agent and start the nodes that can run |
-| `n` (or `/reject`) | Cancel the split: its nodes are removed and a notice says which |
+| `y` | Approve every agent and start the nodes that can run |
+| `n` | Cancel the split: its nodes are removed and a notice says which |
 | `↑` `↓` | Select a node (the selected row is marked `▸`) |
 | `e` | Edit the agent of the selected node |
 | `a` | Pick another role for the selected node |
@@ -1029,9 +1222,37 @@ or is stopped. `s` still stops the run, and stopping keeps the queued reply:
 the next attempt starts right after. Closing decsr stops the node and leaves
 the reply on a waiting node.
 
-**What the new attempt gets.** The context is rebuilt by replay, so it works for
-every runner. The node's task and the usual project context come first. The
-reply attempt then adds:
+**What the new attempt gets.** A later attempt continues the node's own CLI
+conversation, so the node remembers its earlier work and the repeated context
+is served from the provider's cache. It sends only the new message: your reply,
+the answer to a question card, `The command ... is now allowed`, or, for a retry
+after a usage limit or a failure, `Your previous run stopped before it finished.
+Continue where you left off.` The project context and the excerpt of the earlier
+attempt are not built again. The node runs in the same working directory
+(its worktree path) with the same allow list, model and effort.
+
+The runner reports the id of its conversation in its JSON stream; decsr keeps it
+on the node (`session_id`, with the runner and the attempt it came from) and in
+each archived attempt, and resumes it with the CLI's own flag:
+
+| Runner | Id comes from | Resume |
+|---|---|---|
+| claude | `system`/`init` event, `session_id` | `--resume <id>` (a node run no longer passes `--no-session-persistence`; one-shot calls such as the lead split, direct answers, the coordinator review and pings still do) |
+| codex | `thread.started`, `thread_id` | `codex exec resume <id> -` (the prompt comes on stdin; the sandbox is set with `-c sandbox_mode=...`) |
+| opencode | `sessionID` of the events | `--session <id>` |
+| dsh | `session` event, `sessionId` | `--session-id <id>` |
+
+Only the conversation of the same runner is resumed: a node moved to another
+runner or role starts fresh. claude does not store its system prompt in the
+session, so it is sent again with the resume (the context part rebuilt as for a
+first attempt, but without the excerpt); codex, opencode and dsh keep it in
+the first message of their conversation. Only each CLI's own session files
+are used.
+
+**When resuming is not possible.** A node without a session id, a runner that
+cannot resume (the HTTP runners), or a resume that fails at start (the CLI says
+the session does not exist, before any output) runs a fresh attempt instead.
+That attempt rebuilds the context by replay, as before:
 
 ```
 Previous attempt (attempt 1, failed):
@@ -1044,8 +1265,11 @@ The user replied:
 The excerpt is at most 8,000 characters: the previous summary, the commands
 with the tail of their output (failed ones first), the errors, the files
 touched and the last assistant message (at most 1,000 characters). Reasoning is
-never included, and where text was cut it says `[… N characters omitted]`.
-Resuming the CLI's own session is not used.
+never included, and where text was cut it says `[… N characters omitted]`. The
+chat says once `⚠ T1: could not resume its conversation, started fresh with a
+summary` when a resume failed. opencode creates a session for an id it does not
+know, so for opencode a lost session is not detected: the attempt runs in a new
+conversation without the history.
 
 The session keeps the earlier attempts of a node (summary, error, file
 statistics, commit); the activity timeline is kept for the three most recent
@@ -1063,6 +1287,7 @@ summary: <one or two sentences>
 question: <only when status is question: the exact question for the user>
 options: <only when status is question: numbered lines, see below>
 recommended: <number of the option the worker recommends>
+next: <optional: at most 3 lines, one follow-up each>
 ```
 
 decsr reads the last `REPORT` line of the reply. Key names are case-insensitive;
@@ -1073,6 +1298,11 @@ key. An unknown `status` counts as `done`. A reply without a report counts as
 block is not part of the summary shown on the card. The report is stored on the
 node (`report` in the session file) and in each archived attempt.
 
+- `next` is optional and asked for only when real follow-up work remains
+  outside the node's own sub-task; most reports have none. It holds at most 3
+  lines, `<short imperative title> - <one sentence>` each (a numbered or dashed
+  line is fine); more are dropped, and so are empty ones. It is kept as
+  `report.next`. See [Suggested follow-ups](#suggested-follow-ups).
 - `done`: the node is done, as before.
 - `question` or `blocked`: the node ends **waiting** (`◇ waiting`), not done.
   Its changes are committed and merged into the session branch like those of a
@@ -1197,6 +1427,27 @@ A read-only node whose reply was printed in the chat reads `answer above`. The `
 waiting nodes, `/merge` when the session is isolated and Build & test passed,
 and `@T1 ...` to retry a failed node. It appears at every autonomy level.
 
+### Suggested follow-ups
+
+When a run ends and any node that ended in it suggested follow-ups (the `next`
+lines of its report, the same text suggested twice counts once), the run summary
+adds them before the `Next:` line:
+
+```
+Suggested follow-ups
+  1. T2: update the README for the new --port flag
+  2. T3: add a test for the empty config file
+  y plan them · n drop
+```
+
+The same choice shows as a card in the feed. `y` sends one follow-up task to the
+lead, as if you had typed it (`Follow-ups suggested by the finished nodes:` and
+one `- T2: ...` line each); the lead splits it and the plan card still needs
+your `y` before anything runs. `n` drops them. The keys act only while the feed
+has the focus, so they never take a letter you are typing in the prompt. `Esc`
+hides the card and `/answer` brings it back. The follow-ups are kept until you
+pick `y` or `n` or the next run summary replaces them.
+
 Reply to the node (`m`, or `@T3 <message>`) to answer. The reply archives the
 attempt, with its report, and starts the next one. Its context includes what the
 node asked:
@@ -1279,7 +1530,7 @@ the valid ones still count. At most 8 proposals are applied per review.
 activity feed: `+ add T7 ...`, `~ change T4 ...`, `x cancel T5 ...`, skipped
 proposals dim with their reason, and a "needs you" notification. `y` applies all
 valid proposals and `n` rejects them (graph, sidebar or feed focus, shown in the
-hint bar; `/review y` and `/review n` do the same from the prompt). The proposals
+hint bar; y and n are keys of the graph). The proposals
 are checked again when you press `y`, so a node that changed meanwhile is
 skipped. At level 2 and 3 the valid proposals are applied at once, each with a
 line `auto › lead: added T7 ...`, and then the new nodes get their roles and run
@@ -1289,8 +1540,8 @@ last 20 reviews are kept in the session.
 
 **Loop guard.** At most 5 reviews run by themselves per task. The count resets
 when a new task, issue or import adds nodes. After the fifth review a "needs
-you" notification says `5 lead reviews done for this task - /review to
-continue` and no sixth starts by itself. `/review` runs one review now, also
+you" notification says `5 lead reviews done for this task - /coordinator now to
+continue` and no sixth starts by itself. `/coordinator now` runs one review now, also
 past the limit (it counts, and does not reset the counter). It is refused while
 nodes run, while a review waits for `y` or `n`, and when the budget is reached.
 `Esc` cancels a review that is running.
@@ -1373,18 +1624,18 @@ session (`cost_usd`, `cost_known`); the session total is the nodes plus the
 lead's tokens, priced with the `pm` model.
 
 **Unknown prices.** A model without a price has an unknown cost. The status bar
-then shows `≥ $1.23` (at least), and `/budget` lists the runners and models that
+then shows `≥ $1.23` (at least), and `/usage budget` lists the runners and models that
 have no price. The budget counts only the known cost.
 
 **Budget.** Before it starts any node (`r`, auto mode, a fix or a follow-up)
 the engine compares the known cost of the session with the budget. At the warn
 share (`budget_warn_pct`) it prints a message once and sends a needs-you
 notification. When the cost reaches the budget it prints `Budget reached: $5.02
-of $5.00 — raise workspace.budget_usd or /budget <amount> to continue` and
+of $5.00 — raise workspace.budget_usd or /usage budget <amount> to continue` and
 sends the notification; no new node starts and ready nodes stay ready. Nodes
 that are already running are not stopped, so the final cost can pass the budget.
-`/budget 10` sets the budget of this session only (saved in the session as
-`budget_usd`); `/budget off` removes that override; `/budget` alone shows the
+`/usage budget 10` sets the budget of this session only (saved in the session as
+`budget_usd`); `/usage budget off` removes that override; `/usage budget` alone shows the
 spending per runner. The cost of a node adds up over its attempts: a retried node
 keeps the cost of the earlier runs, so they stay in the total and in the budget
 check. The tokens shown for the node are those of its latest run. If any attempt
@@ -1479,7 +1730,8 @@ Press `d` on a node (sidebar or main pane, Activity or Graph mode) to see what
 it changed, full screen. Finished cards in the feed show `d diff` in their dim
 action row. `D` opens the diff of the whole session: everything the session
 branch `decsr/<session>` holds that your current branch does not
-(`git diff HEAD...decsr/<session>`).
+(`git diff HEAD...decsr/<session>`); in a shared checkout it is the working
+tree against `HEAD`, untracked files included. `/diff` does the same.
 
 Where the diff comes from:
 
@@ -1766,7 +2018,7 @@ dim line to the conversation that starts with `auto ›`, for example
 Safety rules:
 
 - Automation never runs `/merge` and never merges the pull request.
-- Level 3 needs a budget (`workspace.budget_usd` above 0, or `/budget`) and
+- Level 3 needs a budget (`workspace.budget_usd` above 0, or `/usage budget`) and
   worktree isolation. `/autonomy 3` without them is refused and sets level 2.
   A configured level 3 without them is announced once and behaves as level 2.
 - A reached budget stops automation at every level: no new fix nodes and no
@@ -1864,7 +2116,7 @@ with other flags, e.g. `decsr --tmux --issue 42`.
 
 ## Reaching the classic pipeline
 
-- Type `/config` (or `/menu`) in the Workspace to open the Home launcher. Its
+- Type `/menu` in the Workspace to open the Home launcher. Its
   Classic pipeline action (`1`) starts the old New Task flow; Workspace (`w`)
   returns here, and `Enter` on a saved session opens the Workspace on it.
 - Changes made in the menu (settings, a different project) apply when you come

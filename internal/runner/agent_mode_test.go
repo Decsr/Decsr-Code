@@ -49,7 +49,7 @@ func claudeArgv(t *testing.T, req CompletionRequest) []string {
 
 func TestClaudeTextModeKeepsToolsOff(t *testing.T) {
 	got := claudeArgv(t, CompletionRequest{})
-	want := []string{"--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--setting-sources", "project,local", "--allowedTools", "", "--model", "claude-opus-5-5", "--effort", "high"}
+	want := []string{"--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--setting-sources", "project,local", "--tools", "", "--model", "claude-opus-5-5", "--effort", "high"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %q, want %q", got, want)
 	}

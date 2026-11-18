@@ -14,7 +14,7 @@ func TestRankShowsFetchingThenTable(t *testing.T) {
 	if cmd == nil || !h.m.rankBusy {
 		t.Fatal("the fetch must run as a command")
 	}
-	h.want("Rank")
+	h.want("Model")
 	h.want("Fetching the rankings")
 
 	h.send(cmd())
@@ -27,13 +27,13 @@ func TestRankShowsFetchingThenTable(t *testing.T) {
 	h.key("esc")
 }
 
-func TestRankIsListedAndModelsIsNot(t *testing.T) {
+func TestModelIsListedAndRankIsNot(t *testing.T) {
 	h := newWSHarness(t)
 	found := map[string]bool{}
 	for _, c := range h.m.commandList() {
 		found[c.name] = true
 	}
-	if !found["/rank"] || found["/models"] {
+	if !found["/model"] || found["/rank"] || found["/models"] {
 		t.Fatalf("commands: %v", found)
 	}
 }

@@ -133,6 +133,15 @@ func (e *Engine) applyReplyLocked(n *Node, msg string) (ReplyResult, *started, [
 	return res, s, notes
 }
 
+// sessionOf is the CLI conversation of the node's current attempt, "" when the
+// attempt did not start one.
+func sessionOf(n *Node) string {
+	if n.SessionAttempt == n.AttemptNumber() {
+		return n.SessionID
+	}
+	return ""
+}
+
 // archiveLocked moves the finished attempt of n into Attempts and numbers the
 // next one. Only the most recent attempts keep their activity.
 func (e *Engine) archiveLocked(n *Node) {
@@ -142,6 +151,7 @@ func (e *Engine) archiveLocked(n *Node) {
 		Summary: n.Summary, Report: cloneReport(n.Report), Error: n.Error,
 		FileStats: append([]FileStat(nil), n.FileStats...), Commit: n.Commit,
 		Activity: append(n.Activity[:0:0], n.Activity...), ActivityDropped: n.ActivityDropped,
+		SessionID: sessionOf(n),
 	})
 	for i := 0; i < len(n.Attempts)-maxAttemptActivity; i++ {
 		n.Attempts[i].Activity, n.Attempts[i].ActivityDropped = nil, 0

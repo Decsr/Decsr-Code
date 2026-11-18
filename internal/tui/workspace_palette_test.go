@@ -135,7 +135,7 @@ func TestPaletteOpensFromEveryFocusAndShowsGroups(t *testing.T) {
 	}
 	h.palette("rev")
 	v := h.view()
-	for _, want := range []string{"Go to", "› rev", "Commands", "/review", "Nodes", "Review error messages", "Sessions", "Refactor review flow", "Projects", "reviewer"} {
+	for _, want := range []string{"Go to", "› rev", "Commands", "Nodes", "Review error messages", "Sessions", "Refactor review flow", "Projects", "reviewer"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("palette lacks %q:\n%s", want, v)
 		}
@@ -166,12 +166,12 @@ func TestPaletteEnterCommand(t *testing.T) {
 	h.m.setFocus(wsFocusGraph)
 	h.palette("/status")
 	h.key("enter") // no arguments: runs now
-	if h.m.overlay != wsOverlayInfo {
-		t.Errorf("/status opens its info: overlay=%v\n%s", h.m.overlay, h.view())
+	if h.m.overlay != wsOverlayPanel || h.m.panel.kind != panelStatus {
+		t.Errorf("/status opens its panel: overlay=%v\n%s", h.m.overlay, h.view())
 	}
 	h.key("esc")
 
-	for _, c := range []string{"/pr", "/merge", "/clear", "/compact", "/plugin", "/review", "/issue", "/export", "/quit"} {
+	for _, c := range []string{"/pr", "/merge", "/clear", "/compact", "/plugin", "/coordinator", "/issue", "/export", "/quit"} {
 		h.m.input.Reset()
 		h.m.setFocus(wsFocusGraph)
 		h.palette(c)

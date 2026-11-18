@@ -80,7 +80,7 @@ func (m workspaceModel) coordMaybeReview() (workspaceModel, tea.Cmd) {
 		return m, nil
 	case m.eng.ReviewRounds() >= workspace.MaxReviewRounds:
 		m.reviewDirty = false
-		body := fmt.Sprintf("%d lead reviews done for this task — /review to continue", workspace.MaxReviewRounds)
+		body := fmt.Sprintf("%d lead reviews done for this task — /coordinator now to continue", workspace.MaxReviewRounds)
 		m.say("system", body)
 		m.notifyNote(notify.NeedsYou, body)
 		return m, nil
@@ -215,7 +215,7 @@ func (m workspaceModel) onReviewDone(msg wsReviewDoneMsg) (tea.Model, tea.Cmd) {
 		rv.Applied, rv.Skipped = m.eng.PreviewProposals(rv.Proposals, opts)
 		if len(rv.Applied) > 0 {
 			rv.State = workspace.ReviewPending
-			m.say("system", fmt.Sprintf("lead review %d: %d %s proposed — y applies, n rejects (or /review y, /review n)",
+			m.say("system", fmt.Sprintf("lead review %d: %d %s proposed — y applies, n rejects",
 				rv.Round, len(rv.Applied), pluralize(len(rv.Applied), "change", "changes")))
 			m.notifyNote(notify.NeedsYou, fmt.Sprintf("Lead review: %d %s proposed — y applies, n rejects",
 				len(rv.Applied), pluralize(len(rv.Applied), "change", "changes")))
@@ -265,7 +265,7 @@ func (m workspaceModel) reviewResolve(apply bool) (workspaceModel, tea.Cmd) {
 	return m, nil
 }
 
-// cmdReview is /review [y|n].
+// cmdReview is /coordinator now; y and n apply or reject the waiting proposals.
 func (m workspaceModel) cmdReview(args string) (tea.Model, tea.Cmd) {
 	switch strings.ToLower(strings.TrimSpace(args)) {
 	case "y", "yes", "apply":

@@ -461,3 +461,11 @@ func TestSplitPromptHasTheLeanRules(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitPromptCutsLongRoleDescriptions(t *testing.T) {
+	long := strings.Repeat("word ", 400)
+	p := buildSplitPrompt("t", []Role{{Name: "big", Description: long}}, "ctx", nil, 0, SplitOptions{})
+	if strings.Contains(p, long) || !strings.Contains(p, "- big: word word") {
+		t.Errorf("role description not cut:\n%.300s", p)
+	}
+}

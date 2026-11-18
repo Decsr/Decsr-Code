@@ -204,18 +204,14 @@ func TestWorkspacePaletteTouchesInput(t *testing.T) {
 		h.size(sz[0], sz[1])
 		h.key("/")
 		lines := strings.Split(h.view(), "\n")
-		last, box := -1, -1
+		box := -1
 		for i, l := range lines {
-			if strings.HasPrefix(strings.TrimSpace(l), "▸ /") || strings.HasPrefix(strings.TrimSpace(l), "/") ||
-				strings.HasPrefix(strings.TrimSpace(l), "↑ ") || strings.HasPrefix(strings.TrimSpace(l), "↓ ") {
-				last = i
-			}
-			if box < 0 && strings.HasPrefix(strings.TrimSpace(l), "╭") && i > 3 && last >= 0 {
-				box = i
+			if strings.HasPrefix(strings.TrimSpace(l), "╭") {
+				box = i // the last box top is the prompt box
 			}
 		}
-		if last < 0 || box != last+1 {
-			t.Fatalf("%v: command list ends at line %d, input box starts at %d:\n%s", sz, last, box, h.view())
+		if prev := strings.TrimSpace(lines[box-1]); box < 4 || !(strings.HasPrefix(prev, "╰") || strings.HasPrefix(prev, "▸ /")) {
+			t.Fatalf("%v: the command list does not end right above the input box (box at %d):\n%s", sz, box, h.view())
 		}
 	}
 }
@@ -454,17 +450,15 @@ func TestWorkspacePaletteScrollsToLastCommand(t *testing.T) {
 	h.size(80, 24)
 	h.key("/")
 	cmds := h.m.cmdMatches("/")
-	more := fmt.Sprintf("%d more", len(cmds)-3) // three rows are visible
-	h.want("↓ " + more)
-	h.wantNot("↑ 1")
+	h.want("more · ↑↓ Tab")
+	h.wantNot("above")
 	last := cmds[len(cmds)-1].name
-	h.wantNot(last + " ")
+	h.wantNot("› " + last)
 	for range len(cmds) - 1 {
 		h.key("down")
 	}
-	h.want("▸ " + last)
-	h.want("↑ " + more)
-	h.wantNot("more\n")
+	h.want("› " + last)
+	h.want("above · ↑↓ Tab")
 	h.key("up")
-	h.want("▸ " + cmds[len(cmds)-2].name)
+	h.want("› " + cmds[len(cmds)-2].name)
 }

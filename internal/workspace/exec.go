@@ -44,7 +44,13 @@ const (
 	// EventFallback reports that the node's assigned agent could not be used
 	// and the role's own agent ran instead; Text is the reason.
 	EventFallback EventType = "fallback"
-	EventDone     EventType = "done"
+	// EventSession reports the id of the node's own CLI conversation (Text) and
+	// the runner it belongs to (Runner). Another attempt resumes it.
+	EventSession EventType = "session"
+	// EventResumeFailed reports that a node could not resume its conversation
+	// and started fresh with a summary; Text is the line to show.
+	EventResumeFailed EventType = "resume_failed"
+	EventDone         EventType = "done"
 	// EventWaiting ends a node that reported a question or was blocked, in
 	// place of EventDone. Text is the question (or the blocked summary); the
 	// node's Report holds the details.
@@ -123,9 +129,9 @@ const (
 	// checkTimeout bounds each check command (builds and test suites can be slow).
 	checkTimeout = 15 * time.Minute
 	// maxContextFileBytes caps one file in the "Current files" section.
-	maxContextFileBytes = 24 * 1024
+	maxContextFileBytes = 10 * 1024
 	// maxContextFilesBytes caps the whole "Current files" section.
-	maxContextFilesBytes = 120 * 1024
+	maxContextFilesBytes = 24 * 1024
 
 	noCheckCommandsMsg = "no build or test command is known for this project yet (set project.test_cmd or pick a language in Project Setup)"
 )
@@ -134,6 +140,7 @@ type executor struct {
 	root           string
 	cfg            config.Config
 	projectContext string
+	contextFor     ContextFunc // overrides projectContext per node; may be nil
 	newRunner      func(config.AgentConfig) (runner.LLMRunner, error)
 	checkCommands  func() []string        // commands for a check node without Commands; may be nil
 	checkTimeout   time.Duration          // 0 = checkTimeout
@@ -143,7 +150,7 @@ type executor struct {
 }
 
 // maxSessionSummaryChars caps the session summary given to a worker.
-const maxSessionSummaryChars = 4000
+const maxSessionSummaryChars = 2000
 
 // NewExecutor returns the real Executor: work nodes go through the generic
 // worker, check nodes run their shell commands.
@@ -167,14 +174,25 @@ func NewExecutorWithSummary(root string, cfg config.Config, projectContext strin
 // node runs in its own git worktree and Build & test runs in the integration
 // worktree. A nil iso keeps every node in root.
 func NewExecutorIsolated(root string, cfg config.Config, projectContext string, checkCommands func() []string, summary func() string, iso *Isolator) Executor {
+	return NewExecutorCtx(root, cfg, func(string, bool) string { return projectContext }, checkCommands, summary, iso)
+}
+
+// ContextFunc gives the project context for a worker that runs on the named
+// runner, in agent mode or not.
+type ContextFunc func(runnerName string, agentMode bool) string
+
+// NewExecutorCtx is NewExecutorIsolated with a project context that depends on
+// the runner and mode of each node: text the runner loads itself, and source
+// excerpts an agent can read on its own, are then left out.
+func NewExecutorCtx(root string, cfg config.Config, ctxFor ContextFunc, checkCommands func() []string, summary func() string, iso *Isolator) Executor {
 	loader := skills.New("")
 	return &executor{
-		root:           root,
-		cfg:            cfg,
-		projectContext: projectContext,
-		checkCommands:  checkCommands,
-		summary:        summary,
-		iso:            iso,
+		root:          root,
+		cfg:           cfg,
+		contextFor:    ctxFor,
+		checkCommands: checkCommands,
+		summary:       summary,
+		iso:           iso,
 		newRunner: func(ac config.AgentConfig) (runner.LLMRunner, error) {
 			return runner.New(ac, loader, cfg.PromptLanguage)
 		},
@@ -250,11 +268,28 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	throttle := newUsageThrottle(time.Now)
 	var res agent.WorkerResult
 	var err error
-	for attempt := 0; ; attempt++ {
-		res, err = x.runWorker(ctx, r, wx, cur, readOnly, role, n, g, rolePrompt, buildCommands, emit, throttle)
+	sess := &sessionState{id: n.SessionID, runner: n.SessionRunner, attempt: n.SessionAttempt}
+	noResume, limitFallback := false, false
+	for {
+		resume := ""
+		if !noResume && sess.id != "" && sess.runner == cur.Runner && runner.CanResume(cur.Runner) {
+			resume = sess.id
+		}
+		res, err = x.runWorker(ctx, r, wx, cur, readOnly, role, n, g, rolePrompt, buildCommands, emit, throttle, sess, resume)
+		// A resume that fails at start: the node starts over with a summary of
+		// what it did, as an attempt without a conversation does.
+		var re *runner.ResumeError
+		if resume != "" && errors.As(err, &re) && ctx.Err() == nil {
+			noResume = true
+			emit(Event{NodeID: n.ID, Type: EventResumeFailed,
+				Text: fmt.Sprintf("\u26a0 %s: could not resume its conversation, started fresh with a summary", n.ID)})
+			emit(Event{NodeID: n.ID, Type: EventOutput, Text: fmt.Sprintf("\u26a0 could not resume its conversation (%s), started fresh with a summary\n", oneLineErr(re))})
+			continue
+		}
 		// A rate limit on the assigned agent before it did any work: the
 		// role's own agent takes over once.
-		if attempt == 0 && usedAssign(n, cur, role) && asRateLimit(err) != nil && res.Usage.OutputTokens == 0 && ctx.Err() == nil {
+		if !limitFallback && usedAssign(n, cur, role) && asRateLimit(err) != nil && res.Usage.OutputTokens == 0 && ctx.Err() == nil {
+			limitFallback = true
 			cur = role.Agent
 			rr, rerr := x.newRunner(cur)
 			if rerr != nil {
@@ -366,16 +401,53 @@ func (x *executor) nodeAgent(role Role, n *Node) (config.AgentConfig, runner.LLM
 	return ac, r, ""
 }
 
-// runWorker is one worker run with the agent cur.
+// sessionState is the CLI conversation of a node while it runs: the latest id
+// the runner reported, the runner it belongs to and the attempt that got it.
+type sessionState struct {
+	id, runner string
+	attempt    int
+}
+
+// continueMessage is what a resumed attempt is sent when no new message from
+// the user came with it (a retry of an attempt that stopped early).
+const continueMessage = "Your previous run stopped before it finished. Continue where you left off."
+
+// runWorker is one worker run with the agent cur. A non-empty resume is the id
+// of the node's own CLI conversation to continue: the run sends only the user's
+// new message (or continueMessage for a retry) and no excerpt of the earlier
+// attempt.
 func (x *executor) runWorker(ctx context.Context, r runner.LLMRunner, wx executor, cur config.AgentConfig, readOnly bool, role Role, n *Node, g *Graph,
-	rolePrompt string, buildCommands []string, emit func(Event), throttle *usageThrottle) (agent.WorkerResult, error) {
+	rolePrompt string, buildCommands []string, emit func(Event), throttle *usageThrottle, sess *sessionState, resume string) (agent.WorkerResult, error) {
+	if wx.contextFor != nil {
+		wx.projectContext = wx.contextFor(cur.Runner, role.Agent.EffectiveMode() == config.ModeAgent)
+	}
+	wn, message := n, ""
+	if resume != "" {
+		// The conversation has the earlier attempts: leave the excerpt out of
+		// the context (a runner that cannot store its system prompt gets the
+		// context again, without it).
+		c := *n
+		c.Reply = ""
+		wn = &c
+		message = continueMessage
+		if n.Reply != "" && sess.attempt < n.AttemptNumber() {
+			message = n.Reply
+		}
+	}
 	return agent.RunWorker(ctx, r, wx.root, x.cfg, agent.WorkerRequest{
+		KeepSession:   runner.CanResume(cur.Runner),
+		ResumeID:      resume,
+		ResumeMessage: message,
+		OnSession: func(id string) {
+			*sess = sessionState{id: id, runner: cur.Runner, attempt: n.AttemptNumber()}
+			emit(Event{NodeID: n.ID, Type: EventSession, Text: id, Runner: cur.Runner})
+		},
 		RolePrompt:      rolePrompt,
 		Skills:          role.Agent.Skills,
 		Model:           cur.Model,
 		Title:           n.Title,
 		Description:     n.Description,
-		Context:         wx.workContext(g, n),
+		Context:         wx.workContext(g, wn),
 		ReadOnly:        readOnly,
 		Mode:            role.Agent.EffectiveMode(),
 		MCP:             role.Agent.MCP,
@@ -617,7 +689,7 @@ func (x *executor) currentFiles(g *Graph, n *Node) string {
 		if sb.Len() == 0 {
 			sb.WriteString("\n\n## Current files\n")
 		}
-		sb.WriteString("\nFiles not shown (size budget): " + strings.Join(left, ", ") + "\n")
+		sb.WriteString("\nFiles not shown (size budget, read them if you need them): " + strings.Join(left, ", ") + "\n")
 	}
 	return sb.String()
 }

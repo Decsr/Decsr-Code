@@ -434,27 +434,10 @@ func TestFollowUpSplitAsksAboutNewRequest(t *testing.T) {
 	}
 }
 
-func TestPluginAvailableListsCatalogWithState(t *testing.T) {
+func TestPluginAvailablePointsToSearch(t *testing.T) {
 	h := lpHarness(t)
-	wsWritePlugin(t, os.Getenv("HOME"), "modern-cpp", map[string]string{"skills/modern-cpp/SKILL.md": "---\ndescription: d\n---\nbody"})
-	wsWritePlugin(t, os.Getenv("HOME"), "modern-python", map[string]string{"skills/modern-python/SKILL.md": "---\ndescription: d\n---\nbody"})
-	if err := plugins.SetEnabled("modern-python", false); err != nil {
-		t.Fatal(err)
-	}
-	h.m = h.m.reloadPlugins()
 	h.typeCmd("/plugin available")
-	h.want("Plugin catalog")
-	lines := h.m.catalogLines()
-	for _, want := range []string{"modern-cpp · installed", "modern-python · installed, disabled", "superpowers · not installed"} {
-		if !containsLine(lines, want) {
-			t.Errorf("catalog lacks %q", want)
-		}
-	}
-	for _, l := range lines {
-		if ansi.StringWidth(l) > 76 {
-			t.Errorf("line of %d cells: %q", ansi.StringWidth(l), l)
-		}
-	}
+	h.want("/plugin search")
 }
 
 func TestPluginInstallCommand(t *testing.T) {

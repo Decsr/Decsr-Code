@@ -7,7 +7,7 @@ what needs me now?*
 > **Default screen:** `decsr` with no arguments opens the [Workspace](workspace.md)
 > (prompt, node graph, assign agents; saved sessions per project, `decsr resume`).
 > This reference covers the classic pipeline cockpit, reached from the Home
-> launcher with `/config` (or `/menu`) in the Workspace.
+> launcher with `/menu` in the Workspace.
 
 The run header is two lines. Line 1 is the task title, an optional pipeline
 tag, a 7-segment phase strip, an optional state label (`FAILED`, `GATE`,
@@ -255,7 +255,7 @@ detection stays in effect.
 
 ## Home launcher
 
-`/config` (or `/menu`) in the Workspace opens Home, in the galaxy look: the
+`/menu` in the Workspace opens Home, in the galaxy look: the
 DECSR logo and the pipeline stages on top, then the project card (name,
 language, branch, default runner and the agents) on the left and the action
 card on the right. The actions are Workspace (`w`), classic pipeline (`1`),

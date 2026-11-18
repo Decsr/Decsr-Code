@@ -60,19 +60,8 @@ func runnerGlyph(runner, icons string) string {
 	return set.unicode
 }
 
-// runnerColor is the colour of a runner's glyph: a brand colour for the two
-// that have one, green for local runners, muted for the rest.
-func runnerColor(runner string) lipgloss.TerminalColor {
-	switch runnerKey(runner) {
-	case "claude":
-		return ui.Claude
-	case "deepseek":
-		return ui.DeepSeek
-	case "ollama", "lmstudio", "mlx":
-		return ui.OK
-	}
-	return ui.Muted
-}
+// runnerColor is the colour of a runner's glyph and name (ui.RunnerColor).
+func runnerColor(runner string) lipgloss.TerminalColor { return ui.RunnerColor(runner) }
 
 // runnerBadge is the coloured glyph of a runner.
 func runnerBadge(runner, icons string) string {

@@ -57,6 +57,7 @@ func approvalTable(cfg config.Config) ranking.Table {
 type approvalRow struct {
 	ID, Title, Grade string
 	Agent            string  // runner · model · effort
+	Runner           string  // the runner of the assignment, for its colour
 	Marker           string  // ↓ cheaper than the role's agent, = the same, ↑ dearer, ≠ differs
 	Cost             float64 // estimated USD per task; 0 = unknown
 	Reason           string
@@ -67,10 +68,41 @@ type approvalRow struct {
 
 // approvalCard is everything the card shows.
 type approvalCard struct {
-	Mode  string
-	Rows  []approvalRow
-	Sel   int
-	Total float64
+	Mode    string
+	Rows    []approvalRow
+	Sel     int
+	Total   float64
+	Changes []string // one line per change of an existing node, mark included
+}
+
+// planPending reports whether the plan card has anything to answer: nodes
+// that wait for the approval of their agent, or changes of existing nodes.
+func (m workspaceModel) planPending() bool {
+	return len(m.pendingChanges) > 0 || (m.g != nil && len(m.g.PendingApproval()) > 0)
+}
+
+// changeLine is the card line of one change: its mark, the node, what
+// happens and the lead's reason.
+func (m workspaceModel) changeLine(c workspace.Change) string {
+	reason := ""
+	if c.Reason != "" {
+		reason = " (" + oneLine(c.Reason) + ")"
+	}
+	switch c.Action {
+	case workspace.ChangeUpdate:
+		what := oneLine(c.Description)
+		if what == "" {
+			what = "dependencies: " + orDefault(strings.Join(c.DependsOn, ", "), "none")
+		}
+		return "~ " + c.Node + " changed: " + what + reason
+	case workspace.ChangeCancel:
+		return "✗ " + c.Node + " cancelled: " + orDefault(oneLine(c.Reason), "no longer needed")
+	}
+	when := "after it finishes"
+	if n := m.g.Node(c.Node); n != nil && n.Status != workspace.StatusRunning {
+		when = "starts again"
+	}
+	return "↻ " + c.Node + " " + when + ": " + oneLine(c.Message) + reason
 }
 
 // agentLabel is "runner · model · effort" for an assignment.
@@ -139,12 +171,15 @@ func (m workspaceModel) approvalCardData() (approvalCard, bool) {
 		return approvalCard{}, false
 	}
 	pend := m.g.PendingApproval()
-	if len(pend) == 0 {
+	if len(pend) == 0 && len(m.pendingChanges) == 0 {
 		return approvalCard{}, false
 	}
 	tab := approvalTable(m.cfg)
 	target := m.approvalTarget()
 	c := approvalCard{Mode: m.routingMode()}
+	for _, ch := range m.pendingChanges {
+		c.Changes = append(c.Changes, m.changeLine(ch))
+	}
 	for i, n := range pend {
 		a := n.Assign
 		if target != nil && n.ID == target.ID {
@@ -152,7 +187,7 @@ func (m workspaceModel) approvalCardData() (approvalCard, bool) {
 		}
 		row := approvalRow{
 			ID: n.ID, Title: oneLine(n.Title), Grade: orDefault(a.Grade, workspace.GradeMedium),
-			Agent: agentLabel(a.Runner, a.Model, a.Effort), Cost: a.EstCostUSD, Reason: oneLine(a.Reason),
+			Agent: agentLabel(a.Runner, a.Model, a.Effort), Runner: a.Runner, Cost: a.EstCostUSD, Reason: oneLine(a.Reason),
 		}
 		if a.Source == workspace.SourceManual {
 			row.Reason = strings.TrimSuffix("manual pick · "+row.Reason, " · ")
@@ -218,8 +253,15 @@ func renderApprovalCard(c approvalCard, width int) []string {
 	text := lipgloss.NewStyle().Foreground(ui.Text)
 	acc := lipgloss.NewStyle().Foreground(ui.Accent)
 
-	head := lipgloss.NewStyle().Foreground(ui.Accent).Bold(true).Render("Approve agents") +
-		dim.Render(fmt.Sprintf(" · %d %s · mode %s", len(c.Rows), pluralize(len(c.Rows), "node", "nodes"), c.Mode))
+	title, info := "Approve agents", fmt.Sprintf(" · %d %s · mode %s", len(c.Rows), pluralize(len(c.Rows), "node", "nodes"), c.Mode)
+	switch {
+	case len(c.Rows) == 0:
+		title, info = "Approve changes", fmt.Sprintf(" · %d %s", len(c.Changes), pluralize(len(c.Changes), "change", "changes"))
+	case len(c.Changes) > 0:
+		title = "Approve plan"
+		info += fmt.Sprintf(" · %d %s", len(c.Changes), pluralize(len(c.Changes), "change", "changes"))
+	}
+	head := lipgloss.NewStyle().Foreground(ui.Accent).Bold(true).Render(title) + dim.Render(info)
 	if c.Total > 0 {
 		head += dim.Render(" · est. " + costCell(c.Total))
 	}
@@ -247,17 +289,17 @@ func renderApprovalCard(c approvalCard, width int) []string {
 		line := mark + idSt.Render(padRight(r.ID, idW)) + " " +
 			text.Render(padRight(truncateOneLine(r.Title, titleW), titleW)) + " " +
 			lipgloss.NewStyle().Foreground(gradeColour(r.Grade)).Render(padRight(r.Grade, gradeW)) + "  " +
-			text.Render(padRight(truncateOneLine(r.Agent, agentW), agentW)) + " " +
+			lipgloss.NewStyle().Foreground(ui.RunnerColor(r.Runner)).Render(padRight(truncateOneLine(r.Agent, agentW), agentW)) + " " +
 			acc.Render(orDefault(r.Marker, " ")) + " " + dim.Render(cost)
 		rows = append(rows, line)
 		ind := strings.Repeat(" ", 2+idW+1)
 		var facts []string
+		lead := ""
 		if r.Role != "" {
-			role := r.Role
+			lead = lipgloss.NewStyle().Foreground(ui.RoleColor(r.Role)).Render(r.Role)
 			if r.NewRole {
-				role += " (new · uses the pm's agent)"
+				lead += dim.Render(" (new · uses the pm's agent)")
 			}
-			facts = append(facts, role)
 		}
 		if r.Access != "" {
 			facts = append(facts, r.Access)
@@ -265,11 +307,28 @@ func renderApprovalCard(c approvalCard, width int) []string {
 		if r.Reason != "" {
 			facts = append(facts, r.Reason)
 		}
-		if len(facts) > 0 {
-			rows = append(rows, dim.Render(ind+truncateOneLine(strings.Join(facts, " · "), max(iw-len(ind), 4))))
+		if line := strings.Join(facts, " · "); lead != "" || line != "" {
+			if lead != "" && line != "" {
+				line = dim.Render(" · " + line)
+			} else {
+				line = dim.Render(line)
+			}
+			rows = append(rows, ansi.Truncate(ind+lead+line, max(iw, 4), "…"))
 		}
 	}
-	rows = append(rows, "", text.Render("y approve · n cancel · e edit agent · a role · ↑↓ select")+dim.Render("  (/approve, /reject)"))
+	if len(c.Changes) > 0 {
+		if len(c.Rows) > 0 {
+			rows = append(rows, "")
+		}
+		for _, l := range c.Changes {
+			rows = append(rows, text.Render(l))
+		}
+	}
+	keys := "y approve · n cancel · e edit agent · a role · ↑↓ select"
+	if len(c.Rows) == 0 {
+		keys = "y apply · n drop"
+	}
+	rows = append(rows, "", text.Render(keys)+dim.Render("  (/answer shows it again)"))
 
 	b := lipgloss.NewStyle().Foreground(ui.Warn)
 	out := make([]string, 0, len(rows)+2)
@@ -289,42 +348,101 @@ func padLeft(s string, w int) string {
 
 // ── Actions: y, n, /approve, /reject ─────────────────────────────────────────
 
-// approveAgents approves every pending agent and starts the runnable nodes.
+// approveAgents applies the pending changes, approves every pending agent and
+// starts the runnable nodes.
 func (m workspaceModel) approveAgents() (workspaceModel, tea.Cmd) {
-	if m.eng == nil || len(m.eng.PendingApproval()) == 0 {
+	if m.eng == nil || (len(m.eng.PendingApproval()) == 0 && len(m.pendingChanges) == 0) {
 		m.setNotice("No agents are waiting for approval", true)
 		return m, nil
 	}
 	m = m.adoptNewRoles()
+	m = m.applyChanges()
 	n := m.eng.ApproveAssignments()
 	m.g = m.eng.Snapshot()
-	m.say("system", fmt.Sprintf("approved the agent of %d %s", n, pluralize(n, "node", "nodes")))
+	if n > 0 {
+		m.say("system", fmt.Sprintf("approved the agent of %d %s", n, pluralize(n, "node", "nodes")))
+	}
 	cmd := m.startTick()
 	if len(m.g.Runnable()) > 0 && m.eng.Running() == 0 {
 		next, rc := m.runAll()
 		m = next.(workspaceModel)
 		cmd = rc
 	}
-	if !m.noticeErr {
+	if !m.noticeErr && n > 0 {
 		m.setNotice(fmt.Sprintf("approved the agent of %d %s", n, pluralize(n, "node", "nodes")), false)
 	}
 	return m, cmd
 }
 
-// rejectAgents cancels the split: its pending nodes are removed.
+// applyChanges applies the pending changes of existing nodes: update and
+// cancel through the engine, a note as a reply (queued for a running node).
+// Running nodes are never stopped. Every result is said in the chat.
+func (m workspaceModel) applyChanges() workspaceModel {
+	changes := m.pendingChanges
+	m.pendingChanges = nil
+	for _, c := range changes {
+		var err error
+		switch c.Action {
+		case workspace.ChangeUpdate:
+			var deps *[]string
+			if c.SetDeps {
+				d := c.DependsOn
+				deps = &d
+			}
+			if err = m.eng.UpdateNode(c.Node, c.Description, deps); err == nil {
+				m.say("system", c.Node+" updated")
+			}
+		case workspace.ChangeCancel:
+			if err = m.eng.CancelNode(c.Node); err == nil {
+				m.say("system", c.Node+" cancelled")
+			}
+		case workspace.ChangeNote:
+			var res workspace.ReplyResult
+			if res, err = m.eng.Reply(c.Node, c.Message); err == nil {
+				switch res.State {
+				case workspace.ReplyQueued:
+					m.say("system", fmt.Sprintf("%s continues with your note after its current attempt (attempt %d)", c.Node, res.Attempt))
+				case workspace.ReplyWaiting:
+					m.say("system", fmt.Sprintf("%s will start attempt %d with your note: %s", c.Node, res.Attempt, res.Reason))
+				default:
+					m.say("system", fmt.Sprintf("%s started attempt %d with your note", c.Node, res.Attempt))
+				}
+			}
+		}
+		if err != nil {
+			m.say("error", oneLine(err.Error()))
+		}
+	}
+	m.g = m.eng.Snapshot()
+	if m.g.Node(m.sel) == nil && len(m.g.Nodes) > 0 {
+		m.sel = m.g.Nodes[0].ID
+	}
+	return m
+}
+
+// rejectAgents cancels the plan: its pending nodes are removed and its
+// changes dropped.
 func (m workspaceModel) rejectAgents() (workspaceModel, tea.Cmd) {
-	if m.eng == nil || len(m.eng.PendingApproval()) == 0 {
+	if m.eng == nil || (len(m.eng.PendingApproval()) == 0 && len(m.pendingChanges) == 0) {
 		m.setNotice("No agents are waiting for approval", true)
 		return m, nil
 	}
+	dropped := len(m.pendingChanges)
+	m.pendingChanges = nil
 	ids := m.eng.RejectSplit()
 	m.g = m.eng.Snapshot()
 	m.sel = ""
 	if len(m.g.Nodes) > 0 {
 		m.sel = m.g.Nodes[0].ID
 	}
-	m.say("system", fmt.Sprintf("cancelled the split: removed %s", idList(ids)))
-	m.setNotice(fmt.Sprintf("cancelled the split: removed %s", idList(ids)), false)
+	msg := fmt.Sprintf("cancelled the split: removed %s", idList(ids))
+	if len(ids) == 0 {
+		msg = fmt.Sprintf("dropped %d %s of existing nodes", dropped, pluralize(dropped, "change", "changes"))
+	} else if dropped > 0 {
+		msg += fmt.Sprintf(" and dropped %d %s", dropped, pluralize(dropped, "change", "changes"))
+	}
+	m.say("system", msg)
+	m.setNotice(msg, false)
 	return m, nil
 }
 

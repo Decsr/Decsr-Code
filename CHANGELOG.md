@@ -8,6 +8,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Workspace: you can chat while nodes run. A task you type goes to the lead at
+  once (it says "wait for the lead" only while the lead is still planning or
+  reviewing, and asks you to answer an open plan card first). The lead gets the
+  live graph: each node's ID, title, status, role, description and the files it
+  touched so far. Besides new tasks it may return a `===CHANGES===` section to
+  `update` or `cancel` a node that has not started, or send a `note` to a
+  running node (it continues with it after its current attempt) or a finished
+  one (new attempt, which resumes its conversation). The plan card shows one
+  line per change with its reason (`~ T3 changed`, `✗ T4 cancelled`,
+  `↻ T2 after it finishes`); `y` applies, `n` drops. Running nodes are never
+  stopped, and a new task that touches what a running node touches waits for it
+  as a dependency.
+- A later attempt of a Workspace node (your reply, a question-card answer,
+  allow-and-retry, a retry after a usage limit or a failure) resumes the node's
+  own CLI conversation and sends only the new message, so the node remembers
+  its work and the repeated context is cached. The session id is read from the
+  runner's JSON stream (claude `--resume`, codex `exec resume`, opencode
+  `--session`, dsh `--session-id`) and kept on the node. When a conversation
+  cannot be resumed the attempt starts fresh with the excerpt of the earlier
+  one and the chat says so.
+- A node can suggest follow-ups with an optional `next:` of at most 3 lines in
+  its report. The run summary lists the follow-ups of the nodes that ended
+  (`y plan them · n drop`); `y` sends them to the lead as one task and the plan
+  card still asks before anything runs.
+- `/plugin` is a manager panel with the tabs Installed, Discover, Marketplaces
+  and Stats. It turns plugins on and off, removes them, imports the plugins
+  Claude Code has installed (`/plugin import <name>`; only `~/.claude/plugins`
+  is read, hooks and MCP servers stay unused), installs from the curated
+  catalog and from marketplaces (GitHub repos with `.claude-plugin/marketplace.json`,
+  kept in `~/.decsr/marketplaces.yaml`, asking for trust on the first install)
+  and shows the nodes, tokens, cost and last use of each plugin from the saved
+  sessions. New direct forms: `list`, `search`, `info`, `remove`, `import`,
+  `stats` and `marketplace add|remove`. `/plugin available` points to
+  `/plugin search`.
+- Workspace slash commands are grouped (Session, Run, Agents, Usage, Project,
+  Plugin commands), each with forms and an example. `/` lists them under group
+  headers; while you type the list ranks the matches, underlines the matched
+  letters in the group colour and shows the group at the right.
+  `/help` opens a panel of the groups and `/help <command>` shows the forms
+  of one command.
+- New commands: `/stop [node]`, `/retry <node>`, `/rename <title>` and `/copy`
+  (the last answer to the clipboard through OSC 52). `/config` lists, shows
+  and changes real settings (`/config set workspace.max_parallel 4`, saved in
+  `project.yaml` after validation) and `/menu` opens the classic menu.
+  `/provider [list|add|remove|test <name>]` manages saved API keys.
+- New forms: `/usage cost`, `/usage budget [amount|off]`, `/model rank`,
+  `/model profile [save|apply <name>]` and `/coordinator now`.
+- Panels for the slash commands. `/usage` has the tabs Session, Budget,
+  History (sessions, tokens and cost of today, 7 and 30 days, a sparkline and
+  a table by agent, from the saved sessions) and Limits (the last limit each
+  runner printed). `/status` is one panel with the runners and how claude
+  logs in, the providers, plugins, run settings, today's usage and the doctor
+  warnings. `/model` edits the runner, model and effort of each role and
+  saves them in `project.yaml`, and holds the rankings and the profiles.
+  `/provider` adds, removes and tests keys, `/config` edits settings.
+- New commands `/context` (what the lead and the workers receive, with sizes),
+  `/doctor`, `/memory [search <query>|add <text>]` and `/diff` (the session
+  diff; in a shared checkout the working tree against `HEAD`).
+- Theme: a colour per command group, per runner (claude, deepseek, codex,
+  opencode, local) and per role (`ui.RoleColor`, `ui.RunnerColor`). Graph
+  cards, the plan card, the sidebar and the status bar use them. Shared
+  components for panels, tables, meters, sparklines and result lines
+  (`✓` `✗` `⚠` `›`) in `internal/ui`. `NO_COLOR` is respected.
 - `project.build_cmd` replaces the detected build command, like `project.test_cmd`
   does for tests. It applies to Workspace Build & test, the classic pipeline
   and the project context.
@@ -18,6 +81,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cmake` and `ctest` are used. Projects without presets are unchanged.
 
 ### Changed
+- Fewer tokens per call. One-shot claude calls (the lead's split, a direct
+  answer, the coordinator review) now run with `--tools ""`: before, the
+  built-in tool schemas were still sent (about 15K input tokens per call, and a
+  chance of stray tool turns). The split prompt cuts role and skill
+  descriptions, lists catalog plugins compactly and gets the project context
+  without source excerpts, capped at 10K characters. A worker gets no source
+  excerpts when it runs as an agent, nothing that its runner loads by itself
+  (`CLAUDE.md` for claude, `AGENTS.md` for codex and opencode), at most 4K
+  characters of the context pack, 24K characters of dependency files (the
+  rest is listed by name) and a 2K-character session summary.
+- `/cost`, `/budget`, `/rank`, `/connect`, `/review`, `/profile`, `/approve`
+  and `/reject` moved (`/usage cost`, `/usage budget`, `/model rank`,
+  `/provider add`, `/coordinator now`, `/model profile`, and `y` / `n` on the
+  plan card). Typing an old name prints the new one and runs nothing.
+  `/config` no longer opens the classic menu; `/menu` does.
 - Workspace: a task runs only what it needs. Each sub-task has a `writes`
   flag (missing means true) and a `writes: false` node runs read-only whatever
   its role. The lead assigns the roles itself and is told to use only the roles
@@ -122,6 +200,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its Mode field.
 
 ### Fixed
+- Every row of the panels (`/usage`, `/status`, `/model`, `/provider`, `/config`,
+  `/context`, `/doctor`, `/memory`, `/plugin`) is checked to fit the frame at 80
+  and 120 columns, by cell width and by terminal width.
 - `decsr models rank` and `/rank` print the Artificial Analysis credit only when
   the table shows Artificial Analysis data, not for the built-in fallback tiers.
 - Claude agent mode no longer refuses `cmake --preset ...`, a cmake or ctest

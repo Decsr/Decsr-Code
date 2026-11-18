@@ -139,7 +139,7 @@ func renderReviewCard(r workspace.Review, width int, selected, expanded bool) []
 		rows = append(rows, dim.Render("no changes proposed"))
 	}
 	if r.State == workspace.ReviewPending {
-		rows = append(rows, text.Render("y apply · n reject")+dim.Render("  (/review y, /review n)"))
+		rows = append(rows, text.Render("y apply · n reject"))
 	}
 	bc := ui.Border
 	switch {

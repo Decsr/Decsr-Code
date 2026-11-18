@@ -43,7 +43,7 @@ func (m workspaceModel) liveCfg() config.Config {
 	return m.cfg
 }
 
-// budgetOf is the budget in force: the session's /budget override, else the
+// budgetOf is the budget in force: the session's /usage budget override, else the
 // configured one.
 func budgetOf(c config.Config, s workspace.Session) (limit float64, warnPct int) {
 	limit = c.Workspace.BudgetUSD
@@ -177,7 +177,7 @@ func budgetShort(v float64) string {
 	return usd(v)
 }
 
-// cmdBudget is /budget [amount|off].
+// cmdBudget is /usage budget [amount|off].
 func (m workspaceModel) cmdBudget(args string) (tea.Model, tea.Cmd) {
 	args = strings.TrimSpace(args)
 	if args == "" {
@@ -212,12 +212,12 @@ func parseBudget(s string) (float64, error) {
 	}
 	v, err := strconv.ParseFloat(strings.TrimPrefix(s, "$"), 64)
 	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1e9 {
-		return 0, fmt.Errorf("usage: /budget [amount|off]  (for example /budget 10)")
+		return 0, fmt.Errorf("usage: /usage budget [amount|off]  (for example /usage budget 10)")
 	}
 	return v, nil
 }
 
-// budgetLines is the body of /budget.
+// budgetLines is the body of /usage budget.
 func (m workspaceModel) budgetLines() []string {
 	c, s := m.liveCfg(), m.sess.snapshot()
 	limit, warn := budgetOf(c, s)
@@ -225,7 +225,7 @@ func (m workspaceModel) budgetLines() []string {
 	budget := "none"
 	switch {
 	case s.BudgetUSD > 0:
-		budget = usd(s.BudgetUSD) + " (this session, /budget)"
+		budget = usd(s.BudgetUSD) + " (this session, /usage budget)"
 	case limit > 0:
 		budget = usd(limit) + " (workspace.budget_usd)"
 	}
@@ -281,7 +281,7 @@ func (m workspaceModel) statusBar() string {
 			runners = append(runners, m.limitStatusSegment(lr))
 			continue
 		}
-		runners = append(runners, dim.Render(runnerGlyph(r.name, m.cfg.UI.Icons)+" "+r.name+" "+formatTokensCompact(r.tokens)))
+		runners = append(runners, lipgloss.NewStyle().Foreground(runnerColor(r.name)).Render(runnerGlyph(r.name, m.cfg.UI.Icons)+" "+r.name)+dim.Render(" "+formatTokensCompact(r.tokens)))
 	}
 	for _, lr := range limited {
 		if !usedRunner(u, lr.name) {

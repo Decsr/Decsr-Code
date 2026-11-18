@@ -371,7 +371,7 @@ func (c *canvasGrid) drawBox(g *workspace.Graph, n *workspace.Node, r canvasRect
 		gw := ansi.StringWidth(gl) + 1
 		x, room = x+gw, room-gw
 		role := truncateOneLine(n.Role, room)
-		c.textOn(x, r.y+2, room, role, ui.Text, bg, false)
+		c.textOn(x, r.y+2, room, role, ui.RoleColor(n.Role), bg, false)
 		rw := ansi.StringWidth(role)
 		x, room = x+rw, room-rw
 		model := strings.TrimPrefix(modelLabel, runner+":")
@@ -385,7 +385,7 @@ func (c *canvasGrid) drawBox(g *workspace.Graph, n *workspace.Node, r canvasRect
 		if room >= 3 {
 			label = truncateOneLine("→ "+n.SuggestedRole, room)
 		}
-		c.textOn(x, r.y+2, room, label, ui.Muted, bg, false)
+		c.textOn(x, r.y+2, room, label, ui.RoleColor(n.SuggestedRole), bg, false)
 	}
 	if len(far) > 0 {
 		c.textOn(r.x+2, r.y+3, tw, truncateOneLine("◂ "+strings.Join(far, ","), tw), ui.Muted, bg, false)

@@ -33,19 +33,34 @@ func BuildSplitPrompt(task string, roles []Role, projectContext string) string {
 	return buildSplitPrompt(task, roles, projectContext, nil, 0, SplitOptions{})
 }
 
-// followUpRules is added to the prompt when the graph already has nodes.
-func followUpRules(existing []string, next int) string {
+// followUpRules is added to the prompt when the graph already has nodes. live
+// is the graph as it is now; without it only the IDs are listed.
+func followUpRules(existing []string, next int, live []LiveNode) string {
 	if len(existing) == 0 {
 		return ""
 	}
 	if next < 1 {
 		next = nextAfter(existing)
 	}
+	if len(live) == 0 {
+		return fmt.Sprintf("\n## Follow-up task\n\n"+
+			"The graph already has these nodes: %s.\n"+
+			"- Number the new sub-tasks from `T%d` upward. Never reuse an existing ID.\n"+
+			"- You MAY list an existing ID in `depends_on` when the new work needs that node's result.\n",
+			strings.Join(existing, ", "), next)
+	}
 	return fmt.Sprintf("\n## Follow-up task\n\n"+
-		"The graph already has these nodes: %s.\n"+
+		"The graph already has these nodes (status, role, description, files touched so far; nodes marked running may still change more files):\n\n%s\n\n"+
 		"- Number the new sub-tasks from `T%d` upward. Never reuse an existing ID.\n"+
-		"- You MAY list an existing ID in `depends_on` when the new work needs that node's result.\n",
-		strings.Join(existing, ", "), next)
+		"- Add new sub-tasks only for what the user's new task asks. Keep every other node as it is.\n"+
+		"- A new sub-task that touches a file a running or waiting node touches, or needs that node's result, MUST list it in `depends_on`: it then waits in the queue.\n"+
+		"- Change an existing node only when the new task requires it, in an optional CHANGES section before ===END===:\n\n"+
+		"===CHANGES===\n"+
+		"[{\"node\":\"T3\",\"action\":\"update\",\"description\":\"...\",\"depends_on\":[\"T1\"],\"reason\":\"...\"},\n"+
+		" {\"node\":\"T4\",\"action\":\"cancel\",\"reason\":\"...\"},\n"+
+		" {\"node\":\"T2\",\"action\":\"note\",\"message\":\"...\",\"reason\":\"...\"}]\n\n"+
+		"`update` (new description, optionally a new `depends_on`) and `cancel` are only for nodes that have not started (todo). `note` is for a running node (it continues with it after its current attempt) or a finished one (it starts a new attempt that continues its conversation). `reason` is one short line the user sees. Running nodes are never stopped. When the new task needs no new sub-task, use `[]` under TASKS.\n",
+		liveSection(live), next)
 }
 
 // nextAfter is one more than the highest T<number> among ids (1 for none).
@@ -65,10 +80,10 @@ func buildSplitPrompt(task string, roles []Role, projectContext string, existing
 	var sb strings.Builder
 	for _, r := range roles {
 		if r.ReadOnly {
-			fmt.Fprintf(&sb, "- %s: %s (read-only: reviews and reports, cannot change files)\n", r.Name, r.Description)
+			fmt.Fprintf(&sb, "- %s: %s (read-only: reviews and reports, cannot change files)\n", r.Name, roleBlurb(r.Description))
 			continue
 		}
-		fmt.Fprintf(&sb, "- %s: %s\n", r.Name, r.Description)
+		fmt.Fprintf(&sb, "- %s: %s\n", r.Name, roleBlurb(r.Description))
 	}
 	p := prompts.MustLoad("ws-split")
 	// One pass, so placeholder text inside a value is never substituted.
@@ -77,7 +92,7 @@ func buildSplitPrompt(task string, roles []Role, projectContext string, existing
 		"{{SKILLS}}", skillsSection(opts.Plugins),
 		"{{CATALOG}}", catalogSection(opts.Plugins, opts.Catalog),
 		"{{ROUTING}}", routingSection(opts.Routing),
-		"{{FOLLOWUP}}", followUpRules(existing, next),
+		"{{FOLLOWUP}}", followUpRules(existing, next, opts.Live),
 		"{{TASK}}", task,
 		"{{PROJECT_CONTEXT}}", projectContext,
 	).Replace(p)
@@ -170,6 +185,7 @@ func ParseSplitWith(task, output string, roles []Role, existing []string) (*Grap
 // reported in Graph.SplitWarnings. PLUGINS entries outside the catalog are
 // dropped too.
 func ParseSplitOpts(task, output string, roles []Role, existing []string, opts SplitOptions) (*Graph, error) {
+	changes, changeWarns := parseChanges(output, opts.Live, newTaskKeys(output))
 	tasksRaw, ok := section(output, markerTasks)
 	if !ok {
 		if answer, found := section(output, markerAnswer); found {
@@ -178,13 +194,16 @@ func ParseSplitOpts(task, output string, roles []Role, existing []string, opts S
 			}
 			return &Graph{Task: task, Answer: answer}, nil
 		}
-		return nil, fmt.Errorf("split: no %s section in the lead's answer", markerTasks)
+		if len(changes) == 0 {
+			return nil, fmt.Errorf("split: no %s section in the lead's answer", markerTasks)
+		}
+		tasksRaw = "[]"
 	}
 	var tasks []splitTask
 	if err := unmarshalArray(tasksRaw, &tasks); err != nil {
 		return nil, fmt.Errorf("split: the lead's answer was not valid JSON (%s)", shortReason(err))
 	}
-	if len(tasks) == 0 {
+	if len(tasks) == 0 && len(changes) == 0 {
 		return nil, fmt.Errorf("split: the lead returned no tasks")
 	}
 	if len(tasks) > maxSplitTasks {
@@ -292,7 +311,8 @@ func ParseSplitOpts(task, output string, roles []Role, existing []string, opts S
 	}
 
 	g.PluginRequests = reqs
-	g.SplitWarnings = warns
+	g.SplitWarnings = append(warns, changeWarns...)
+	g.Changes = changes
 
 	// External dependencies are checked apart: Validate only knows g's nodes.
 	own := make(map[string]bool, len(g.Nodes))
@@ -317,7 +337,10 @@ func ParseSplitOpts(task, output string, roles []Role, existing []string, opts S
 		}
 		nd.DependsOn = internal
 	}
-	err := g.Validate()
+	var err error
+	if len(g.Nodes) > 0 {
+		err = g.Validate()
+	}
 	for _, nd := range g.Nodes {
 		nd.DependsOn = append(nd.DependsOn, external[nd]...)
 	}
@@ -433,7 +456,7 @@ func section(s, marker string) (string, bool) {
 	}
 	rest := s[i+len(marker):]
 	end := len(rest)
-	for _, m := range []string{markerTitle, markerTasks, markerNewRoles, markerPlugins, markerAnswer, markerEnd} {
+	for _, m := range []string{markerTitle, markerTasks, markerNewRoles, markerPlugins, markerChanges, markerAnswer, markerEnd} {
 		if j := strings.Index(rest, m); j >= 0 && j < end {
 			end = j
 		}
@@ -636,3 +659,28 @@ func routingSection(on bool) string {
 	}
 	return ""
 }
+
+// newTaskKeys are the keys of the answer's own new tasks, which a change may
+// depend on.
+func newTaskKeys(output string) map[string]bool {
+	raw, ok := section(output, markerTasks)
+	if !ok {
+		return nil
+	}
+	var tasks []splitTask
+	if unmarshalArray(raw, &tasks) != nil {
+		return nil
+	}
+	keys := make(map[string]bool, len(tasks))
+	for _, t := range tasks {
+		keys[upperKey(t.Key)] = true
+	}
+	return keys
+}
+
+// maxRoleBlurbRunes cuts a role description in the split prompt: a plugin
+// role can carry its whole prompt there, and the lead only needs to know
+// what the role is for.
+const maxRoleBlurbRunes = 160
+
+func roleBlurb(desc string) string { return cutRunes(Sanitize(desc), maxRoleBlurbRunes) }

@@ -119,7 +119,11 @@ func (m workspaceModel) openDiff(n *workspace.Node) workspaceModel {
 	var err error
 	if n == nil {
 		v.title = "Session diff"
-		d, err = workspace.SessionDiff(m.root, m.sess.snapshot().ID)
+		if m.iso == nil {
+			d, err = workspace.WorkingTreeDiff(m.root)
+		} else {
+			d, err = workspace.SessionDiff(m.root, m.sess.snapshot().ID)
+		}
 	} else {
 		v.nodeID = n.ID
 		v.title = n.ID + " · " + oneLine(workspace.Sanitize(n.Title))

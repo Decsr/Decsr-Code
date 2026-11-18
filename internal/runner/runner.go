@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/Decsr/Decsr-Code/internal/skills"
@@ -54,6 +55,47 @@ type Token struct {
 	Model string
 	// Denials are the tool calls the runner refused, sent on the Done token.
 	Denials []Denial
+	// SessionID is the id of the CLI's own conversation, sent once when the
+	// runner learns it. A later call resumes it with CompletionRequest.ResumeID.
+	SessionID string
+}
+
+// ResumeError is a failed start of a resumed conversation: the CLI refused or
+// could not find the session before it produced any output.
+type ResumeError struct{ Err error }
+
+func (e *ResumeError) Error() string { return e.Err.Error() }
+func (e *ResumeError) Unwrap() error { return e.Err }
+
+// resumeGuard turns an error that ends a resumed call before it produced any
+// output (text, reasoning or an activity other than an error) into a *ResumeError. A usage limit is
+// not a failed resume and passes through unchanged.
+func resumeGuard(in <-chan Token) <-chan Token {
+	out := make(chan Token, 16)
+	go func() {
+		defer close(out)
+		produced := false
+		for tok := range in {
+			if tok.Text != "" || tok.Reasoning != "" || (tok.Activity != nil && tok.Activity.Kind != ActError) {
+				produced = true
+			}
+			var rl *RateLimitError
+			if tok.Error != nil && !produced && !errors.As(tok.Error, &rl) {
+				tok.Error = &ResumeError{Err: tok.Error}
+			}
+			out <- tok
+		}
+	}()
+	return out
+}
+
+// CanResume reports whether the named runner can resume its own conversation.
+func CanResume(name string) bool {
+	switch name {
+	case "claude", "codex", "opencode", "dsh":
+		return true
+	}
+	return false
 }
 
 // Denial is one tool call a runner refused because it was not on the allow
@@ -89,6 +131,16 @@ type CompletionRequest struct {
 	// --allowedTools syntax ("Read", "Bash(go test:*)"). Only the Claude runner
 	// uses it; empty with Agent set means no tools.
 	AllowedTools []string
+	// KeepSession asks a CLI runner to keep its own conversation on disk so a
+	// later call can resume it (a Claude one-shot call does not keep it). Only
+	// Workspace node runs set it.
+	KeepSession bool
+	// ResumeID resumes the CLI conversation with this id. Messages then hold
+	// only the new message; the conversation already has the rest. SystemPrompt
+	// is sent again only by runners that do not store it (claude). Empty starts
+	// a fresh conversation. A resume that fails at start ends with a
+	// *ResumeError.
+	ResumeID string
 }
 
 // LLMRunner is the common interface for all LLM backends.
@@ -146,5 +198,31 @@ func ResolveSkills(systemPrompt string, skillNames []string, loader *skills.Load
 	sb.WriteString("\n\n<skills>\n")
 	sb.WriteString(strings.Join(loaded, "\n---\n"))
 	sb.WriteString("\n</skills>")
+	return sb.String()
+}
+
+// cliPrompt is the one text a CLI runner that takes its prompt on stdin gets:
+// the system prompt and the messages with their roles. A resumed call gets only
+// the new message, as the conversation already has the system prompt and the
+// earlier messages.
+func cliPrompt(req CompletionRequest) string {
+	var sb strings.Builder
+	if req.ResumeID != "" {
+		for _, m := range req.Messages {
+			sb.WriteString(m.Content)
+			sb.WriteString("\n")
+		}
+		return sb.String()
+	}
+	if req.SystemPrompt != "" {
+		sb.WriteString(req.SystemPrompt)
+		sb.WriteString("\n\n")
+	}
+	for _, m := range req.Messages {
+		sb.WriteString(strings.ToUpper(m.Role))
+		sb.WriteString(":\n")
+		sb.WriteString(m.Content)
+		sb.WriteString("\n\n")
+	}
 	return sb.String()
 }

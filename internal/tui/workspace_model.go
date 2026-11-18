@@ -23,6 +23,7 @@ import (
 	"github.com/Decsr/Decsr-Code/internal/artifacts"
 	"github.com/Decsr/Decsr-Code/internal/config"
 	dctx "github.com/Decsr/Decsr-Code/internal/context"
+	"github.com/Decsr/Decsr-Code/internal/doctor"
 	"github.com/Decsr/Decsr-Code/internal/lang"
 	"github.com/Decsr/Decsr-Code/internal/plugins"
 	"github.com/Decsr/Decsr-Code/internal/runner"
@@ -59,6 +60,8 @@ type WorkspaceOptions struct {
 	Session string
 	// Automation makes this an unattended automation run.
 	Automation AutomationOptions
+	// Doctor runs the doctor checks for /status and /doctor; nil shows none.
+	Doctor func() []doctor.Result
 }
 
 // wsDeps are the seams between the model and the outside world. The optional
@@ -67,7 +70,7 @@ type wsDeps struct {
 	// split asks the lead to split task; earlier is the session summary and
 	// the current nodes ("" for a fresh session). existing are the node IDs
 	// already in the graph and next the first number for new sub-tasks.
-	split func(ctx context.Context, task, earlier string, existing []string, next int, routing bool, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error)
+	split func(ctx context.Context, task, earlier string, existing []string, live []workspace.LiveNode, next int, routing bool, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error)
 	// review asks the lead to review the graph after a batch (the coordinator);
 	// nil disables reviews.
 	review func(ctx context.Context, in workspace.ReviewInput) (workspace.ReviewResult, runner.TokenUsage, error)
@@ -91,10 +94,18 @@ type wsDeps struct {
 	loadPlugins    func() plugins.Set
 	// installPlugin installs a catalog plugin (plugins.Install by default).
 	installPlugin func(ctx context.Context, e plugins.CatalogEntry) error
+	// installMarket installs an entry of a trusted marketplace repo.
+	installMarket func(ctx context.Context, repo string, e plugins.CatalogEntry) error
+	// fetchMarket reads the marketplace.json of a GitHub repo.
+	fetchMarket func(ctx context.Context, repo string) (plugins.MarketFetch, error)
 	// ghRun runs gh and git for /pr; nil runs the real programs.
 	ghRun workspace.CmdRunner
 	// notify sends a "needs you" note; nil sends nothing.
 	notify wsNotifyFunc
+	// doctor runs the doctor checks (/status, /doctor); nil has none.
+	doctor func() []doctor.Result
+	// probeRunners looks for the installed runners (/status); nil probes the machine.
+	probeRunners func() []frEntry
 	// cfg returns the live config for pricing and the budget; nil uses the
 	// config the engine was attached with.
 	cfg func() config.Config
@@ -140,6 +151,16 @@ func (d *wsDeps) fillDefaults(root string) {
 	if d.installPlugin == nil {
 		d.installPlugin = plugins.Install
 	}
+	if d.installMarket == nil {
+		d.installMarket = func(ctx context.Context, repo string, e plugins.CatalogEntry) error {
+			return plugins.InstallMarketplace(ctx, repo, e, plugins.RepoURL)
+		}
+	}
+	if d.fetchMarket == nil {
+		d.fetchMarket = func(ctx context.Context, repo string) (plugins.MarketFetch, error) {
+			return plugins.FetchMarketplace(ctx, repo, plugins.RepoURL)
+		}
+	}
 	if d.useProvider == nil {
 		d.useProvider = func(runnerName, provider, model string, all bool) (config.Config, error) {
 			if err := config.UseProviderGlobal(runnerName, provider, model, all); err != nil {
@@ -155,7 +176,7 @@ func (d *wsDeps) fillDefaults(root string) {
 type wsLiveExec struct {
 	root    string
 	cfg     func() config.Config
-	pctx    func() string
+	ctxFor  workspace.ContextFunc
 	checks  func() []string
 	summary func() string
 	iso     *workspace.Isolator
@@ -169,7 +190,7 @@ func (e wsLiveExec) Run(ctx context.Context, g *workspace.Graph, n *workspace.No
 	}
 	c.Agents = agents
 	runner.ApplyModelMemory(&c)
-	return workspace.NewExecutorIsolated(e.root, c, e.pctx(), e.checks, e.summary, e.iso).Run(ctx, g, n, emit)
+	return workspace.NewExecutorCtx(e.root, c, e.ctxFor, e.checks, e.summary, e.iso).Run(ctx, g, n, emit)
 }
 
 // writeSplitRaw saves the lead's full raw answer of the last split to
@@ -211,18 +232,23 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 	setCfg := func(c config.Config) { mu.Lock(); cur = c; mu.Unlock() }
 
 	var once sync.Once
-	var pctx string
-	projectContext := func() string {
+	var src ctxSource
+	loadContext := func() ctxSource {
 		once.Do(func() {
 			c := getCfg()
 			if pc, err := dctx.Collect(root, c); err == nil {
-				pctx = pc.SystemPromptFragment()
+				src.pc, src.repo = pc, true
 			}
 			if data, err := os.ReadFile(filepath.Join(root, artifacts.DirName, artifacts.ContextPackFile)); err == nil && len(data) > 0 { // #nosec G304 -- fixed path under the project root
-				pctx += "\n\n## Context pack\n" + string(data)
+				src.pack = string(data)
 			}
 		})
-		return pctx
+		return src
+	}
+	// contextFor is the project context for a reader that runs on runnerName:
+	// see ctxSource.render.
+	contextFor := func(runnerName string, agentMode, lead bool) string {
+		return loadContext().render(runnerName, agentMode, lead)
 	}
 
 	// checkCmds resolves the Build & test commands. It is used at split time
@@ -252,7 +278,8 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 	deps := wsDeps{
 		notify: wsSendNote,
 		cfg:    getCfg,
-		split: func(ctx context.Context, task, earlier string, existing []string, next int, routing bool, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error) {
+		doctor: opts.Doctor,
+		split: func(ctx context.Context, task, earlier string, existing []string, live []workspace.LiveNode, next int, routing bool, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error) {
 			c := getCfg()
 			agents := make(map[string]config.AgentConfig, len(c.Agents))
 			for k, v := range c.Agents {
@@ -265,12 +292,12 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 			if err != nil {
 				return nil, runner.TokenUsage{}, fmt.Errorf("lead runner: %w", err)
 			}
-			pc := projectContext()
+			pc := contextFor(pm.Runner, true, true)
 			if earlier != "" {
 				pc += "\n\n## Earlier in this session\n" + earlier
 			}
 			var raw strings.Builder
-			opts := workspace.SplitOptions{Plugins: plugins.Load(root), Catalog: plugins.Catalog(), Routing: routing}
+			opts := workspace.SplitOptions{Plugins: plugins.Load(root), Catalog: plugins.Catalog(), Routing: routing, Live: live}
 			g, u, err := workspace.SplitOpts(ctx, r, pm.Model, task, workspace.Roles(c), pc, existing, next, opts, func(s string) {
 				raw.WriteString(s)
 				if onToken != nil {
@@ -299,7 +326,7 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 			return workspace.NewIsolator(root, session, getCfg().Workspace.Isolation)
 		},
 		newEngine: func(g *workspace.Graph, save func(*workspace.Graph) error, summary func() string, iso *workspace.Isolator) *workspace.Engine {
-			e := workspace.NewEngineWithSave(g, wsLiveExec{root: root, cfg: getCfg, pctx: projectContext, checks: checkCmds, summary: summary, iso: iso},
+			e := workspace.NewEngineWithSave(g, wsLiveExec{root: root, cfg: getCfg, ctxFor: func(r string, agent bool) string { return contextFor(r, agent, false) }, checks: checkCmds, summary: summary, iso: iso},
 				workspace.MaxParallel(getCfg()), save)
 			engMu.Lock()
 			engines = append(engines, e)
@@ -411,6 +438,8 @@ const (
 	wsOverlayInbox
 	wsOverlayPalette
 	wsOverlayAgent
+	wsOverlayHelp
+	wsOverlayPanel
 )
 
 // wsConfirm is a pending y/n question. kind: quit | menu | clear | delsession
@@ -588,6 +617,11 @@ type workspaceModel struct {
 	screen        wsScreen
 	focus         wsFocus
 	showHelp      bool
+	helpName      string // /help <command>: the command shown; "" = the groups
+	helpPS        ui.PanelState
+	panel         wsPanel         // the open panel of /usage, /status, /model and the other panel commands
+	panelIn       textinput.Model // the entry line of a panel
+	rankLines     []string        // the last rankings, for the Rankings tab of /model
 	overlay       wsOverlay
 	conn          *connectModel // the /connect overlay
 	confirm       wsConfirm
@@ -628,7 +662,10 @@ type workspaceModel struct {
 	cancelReview context.CancelFunc
 
 	// plugin install started from the dialog
-	installing    string // plugin being installed; "" for none
+	installing    string               // plugin being installed; "" for none
+	instEntry     plugins.CatalogEntry // the entry being installed
+	marketPick    pluginPick           // the marketplace entry a confirm is about
+	marketBusy    string               // marketplace being fetched; "" for none
 	installGen    int
 	cancelInstall context.CancelFunc
 
@@ -707,6 +744,14 @@ type workspaceModel struct {
 
 	runEnded []string // nodes that ended since the last run summary
 
+	// follow-ups the finished nodes suggested, kept until y plans them or n
+	// drops them; followSeq tells one set from the next.
+	followups []string
+	// pendingChanges are the edits of existing nodes the lead asked for; the
+	// plan card applies them on y and drops them on n.
+	pendingChanges []workspace.Change
+	followSeq      int
+
 	// inbox (N) and go-to palette (Ctrl+K)
 	inboxIdx    int
 	inboxAutos  []inboxAutoRun // last automation runs, read when the inbox or palette opens
@@ -767,6 +812,7 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...Work
 		formDesc:  newField("what this role does, in one line"),
 		textIn:    newField(""),
 		palIn:     newField("search"),
+		panelIn:   newField(""),
 		outVP:     viewport.New(78, 20),
 
 		sbSess:       -1,
@@ -945,6 +991,18 @@ func (m workspaceModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onSplitDone(msg)
 	case wsRankMsg:
 		return m.onRank(msg)
+	case wsHistMsg:
+		return m.onHist(msg)
+	case wsProbeMsg:
+		return m.onProbe(msg)
+	case wsDoctorMsg:
+		return m.onDoctor(msg)
+	case wsCtxMsg:
+		return m.onCtx(msg)
+	case wsMemoryMsg:
+		return m.onMemory(msg)
+	case providerTestMsg:
+		return m.onProviderTest(msg)
 	case wsReviewDoneMsg:
 		return m.onReviewDone(msg)
 	case wsEventMsg:
@@ -953,6 +1011,10 @@ func (m workspaceModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onOutDiff(msg)
 	case wsInstallMsg:
 		return m.onInstalled(msg)
+	case wsPluginDataMsg:
+		return m.onPluginData(msg)
+	case wsMarketMsg:
+		return m.onMarket(msg)
 	case connectProbeMsg, connectTickMsg, connectSavedMsg, connectClosedMsg:
 		return m.onConnectMsg(msg)
 	case wsPRMsg:
@@ -1259,6 +1321,12 @@ func (m workspaceModel) submit() (tea.Model, tea.Cmd) {
 		}
 	}
 	if !ok {
+		if hint := removedHint(name); hint != "" {
+			m.input.Reset()
+			m.cmdIdx, m.cmdPicked = 0, false
+			m.say("system", hint)
+			return m, nil
+		}
 		m.say("error", fmt.Sprintf("unknown command %s — /help lists them", name))
 		return m, nil
 	}
@@ -1268,37 +1336,25 @@ func (m workspaceModel) submit() (tea.Model, tea.Cmd) {
 	return c.run(m, strings.TrimSpace(args))
 }
 
-// earlierContext is what the lead is told about the session so far.
+// earlierContext is what the lead is told about the session so far: the
+// summary of the finished work. The nodes of the graph go separately, with
+// their live state (workspace.LiveNodes).
 func (m workspaceModel) earlierContext() string {
 	var parts []string
 	if s := strings.TrimSpace(m.sess.snapshot().Summary); s != "" {
 		parts = append(parts, "Finished and folded into this summary:\n"+s)
-	}
-	var nodes []string
-	for _, n := range m.g.Nodes {
-		if n.Kind != workspace.KindWork {
-			continue
-		}
-		line := fmt.Sprintf("- %s %s [%s]", n.ID, n.Title, n.Status)
-		if n.Role != "" {
-			line += " by " + n.Role
-		}
-		nodes = append(nodes, line)
-	}
-	if len(nodes) > 0 {
-		parts = append(parts, "Nodes already in the graph:\n"+strings.Join(nodes, "\n"))
 	}
 	return strings.Join(parts, "\n\n")
 }
 
 // sendTask sends task to the lead; shown is what the chat displays.
 func (m workspaceModel) sendTask(task, shown string) (tea.Model, tea.Cmd) {
-	if m.reviewing {
-		m.setNotice("The lead is reviewing the batch: wait for it, or press Esc to cancel the review", true)
+	if m.reviewing || m.splitting {
+		m.say("system", "wait for the lead: it is still working on the last request (Esc cancels)")
 		return m, nil
 	}
-	if m.running() > 0 {
-		m.setNotice("Stop the running nodes first (Tab to the graph, then S), then send the task", true)
+	if len(m.pendingChanges) > 0 {
+		m.say("system", "answer the plan card first: y applies the changes, n drops them")
 		return m, nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1313,17 +1369,23 @@ func (m workspaceModel) sendTask(task, shown string) (tea.Model, tea.Cmd) {
 	m.input.Placeholder = wsSplittingHint
 	earlier := m.earlierContext()
 	var existing []string
+	var live []workspace.LiveNode
 	next := 0
 	if m.hasNodes() {
 		for _, n := range m.g.Nodes {
 			existing = append(existing, n.ID)
+		}
+		if m.eng != nil {
+			live = workspace.LiveNodes(m.eng.Snapshot())
+		} else {
+			live = workspace.LiveNodes(m.g)
 		}
 		next = max(m.sess.snapshot().NextID, nextWorkNumber(m.g))
 	}
 	split, stream := m.deps.split, m.stream
 	routing := m.freezeRoutingMode() != config.RoutingManual
 	cmd := func() tea.Msg {
-		g, u, err := split(ctx, task, earlier, existing, next, routing, stream.add)
+		g, u, err := split(ctx, task, earlier, existing, live, next, routing, stream.add)
 		return wsSplitDoneMsg{gen: gen, g: g, usage: u, err: err}
 	}
 	return m, tea.Batch(cmd, m.startTick())
@@ -1363,7 +1425,7 @@ func (m workspaceModel) onSplitDone(msg wsSplitDoneMsg) (tea.Model, tea.Cmd) {
 		m.saveSession()
 		return m, nil
 	}
-	if msg.g == nil || len(msg.g.Nodes) == 0 {
+	if msg.g == nil || (len(msg.g.Nodes) == 0 && len(msg.g.Changes) == 0) {
 		m.restoreTask()
 		m.say("error", "the lead returned no sub-tasks. Try describing the task differently")
 		return m, nil
@@ -1398,7 +1460,10 @@ func (m workspaceModel) onSplitDone(msg wsSplitDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	m = m.askPlugins()
 	m, autoCmd := m.autoAfterGraph()
-	m, roCmd := m.startReadOnlyPlan(newWorkNodes(m.g, before))
+	var roCmd tea.Cmd
+	if len(m.pendingChanges) == 0 { // changes always need the plan card
+		m, roCmd = m.startReadOnlyPlan(newWorkNodes(m.g, before))
+	}
 	return m, tea.Batch(cmd, autoCmd, roCmd)
 }
 
@@ -1474,25 +1539,42 @@ func (m workspaceModel) openGraph(g *workspace.Graph) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// appendGraph adds the nodes of a follow-up split to the live graph.
+// appendGraph adds the nodes of a follow-up split to the live graph, while
+// other nodes may run, and keeps the lead's changes of existing nodes for the
+// plan card.
 func (m workspaceModel) appendGraph(add *workspace.Graph) (tea.Model, tea.Cmd) {
 	add.Sanitize()
-	next := m.sess.snapshot().NextID
-	var idMap map[string]string
-	err := m.eng.Replace(func(g *workspace.Graph) { next, idMap = g.Append(add, next) })
-	if err != nil {
-		m.restoreTask()
-		m.say("error", oneLine(err.Error()))
-		return m, nil
-	}
 	var ids []string
-	for _, n := range add.Nodes {
-		if id, ok := idMap[n.ID]; ok {
-			ids = append(ids, id)
+	idMap := map[string]string{}
+	if len(add.Nodes) > 0 {
+		next := m.sess.snapshot().NextID
+		var err error
+		next, idMap, err = m.eng.AppendNodes(add, next)
+		if err != nil {
+			m.restoreTask()
+			m.say("error", oneLine(err.Error()))
+			return m, nil
 		}
+		for _, n := range add.Nodes {
+			if id, ok := idMap[n.ID]; ok {
+				ids = append(ids, id)
+			}
+		}
+		m.sess.update(func(s *workspace.Session) { s.NextID = next })
+		m.say("lead", splitNotice(ids))
 	}
-	m.sess.update(func(s *workspace.Session) { s.NextID = next })
-	m.say("lead", splitNotice(ids))
+	m.pendingChanges = nil
+	for _, c := range add.Changes {
+		for i, d := range c.DependsOn {
+			if nd, ok := idMap[d]; ok {
+				c.DependsOn[i] = nd
+			}
+		}
+		m.pendingChanges = append(m.pendingChanges, c)
+	}
+	if n := len(m.pendingChanges); n > 0 {
+		m.say("lead", fmt.Sprintf("%d %s of existing nodes wait for your approval (y apply · n drop)", n, pluralize(n, "change", "changes")))
+	}
 	m = m.proposeAgents(ids)
 	m.g = m.eng.Snapshot()
 	if len(ids) > 0 {
@@ -1544,6 +1626,8 @@ func (m workspaceModel) resetSession(s *workspace.Session) workspaceModel {
 	m.autoPaused, m.autoWarned = false, false
 	m.stopReview()
 	m.reviewDirty = false
+	m.followups = nil
+	m.pendingChanges = nil
 	m.prStop()
 	m.outputs = map[string][]string{}
 	m.partial = map[string]string{}
@@ -1611,6 +1695,8 @@ func (m workspaceModel) onEvent(msg wsEventMsg) (tea.Model, tea.Cmd) {
 		m.sayQueuedReplyStarted(ev.NodeID)
 	case workspace.EventBudgetWarn, workspace.EventBudgetReached:
 		m.onBudgetEvent(ev)
+	case workspace.EventResumeFailed:
+		m.say("system", ev.Text)
 	case workspace.EventFailed:
 		m.sayQueuedReplyStarted(ev.NodeID)
 		if ev.Text == "stopped" {
@@ -1760,7 +1846,7 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "N":
 		return m.openInbox(), nil
 	case "y", "n":
-		if m.focus != wsFocusPrompt && len(m.g.PendingApproval()) > 0 {
+		if m.focus != wsFocusPrompt && m.planPending() {
 			if k == "y" {
 				return m.approveAgents()
 			}
@@ -1868,22 +1954,11 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if n == nil {
 			return m, nil
 		}
-		m.autoPaused = false
-		if m.installing != "" {
-			m.setNotice("Wait for the plugin install to finish, then run the node", true)
-			return m, nil
+		cmd, msg, isErr := m.startNode(n)
+		if msg != "" {
+			m.setNotice(msg, isErr)
 		}
-		if n.Limited() {
-			m.retryLimitedKey(n)
-			return m, m.startTick()
-		}
-		if err := m.eng.Run(m.runCtx, n.ID); err != nil {
-			m.setNotice("! "+err.Error(), true)
-			return m, nil
-		}
-		m.g = m.eng.Snapshot()
-		m.setNotice("Started "+n.ID, false)
-		return m, m.startTick()
+		return m, cmd
 	case "R":
 		m.autoPaused = false
 		return m.runAll()
@@ -2187,6 +2262,12 @@ func (m workspaceModel) overlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case wsOverlayAgent:
 		return m.agentKey(msg)
 
+	case wsOverlayHelp:
+		return m.helpKey(k)
+
+	case wsOverlayPanel:
+		return m.panelKey(msg)
+
 	case wsOverlayInfo:
 		switch k {
 		case "esc", "q", "enter":
@@ -2225,6 +2306,10 @@ func (m workspaceModel) confirmKey(k string) (tea.Model, tea.Cmd) {
 			return m.doDeleteSession(c.arg), nil
 		case "delprofile":
 			return m.doDeleteProfile(c.arg), nil
+		case "rmprovider":
+			return m.doRemoveProvider(c.arg), nil
+		case "rmplugin", "rmmarket", "trust", "mplugin":
+			return m.pluginConfirmed(c)
 		}
 	case "n", "N", "esc":
 		m.overlay = c.back
@@ -2475,6 +2560,10 @@ func (m workspaceModel) overlayBox() string {
 		return m.paletteBox()
 	case wsOverlayAgent:
 		return m.agentEditorBox()
+	case wsOverlayHelp:
+		return m.helpBox()
+	case wsOverlayPanel:
+		return m.panelBox()
 	}
 	return ""
 }
@@ -2654,11 +2743,22 @@ func (m workspaceModel) transcriptLines(w int, withStream bool) []string {
 		case "lead":
 			prefix = lipgloss.NewStyle().Foreground(ui.Accent).Bold(true).Render("lead ›") + " "
 			body = lipgloss.NewStyle().Foreground(ui.Text)
-		case "system":
-			prefix = lipgloss.NewStyle().Foreground(ui.Muted).Bold(true).Render("· ")
+		case "system", "ok", "warn":
+			kind := ui.ResultInfo
+			if l.Who != "system" {
+				kind = l.Who
+			}
+			g, col := ui.ResultGlyph(kind)
+			prefix = lipgloss.NewStyle().Foreground(col).Bold(true).Render(g) + " "
 			body = lipgloss.NewStyle().Foreground(ui.Muted)
+			if kind == ui.ResultOK {
+				body = lipgloss.NewStyle().Foreground(ui.Text)
+			} else if kind == ui.ResultWarn {
+				body = lipgloss.NewStyle().Foreground(ui.Warn)
+			}
 		default:
-			prefix = lipgloss.NewStyle().Foreground(ui.Fail).Bold(true).Render("! ")
+			g, _ := ui.ResultGlyph(ui.ResultError)
+			prefix = lipgloss.NewStyle().Foreground(ui.Fail).Bold(true).Render(g) + " "
 			body = lipgloss.NewStyle().Foreground(ui.Fail)
 		}
 		pw := ansi.StringWidth(prefix)
@@ -3061,12 +3161,12 @@ func (m workspaceModel) paletteLines(maxRows int) []string {
 	matches := m.cmdMatches(m.input.Value())
 	var pal []string
 	if len(matches) == 0 {
-		pal = []string{lipgloss.NewStyle().Foreground(ui.Fail).Render("! no such command")}
-	} else {
+		pal = []string{ui.ResultLine(ui.ResultError, "no such command")}
+	} else if pal = renderCmdPalette(matches, m.input.Value(), m.cmdIdx, m.width-2, maxRows); pal == nil {
 		pal = renderCmdList(matches, m.cmdIdx, m.width-2, maxRows)
 	}
 	for i := range pal {
-		pal[i] = " " + pal[i]
+		pal[i] = "  " + pal[i]
 	}
 	return pal
 }

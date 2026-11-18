@@ -82,13 +82,17 @@ func (m workspaceModel) routingConnected() map[string]bool {
 // pending and the run must not go on.
 func (m workspaceModel) autoApproveAgents() (_ workspaceModel, wait bool) {
 	p := len(m.g.PendingApproval())
-	if p == 0 {
+	if p == 0 && len(m.pendingChanges) == 0 {
 		return m, false
 	}
 	if !m.cfg.Routing.ApproveUnattended() {
-		m.autoSay(fmt.Sprintf("%d %s wait for the approval of their agent (routing.auto_approve is off)", p, pluralize(p, "node", "nodes")))
+		m.autoSay(fmt.Sprintf("%d %s and %d %s wait for approval (routing.auto_approve is off)", p, pluralize(p, "node", "nodes"), len(m.pendingChanges), pluralize(len(m.pendingChanges), "change", "changes")))
 		m.notifyNote(notify.NeedsYou, "The agents of the split need your approval")
 		return m, true
+	}
+	if c := len(m.pendingChanges); c > 0 {
+		m.autoSay(fmt.Sprintf("applying %d %s of existing nodes", c, pluralize(c, "change", "changes")))
+		m = m.applyChanges()
 	}
 	n := m.eng.ApproveAssignments()
 	m.g = m.eng.Snapshot()

@@ -18,9 +18,9 @@ const (
 	// maxSkillLines caps the "Installed skills" section of the split prompt.
 	maxSkillLines = 60
 	// maxSkillDescRunes cuts a skill description in the split prompt.
-	maxSkillDescRunes = 120
+	maxSkillDescRunes = 80
 	// maxCatalogSkills is the most skills named on one catalog line.
-	maxCatalogSkills = 12
+	maxCatalogSkills = 6
 	// maxReasonRunes cuts the reason of a plugin request.
 	maxReasonRunes = 200
 )
@@ -33,6 +33,10 @@ type SplitOptions struct {
 	// Routing asks the lead to grade each sub-task (difficulty and reason),
 	// which the agent picker uses.
 	Routing bool
+	// Live is the work nodes already in the graph, with what is known of
+	// their files, for a follow-up task. The lead may change the ones that
+	// have not started (CHANGES) and must not collide with the running ones.
+	Live []LiveNode
 }
 
 func cutRunes(s string, n int) string {
@@ -81,7 +85,7 @@ func catalogSection(set plugins.Set, cat []plugins.CatalogEntry) string {
 		if state == plugins.StateDisabled {
 			line += " (disabled)"
 		}
-		line += ": " + Sanitize(e.Description)
+		line += ": " + cutRunes(Sanitize(e.Description), maxSkillDescRunes)
 		if len(e.Skills) > 0 {
 			names := e.Skills
 			tail := ""

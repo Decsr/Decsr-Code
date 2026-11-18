@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +8,6 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/Decsr/Decsr-Code/internal/plugins"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -43,22 +41,22 @@ func newPluginHarness(t *testing.T) *wsHarness {
 	return newWSHarnessAt(t, t.TempDir())
 }
 
-func TestWorkspacePluginListing(t *testing.T) {
+func TestWorkspacePluginManagerListsInstalled(t *testing.T) {
 	h := newPluginHarness(t)
 	h.typeCmd("/plugin")
+	if h.m.overlay != wsOverlayPanel || h.m.panel.kind != panelPlugin {
+		t.Fatalf("no plugin panel:\n%s", h.view())
+	}
 	h.want("Plugins")
-	h.want("tb 1.2.3 · user · enabled")
-	h.want("/tb:diff-review")
-	h.want("tb:audit")
-	h.want("tb:auditor")
-	h.want("hooks and MCP servers are not used by decsr")
+	h.want("tb")
+	h.want("1 skill")
+	h.want("hooks/MCP unused")
 }
 
 func TestWorkspacePluginEmptyState(t *testing.T) {
 	h := newWSHarness(t)
 	h.typeCmd("/plugins")
-	h.want("No plugins found")
-	h.want("install-plugins.sh")
+	h.want("no plugins installed")
 }
 
 func TestWorkspacePluginCommandRuns(t *testing.T) {
@@ -121,9 +119,8 @@ func TestWorkspacePluginDisableEnable(t *testing.T) {
 			t.Errorf("command %s still offered", c.name)
 		}
 	}
-	h.typeCmd("/plugin")
-	h.want("tb 1.2.3 · user · disabled")
-	h.key("esc")
+	h.typeCmd("/plugin info tb")
+	h.want("· off ·")
 
 	h.typeCmd("/plugin enable tb")
 	h.want("plugin tb enabled")
@@ -135,26 +132,6 @@ func TestWorkspacePluginDisableEnable(t *testing.T) {
 	h.want("no plugin named")
 	h.typeCmd("/plugin reload")
 	h.want("plugins reloaded: 1 found")
-}
-
-func TestPluginLinesWrapInsteadOfTruncating(t *testing.T) {
-	h := newWSHarness(t)
-	p := plugins.Plugin{Name: "big", Scope: "user", Enabled: true}
-	for i := 0; i < 12; i++ {
-		p.Skills = append(p.Skills, plugins.Skill{ID: fmt.Sprintf("big:skill-number-%02d", i)})
-	}
-	h.m.plug = plugins.Set{Plugins: []plugins.Plugin{p}}
-	text := strings.Join(h.m.pluginLines(), "\n")
-	for i := 0; i < 12; i++ {
-		if id := fmt.Sprintf("big:skill-number-%02d", i); !strings.Contains(text, id) {
-			t.Errorf("%s missing from %q", id, text)
-		}
-	}
-	for _, l := range h.m.pluginLines() {
-		if w := ansi.StringWidth(l); w > 76 {
-			t.Errorf("line of %d cells: %q", w, l)
-		}
-	}
 }
 
 func TestRolesPickerKeepsPluginRolesDistinct(t *testing.T) {

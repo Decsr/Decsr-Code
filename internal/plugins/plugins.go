@@ -56,6 +56,7 @@ type Plugin struct {
 	Skills                     []Skill
 	Agents                     []Agent
 	HasHooks, HasMCP           bool
+	Dir                        string // the plugin directory
 }
 
 // Set is the result of a scan.
@@ -163,7 +164,7 @@ func loadPlugin(dir, scope string, disabled map[string]bool) (p Plugin, warn str
 	}
 	p = Plugin{
 		Name: mf.Name, Description: sanitize(mf.Description), Version: sanitize(mf.Version),
-		Scope: scope, Enabled: !disabled[mf.Name],
+		Scope: scope, Enabled: !disabled[mf.Name], Dir: dir,
 		HasHooks: len(mf.Hooks) > 0 || isDir(filepath.Join(dir, "hooks")),
 		HasMCP:   len(mf.MCPServers) > 0 || isFile(filepath.Join(dir, ".mcp.json")),
 	}

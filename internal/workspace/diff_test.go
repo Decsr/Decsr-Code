@@ -335,3 +335,26 @@ func TestSessionNotesRoundTripAndOldFiles(t *testing.T) {
 		t.Fatalf("old = %+v, %v", old.Notes, err)
 	}
 }
+
+func TestWorkingTreeDiffHoldsChangedAndUntrackedFiles(t *testing.T) {
+	repo := newRepo(t)
+	writeT(t, repo, "a.go", "package a\n\nvar A = 2\n")
+	writeT(t, repo, "new.go", "package n\n")
+	d, err := WorkingTreeDiff(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, f := range d.Files {
+		names = append(names, f.Path)
+	}
+	if got := strings.Join(names, ","); !strings.Contains(got, "a.go") || !strings.Contains(got, "new.go") || strings.Contains(got, "b.go") {
+		t.Errorf("files = %v", names)
+	}
+	if clean, err := WorkingTreeDiff(newRepo(t)); err != nil || len(clean.Files) != 0 {
+		t.Errorf("a clean tree has no diff: %+v %v", clean, err)
+	}
+	if _, err := WorkingTreeDiff(t.TempDir()); err == nil {
+		t.Error("a directory outside git is an error")
+	}
+}

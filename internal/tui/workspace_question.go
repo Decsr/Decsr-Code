@@ -20,12 +20,15 @@ const (
 	askActAllow  = "allow"  // allow the programs for the node, then retry
 	askActAlways = "always" // allow the programs in project.yaml, then retry
 	askActNo     = "no"     // hide the card
+	askActPlan   = "plan"   // send the suggested follow-ups to the lead
+	askActDrop   = "drop"   // forget the suggested follow-ups
 )
 
 // askOpt is one choice of a card.
 type askOpt struct {
 	Label, Reason string
 	Act           string
+	Hot           string // a key that picks the option, besides its number
 }
 
 // askCard is a card that waits for a key press about one node: the question
@@ -40,6 +43,7 @@ type askCard struct {
 	Rec   int      // index of the recommended option; -1 none
 	Progs []string // askActAllow and askActAlways: the programs to allow
 	Cmds  []string // the refused commands
+	Hint  string   // the key line, when it is not the usual one
 }
 
 // askOptionSplit cuts "8080 - matches the dev server" into label and reason.
@@ -99,6 +103,9 @@ func (m workspaceModel) askCards() []askCard {
 			add(c)
 		}
 	}
+	if len(m.followups) > 0 {
+		add(followCard(m.followups, m.followSeq))
+	}
 	return out
 }
 
@@ -154,6 +161,9 @@ func renderAskCard(c askCard, sel, width int) []string {
 		rows = append(rows, truncateOneLine(line, iw))
 	}
 	keys := fmt.Sprintf("↑↓ move · 1-%d pick · Enter choose · Esc later", min(len(c.Opts), 9))
+	if c.Hint != "" {
+		keys = c.Hint
+	}
 	rows = append(rows, "", dim.Render(keys+"  (/answer brings it back)"))
 
 	b := lipgloss.NewStyle().Foreground(col)
@@ -192,6 +202,12 @@ func (m workspaceModel) askKeyPress(msg tea.KeyMsg) (next tea.Model, cmd tea.Cmd
 		nm, cmd := m.askChoose(c, sel)
 		return nm, cmd, true
 	}
+	for i, o := range c.Opts {
+		if o.Hot != "" && k == o.Hot {
+			nm, cmd := m.askChoose(c, i)
+			return nm, cmd, true
+		}
+	}
 	if len(k) == 1 && k[0] >= '1' && k[0] <= '9' {
 		if i := int(k[0] - '1'); i < len(c.Opts) {
 			nm, cmd := m.askChoose(c, i)
@@ -228,8 +244,32 @@ func (m workspaceModel) askChoose(c askCard, i int) (tea.Model, tea.Cmd) {
 		return m, nil
 	case askActAllow, askActAlways:
 		return m.allowAndRetry(c, o.Act == askActAlways)
+	case askActPlan:
+		return m.planFollowUps()
+	case askActDrop:
+		m.followups = nil
+		m.setNotice("Suggested follow-ups dropped", false)
+		return m, nil
 	}
 	return m, nil
+}
+
+// planFollowUps sends the suggested follow-ups to the lead as one task, through
+// the same path as a follow-up the user types, so the plan card still has to be
+// approved before anything runs. They are kept when the lead cannot take the
+// task now. A draft in the prompt is left alone.
+func (m workspaceModel) planFollowUps() (tea.Model, tea.Cmd) {
+	task := followUpTask(m.followups)
+	draft := m.input.Value()
+	next, cmd := m.sendTask(task, task)
+	nm := next.(workspaceModel)
+	if nm.splitting {
+		nm.followups = nil
+	}
+	if draft != "" {
+		nm.input.SetValue(draft)
+	}
+	return nm, cmd
 }
 
 // replyKeepingDraft is sendReply that leaves a draft in the prompt alone.

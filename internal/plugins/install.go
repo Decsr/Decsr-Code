@@ -39,7 +39,11 @@ func InstallWith(ctx context.Context, e CatalogEntry, url func(repo string) stri
 	if !ok || listed.Repo != e.Repo || listed.Path != e.Path {
 		return fmt.Errorf("plugin %q is not in the catalog", e.Name)
 	}
-	e = listed
+	return install(ctx, listed, url)
+}
+
+// install is InstallWith for an entry already checked by the caller.
+func install(ctx context.Context, e CatalogEntry, url func(repo string) string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return errors.New("home directory not found")

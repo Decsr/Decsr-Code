@@ -65,7 +65,7 @@ func TestBudgetBlocksRunAndKeepsNodeReady(t *testing.T) {
 	e := NewEngine(g, newFakeExec(), 2, "")
 	e.SetBudget(func() Budget { return Budget{LimitUSD: 5} })
 	err := e.Run(context.Background(), "T2")
-	if err == nil || !strings.Contains(err.Error(), "Budget reached: $5.02 of $5.00") || !strings.Contains(err.Error(), "/budget <amount>") {
+	if err == nil || !strings.Contains(err.Error(), "Budget reached: $5.02 of $5.00") || !strings.Contains(err.Error(), "/usage budget <amount>") {
 		t.Fatalf("err %v", err)
 	}
 	if e.Snapshot().Node("T2").Status != StatusTodo {

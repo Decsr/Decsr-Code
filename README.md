@@ -125,7 +125,7 @@ Type `@T3 your message` (or press `m` on a node) to start a new attempt of that 
 
 ### Sessions, profiles and extensions
 
-Each project keeps its sessions in `.decsr/sessions/`. `decsr resume` or `/resume` continues one, `/clear` starts a new one and `/compact` folds finished nodes into a summary. `/profile` saves your role settings for any project. Markdown files in `.decsr/commands/` and `.decsr/skills/` add your own commands and skills. Claude-format plugins add commands, skills and roles (`/plugin`). See [Sessions](doc/workspace.md#sessions), [Profiles](doc/workspace.md#profiles), [Custom commands and skills](doc/workspace.md#custom-commands-and-skills) and [Plugins](doc/workspace.md#plugins).
+Each project keeps its sessions in `.decsr/sessions/`. `decsr resume` or `/resume` continues one, `/clear` starts a new one and `/compact` folds finished nodes into a summary. `/model profile` saves your role settings for any project. Markdown files in `.decsr/commands/` and `.decsr/skills/` add your own commands and skills. Claude-format plugins add commands, skills and roles; `/plugin` is a manager to install, enable, import (from Claude Code), discover (curated catalog and marketplaces) and see the use of plugins. See [Sessions](doc/workspace.md#sessions), [Profiles](doc/workspace.md#profiles), [Custom commands and skills](doc/workspace.md#custom-commands-and-skills) and [Plugins](doc/workspace.md#plugins).
 
 ### Issues and Spec Kit import
 
@@ -165,12 +165,12 @@ In the diff view: `c` adds a note, `x` deletes it, `S` sends the notes, `n`/`p` 
 | `/merge` | Merge the session branch into your current branch |
 | `/pr`, `/pr watch`, `/pr stop` | Open a pull request, watch CI and review comments, stop watching |
 | `/issue`, `/import speckit` | Start from an issue / import Spec Kit tasks |
-| `/autonomy 1\|2\|3`, `/coordinator on\|off`, `/budget` | Autonomy, coordinator and spending |
-| `/approve`, `/reject`, `/routing` | Approve or cancel the plan of a split, show or set the routing mode |
+| `/autonomy 1\|2\|3`, `/coordinator on\|off\|now`, `/usage budget` | Autonomy, coordinator and spending |
+| `/routing`, `/stop`, `/retry` | Show or set the routing mode, stop and retry nodes (`y` / `n` on the plan card approve or cancel a split) |
 | `/check` | Run Build & test now, even when nothing changed |
-| `/resume`, `/clear`, `/compact`, `/project`, `/profile` | Sessions, projects and profiles |
-| `/connect`, `/roles`, `/plugin`, `/status`, `/cost`, `/rank`, `/export` | Providers, roles, plugins, status and reports |
-| `/config` | Home launcher (settings and classic pipeline) |
+| `/resume`, `/clear`, `/compact`, `/rename`, `/copy`, `/project`, `/model profile` | Sessions, projects and profiles |
+| `/provider`, `/roles`, `/model`, `/plugin`, `/status`, `/usage`, `/export` | Providers, roles, models, plugins, status and reports; `/help` lists them by group |
+| `/config`, `/menu` | Show and change settings; open the Home launcher (settings and classic pipeline) |
 
 `/help` lists every command. Full key reference: [Workspace keys](doc/workspace.md#keys) and [Commands](doc/workspace.md#commands).
 
@@ -196,7 +196,7 @@ In the diff view: `c` adds a note, `x` deletes it, `S` sends the notes, `n`/`p` 
 
 API and local runners answer in text mode (plain chat, no tools). Agent mode needs `claude`, `opencode`, `codex` or `dsh`.
 
-Connect an API provider once and decsr keeps the key (also `/connect` in the Workspace):
+Connect an API provider once and decsr keeps the key (also `/provider add` in the Workspace):
 
 ```bash
 decsr connect deepseek              # asks for the key (hidden), tests it, saves it
@@ -211,7 +211,7 @@ The `claude` runner starts your own, unmodified `claude` CLI headlessly. It uses
 
 ### Model rankings
 
-`decsr connect artificialanalysis` saves an [Artificial Analysis](https://artificialanalysis.ai) key (it is a data source, not a provider, so it never appears as a runner). `decsr models rank` then fetches the rankings once, saves them to `~/.decsr/rankings.json` and prints every model and effort sorted by a balance score (intelligence 50%, cost per task 30%, time per task 10%, context 10%; change the shares with `routing.weights`). `--json` prints the same as JSON. `/rank` does the same in the Workspace and shows the table in a scrollable view. Nothing is fetched unless you run one of them; the free tier allows 100 requests a day and the output says how many were used. Efforts without a measured row are estimated and marked `~`. With no key, the built-in relative tiers are shown. AA names that match no runner model are listed; add `routing.aliases` (`"AA name": "runner/model"`) to map them, and `routing.fallback` to edit the tiers.
+`decsr connect artificialanalysis` saves an [Artificial Analysis](https://artificialanalysis.ai) key (it is a data source, not a provider, so it never appears as a runner). `decsr models rank` then fetches the rankings once, saves them to `~/.decsr/rankings.json` and prints every model and effort sorted by a balance score (intelligence 50%, cost per task 30%, time per task 10%, context 10%; change the shares with `routing.weights`). `--json` prints the same as JSON. `/model rank` does the same in the Workspace and shows the table in a scrollable view. Nothing is fetched unless you run one of them; the free tier allows 100 requests a day and the output says how many were used. Efforts without a measured row are estimated and marked `~`. With no key, the built-in relative tiers are shown. AA names that match no runner model are listed; add `routing.aliases` (`"AA name": "runner/model"`) to map them, and `routing.fallback` to edit the tiers.
 
 Data: Artificial Analysis (artificialanalysis.ai)
 

@@ -132,6 +132,15 @@ type Node struct {
 	// are added to the allow list of its later attempts.
 	ExtraAllowed []string `json:"extra_allowed,omitempty"`
 
+	// SessionID is the id of the node's own CLI conversation, as the runner
+	// reported it in the latest attempt that started one; SessionRunner is the
+	// runner it belongs to and SessionAttempt the attempt that reported it.
+	// A later attempt resumes it, with the same runner, instead of starting
+	// over.
+	SessionID      string `json:"session_id,omitempty"`
+	SessionRunner  string `json:"session_runner,omitempty"`
+	SessionAttempt int    `json:"session_attempt,omitempty"`
+
 	// replyContext is the excerpt of the previous attempt the engine built when
 	// this attempt started (it can read details that are kept in memory only).
 	// Not saved.
@@ -153,6 +162,8 @@ type Attempt struct {
 	Commit          string            `json:"commit,omitempty"`
 	Activity        []runner.Activity `json:"activity,omitempty"`
 	ActivityDropped int               `json:"activity_dropped,omitempty"`
+	// SessionID is the CLI conversation of the attempt, when it had one.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // maxAttemptActivity is how many archived attempts keep their activity.
@@ -181,6 +192,10 @@ func cloneReport(r *Report) *Report {
 	c.Options = append([]string(nil), r.Options...)
 	if len(r.Options) == 0 {
 		c.Options = nil
+	}
+	c.Next = append([]string(nil), r.Next...)
+	if len(r.Next) == 0 {
+		c.Next = nil
 	}
 	return &c
 }
@@ -266,6 +281,9 @@ type Graph struct {
 	// SplitWarnings are the notes of the split that produced the graph (an
 	// unusable skill or plugin dropped). Not saved.
 	SplitWarnings []string `json:"-"`
+	// Changes are the edits the lead asked for on existing nodes; they are not
+	// part of the saved graph, the plan card applies them.
+	Changes []Change `json:"-"`
 	// ReviewRounds is the number of lead reviews of the current task; a new
 	// task, issue or import resets it (Append).
 	ReviewRounds int `json:"review_rounds,omitempty"`
@@ -508,6 +526,7 @@ func (g *Graph) Clone() *Graph {
 	c.NewRoles = append([]NewRole(nil), g.NewRoles...)
 	c.PluginRequests = append([]PluginRequest(nil), g.PluginRequests...)
 	c.SplitWarnings = append([]string(nil), g.SplitWarnings...)
+	c.Changes = append([]Change(nil), g.Changes...)
 	return &c
 }
 

@@ -71,7 +71,7 @@ func TestWorkspaceProfileApplyRefusedWhileRunning(t *testing.T) {
 	h.pump(func(m workspaceModel) bool { return len(m.outputs["T1"]) > 0 })
 	before := h.m.cfg.Agents["coder"].Model
 	h.key("tab")
-	h.typeCmd("/profile")
+	h.typeCmd("/model profile")
 	h.key("enter")
 	h.want("stop the running nodes first")
 	if h.m.cfg.Agents["coder"].Model != before || h.m.cfg.Project.Profile != "" {
@@ -81,7 +81,7 @@ func TestWorkspaceProfileApplyRefusedWhileRunning(t *testing.T) {
 		t.Fatal("project.yaml was written")
 	}
 	// Saving stays allowed.
-	h.typeCmd("/profile")
+	h.typeCmd("/model profile")
 	h.key("down", "enter")
 	h.want("Save profile")
 }
@@ -122,7 +122,7 @@ func TestWorkspacePaletteEnterRule(t *testing.T) {
 		h := newWSHarness(t)
 		typeOnly(h, pre)
 		h.key("enter")
-		h.want("! " + pre + " matches several commands: ")
+		h.want("✗ " + pre + " matches several commands: ")
 		h.want("/compact")
 		h.want("keep typing or press Tab")
 		if h.m.input.Value() != pre || h.m.overlay != wsOverlayNone || h.m.showHelp {
@@ -132,7 +132,7 @@ func TestWorkspacePaletteEnterRule(t *testing.T) {
 	h := newWSHarness(t)
 	typeOnly(h, "/co")
 	h.key("enter")
-	h.want("! /co matches several commands: /compact, /config, /connect, /coordinator, /cost — keep typing or press Tab")
+	h.want("✗ /co matches several commands: /compact, /config, /context, /coordinator, /copy, /doctor — keep typing or press Tab")
 
 	// Exact name runs.
 	h = newWSHarness(t)
@@ -149,9 +149,9 @@ func TestWorkspacePaletteEnterRule(t *testing.T) {
 	// An arrow-selected highlight runs.
 	h = newWSHarness(t)
 	typeOnly(h, "/co")
-	h.key("down", "down", "enter") // /compact, /connect, /cost, /config: the third one is /cost
-	if h.m.overlay != wsOverlayInfo || h.m.infoName != "Cost" {
-		t.Fatalf("the highlighted /cost did not run:\n%s", h.view())
+	h.key("down", "down", "down", "down", "enter") // /compact, /copy, /coordinator, /context, /config: the fifth one is /config
+	if h.m.overlay != wsOverlayPanel || h.m.panel.kind != panelConfig {
+		t.Fatalf("the highlighted /config did not run:\n%s", h.view())
 	}
 
 	// Tab completes, then Enter runs the completed name.

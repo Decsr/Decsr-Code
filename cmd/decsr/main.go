@@ -284,6 +284,7 @@ func runCmdWith(args []string, wsOpts tui.WorkspaceOptions) {
 			}
 		}
 		for {
+			wsOpts.Doctor = workspaceDoctor(root)
 			wsResult, err := tui.RunWorkspace(root, cfg, wsOpts)
 			wsOpts = tui.WorkspaceOptions{} // only the first Workspace opens on the session list
 			if err != nil {
