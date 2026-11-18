@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -225,7 +226,7 @@ func TestSessionJSONReportCompat(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := back.Node("T1")
-	if b.Status != StatusWaiting || *b.Report != *n.Report || b.Attempts[0].Report.Status != "blocked" {
+	if b.Status != StatusWaiting || !reflect.DeepEqual(*b.Report, *n.Report) || b.Attempts[0].Report.Status != "blocked" {
 		t.Errorf("round trip = %+v", b)
 	}
 	c := g.Clone()

@@ -163,6 +163,9 @@ func CommandsFor(language, root string) Commands {
 	case "go":
 		return Commands{"go mod tidy", "go build -o " + os.DevNull + " ./...", []string{"go test -count=1 ./..."}}
 	case "cpp", "c":
+		if build, test, ok := cmakePresetCommands(root); ok {
+			return Commands{"", build, test}
+		}
 		return Commands{"", "cmake -S . -B build && cmake --build build", []string{"ctest --test-dir build --output-on-failure"}}
 	case "csharp":
 		return Commands{"dotnet restore", "dotnet build --nologo", []string{"dotnet test --nologo"}}

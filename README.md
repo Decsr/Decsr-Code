@@ -105,7 +105,7 @@ The lead splits your task into nodes with titles, dependencies and a suggested r
 
 ### Roles and backends
 
-A role is a name, a description, a runner, a model and an effort. Six built-in roles exist (`pm`, `coder`, `coder_fixer`, `qa`, `ux_reviewer`, `security`) and you can add your own under `agents:`. Use `mode: agent` to let a CLI agent edit files with its own tools, or `mode: text` to let decsr write the files. `read_only: true` makes a role report only. See [Roles](doc/workspace.md#roles) and [Agent mode](doc/workspace.md#agent-mode).
+A role is a name, a description, a runner, a model and an effort. Seven built-in roles exist (`pm`, `coder`, `coder_fixer`, `qa`, `ux_reviewer`, `security`, `reviewer`) and you can add your own under `agents:`. Use `mode: agent` to let a CLI agent edit files with its own tools, or `mode: text` to let decsr write the files. `read_only: true` makes a role report only. See [Roles](doc/workspace.md#roles) and [Agent mode](doc/workspace.md#agent-mode).
 
 ### Review and merge
 
@@ -166,7 +166,8 @@ In the diff view: `c` adds a note, `x` deletes it, `S` sends the notes, `n`/`p` 
 | `/pr`, `/pr watch`, `/pr stop` | Open a pull request, watch CI and review comments, stop watching |
 | `/issue`, `/import speckit` | Start from an issue / import Spec Kit tasks |
 | `/autonomy 1\|2\|3`, `/coordinator on\|off`, `/budget` | Autonomy, coordinator and spending |
-| `/approve`, `/reject`, `/routing` | Approve or cancel the agents of a split, show or set the routing mode |
+| `/approve`, `/reject`, `/routing` | Approve or cancel the plan of a split, show or set the routing mode |
+| `/check` | Run Build & test now, even when nothing changed |
 | `/resume`, `/clear`, `/compact`, `/project`, `/profile` | Sessions, projects and profiles |
 | `/connect`, `/roles`, `/plugin`, `/status`, `/cost`, `/rank`, `/export` | Providers, roles, plugins, status and reports |
 | `/config` | Home launcher (settings and classic pipeline) |

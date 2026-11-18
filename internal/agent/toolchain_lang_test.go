@@ -78,6 +78,11 @@ func TestQAFallbackTestCmdsNonGo(t *testing.T) {
 		cfg.Project.TestCmd = cmd
 		return cfg
 	}
+	withBuild := func(cmd string) config.Config {
+		cfg := config.DefaultConfig()
+		cfg.Project.BuildCmd = cmd
+		return cfg
+	}
 	tests := []struct {
 		name string
 		file string
@@ -87,6 +92,7 @@ func TestQAFallbackTestCmdsNonGo(t *testing.T) {
 		{"python user cmd", "pyproject.toml", withTest("pytest -q"), []string{"pytest -q"}},
 		{"go user cmd", "go.mod", withTest("go test ./..."), []string{goBuildCmd, "go test ./..."}},
 		{"cmake", "CMakeLists.txt", config.DefaultConfig(), []string{"cmake -S . -B build && cmake --build build", "ctest --test-dir build --output-on-failure"}},
+		{"build_cmd override", "CMakeLists.txt", withBuild("make -j4"), []string{"make -j4", "ctest --test-dir build --output-on-failure"}},
 		{"empty", "", config.DefaultConfig(), []string{"echo 'no test commands available'"}},
 	}
 	for _, tc := range tests {

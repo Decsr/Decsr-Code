@@ -57,6 +57,10 @@ type WorkerResult struct {
 	// the extracted summary.
 	Report Report
 	Usage  runner.TokenUsage
+	// Denials are the tool calls the runner refused during the run.
+	Denials []runner.Denial
+	// Body is the reply without the closing REPORT block.
+	Body string
 }
 
 // IsBinaryContent reports whether data looks like binary (non-text) content.
@@ -166,6 +170,9 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 			res.Usage.OutputTokens += tok.Usage.OutputTokens
 			res.Usage.Estimated = res.Usage.Estimated || tok.Usage.Estimated
 		}
+		if len(tok.Denials) > 0 {
+			res.Denials = tok.Denials
+		}
 		if tok.Text != "" {
 			sb.WriteString(tok.Text)
 			if req.OnActivity != nil && !req.ReadOnly && !agentMode {
@@ -194,6 +201,7 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 	}
 
 	rep, body, found := ParseReport(res.Output)
+	res.Body = strings.TrimSpace(body)
 	res.Summary = workerSummary(body)
 	if found {
 		res.Report = rep

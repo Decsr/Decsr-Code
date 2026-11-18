@@ -7,7 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `project.build_cmd` replaces the detected build command, like `project.test_cmd`
+  does for tests. It applies to Workspace Build & test, the classic pipeline
+  and the project context.
+- C and C++ projects with a `CMakePresets.json` (and optional
+  `CMakeUserPresets.json`) build and test through the presets instead of
+  `cmake -S . -B build`. When the preset's `CMAKE_MAKE_PROGRAM` sits under a
+  `Tools/<name>/` directory that holds `CMake/bin/cmake` (a Qt install), that
+  `cmake` and `ctest` are used. Projects without presets are unchanged.
+
 ### Changed
+- Workspace: a task runs only what it needs. Each sub-task has a `writes`
+  flag (missing means true) and a `writes: false` node runs read-only whatever
+  its role. The lead assigns the roles itself and is told to use only the roles
+  the task needs, so a review or question becomes one read-only node.
+  Build & test is added only when a node writes, and when its turn comes it is
+  skipped (`skipped · nothing changed`, done but not passed) unless a node
+  changed a file that is not documentation. A plan whose nodes all have
+  `writes: false` starts without the plan card. The approval card is now the
+  plan card: it also shows each node's role and `writes` or `read-only`, and a
+  role the lead invented as `new · uses the pm's agent`, which `y` creates for
+  the session only (`/roles save <name>` keeps it in `project.yaml`).
 - claude runner on a subscription login: `decsr automation install` prints a
   warning that cites Anthropic's Consumer Terms and usage policy and asks for
   confirmation (`--yes` accepts it; without a terminal it refuses without
@@ -19,6 +40,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API use and keeps the old behaviour.
 
 ### Added
+- Workspace: a direct answer. When the project context already answers the
+  task, the lead replies in the chat (`===ANSWER===`) with no nodes and no
+  Build & test.
+- Workspace: a `reviewer` built-in role that reads the code and reports,
+  never writes.
+- Workspace: the full reply of a `writes: false` node is printed in the chat as
+  `T1 · reviewer:` followed by the Markdown body; the run summary says
+  `answer above`.
+- Workspace: `/check` runs Build & test now, whatever changed.
+- Workspace: questions with options. A worker's `REPORT` may carry `options:`
+  (numbered lines) and `recommended:`; a waiting question shows a card with the
+  options, the recommended one first under the cursor, and `Type your own
+  answer`. `1`-`9` or `Enter` replies, `Esc` hides the card, `/answer` brings
+  it back. A blocked report is said in the chat, with no card.
+- Workspace: a summary in the chat when a run ends, built from the graph: the
+  nodes that ended with their summary and file count, Build & test, and the
+  next steps that apply.
+- Workspace: refused-command card for the `claude` runner. The `permission_denials`
+  of the result event are kept on the node; a refused `Bash` command offers
+  `Allow for T2 and retry`, `Always allow ... in this project and retry`
+  (`project.allowed_commands`) or `No`. Nothing is allowed without a key press,
+  and read-only roles are never offered it.
 - Workspace: approval card for agent routing. After a split one card lists
   each node with its grade, `runner · model · effort`, a marker against the
   role's agent, the estimated cost and the reason. `y` approves and starts the

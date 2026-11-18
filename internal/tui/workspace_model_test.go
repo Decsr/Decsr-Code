@@ -25,6 +25,10 @@ type wsFakeExec struct {
 	gates map[string]chan error
 	// reports are the reports nodes end with; a node without one has none.
 	reports map[string]workspace.Report
+	// denied are the refused tool calls nodes end with.
+	denied map[string][]runner.Denial
+	// answers are the full replies read-only nodes end with.
+	answers map[string]string
 }
 
 func (f *wsFakeExec) gate(id string) chan error {
@@ -51,6 +55,8 @@ func (f *wsFakeExec) Run(ctx context.Context, _ *workspace.Graph, n *workspace.N
 		res := workspace.Result{Summary: "ok " + n.ID}
 		f.mu.Lock()
 		res.Report = f.reports[n.ID]
+		res.Denied = f.denied[n.ID]
+		res.Answer = f.answers[n.ID]
 		f.mu.Unlock()
 		return res, nil
 	case <-ctx.Done():

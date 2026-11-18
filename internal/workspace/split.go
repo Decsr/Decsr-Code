@@ -17,6 +17,7 @@ const (
 	markerTitle    = "===TITLE==="
 	markerTasks    = "===TASKS==="
 	markerNewRoles = "===NEW_ROLES==="
+	markerAnswer   = "===ANSWER==="
 	markerEnd      = "===END==="
 
 	// maxSplitTasks is the most sub-tasks the lead may produce.
@@ -91,6 +92,8 @@ type splitTask struct {
 	Skills      []string `json:"skills"`
 	Difficulty  string   `json:"difficulty"`
 	Reason      string   `json:"reason"`
+	// Writes is false for a read-only sub-task; a missing field means true.
+	Writes bool `json:"writes"`
 }
 
 // UnmarshalJSON accepts the common alternative key names the lead uses; an
@@ -117,6 +120,7 @@ func (t *splitTask) UnmarshalJSON(data []byte) error {
 		Size         string   `json:"size"`
 		Reason       string   `json:"reason"`
 		DiffReason   string   `json:"difficulty_reason"`
+		Writes       *bool    `json:"writes"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -137,6 +141,7 @@ func (t *splitTask) UnmarshalJSON(data []byte) error {
 	t.Skills = raw.Skills
 	t.Difficulty = first(raw.Difficulty, raw.Grade, raw.Size)
 	t.Reason = first(raw.Reason, raw.DiffReason)
+	t.Writes = raw.Writes == nil || *raw.Writes
 	for _, alt := range [][]string{raw.Depends, raw.Dependencies, raw.DependsOnC, raw.Deps} {
 		if t.DependsOn == nil {
 			t.DependsOn = alt
@@ -145,8 +150,9 @@ func (t *splitTask) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ParseSplit turns the lead's output into a validated graph. Roles named by
-// the lead become suggestions only; nothing is assigned.
+// ParseSplit turns the lead's output into a validated graph. A role the lead
+// names that is defined is assigned to the node; one that is not defined stays
+// a suggestion until the user approves the new role.
 func ParseSplit(task, output string, roles []Role) (*Graph, error) {
 	return ParseSplitWith(task, output, roles, nil)
 }
@@ -166,6 +172,12 @@ func ParseSplitWith(task, output string, roles []Role, existing []string) (*Grap
 func ParseSplitOpts(task, output string, roles []Role, existing []string, opts SplitOptions) (*Graph, error) {
 	tasksRaw, ok := section(output, markerTasks)
 	if !ok {
+		if answer, found := section(output, markerAnswer); found {
+			if answer == "" {
+				return nil, fmt.Errorf("split: the lead's answer is empty")
+			}
+			return &Graph{Task: task, Answer: answer}, nil
+		}
 		return nil, fmt.Errorf("split: no %s section in the lead's answer", markerTasks)
 	}
 	var tasks []splitTask
@@ -250,8 +262,12 @@ func ParseSplitOpts(task, output string, roles []Role, existing []string, opts S
 		if len(dropped) > 0 {
 			warns = append(warns, fmt.Sprintf("%s: skill %s is not installed or suggested, dropped", nd.ID, strings.Join(dropped, ", ")))
 		}
+		nd.ReadOnlyTask = !t.Writes
 		if role := splitRole(t.Role, known); role != "" {
 			nd.SuggestedRole = role
+			if known[role] {
+				nd.Role = role
+			}
 			if !known[role] && !proposed[role] {
 				proposed[role] = true
 				proposedOrder = append(proposedOrder, role)
@@ -347,7 +363,7 @@ func SplitOpts(ctx context.Context, r runner.LLMRunner, model string, task strin
 	if err != nil {
 		return nil, usage, err
 	}
-	if len(g.Nodes) < 2 || anySuggestedRole(g) {
+	if g.Answer != "" || len(g.Nodes) < 2 || anySuggestedRole(g) {
 		return g, usage, nil
 	}
 	req.Messages = append(append([]runner.ConvMessage(nil), req.Messages...),
@@ -417,7 +433,7 @@ func section(s, marker string) (string, bool) {
 	}
 	rest := s[i+len(marker):]
 	end := len(rest)
-	for _, m := range []string{markerTitle, markerTasks, markerNewRoles, markerPlugins, markerEnd} {
+	for _, m := range []string{markerTitle, markerTasks, markerNewRoles, markerPlugins, markerAnswer, markerEnd} {
 		if j := strings.Index(rest, m); j >= 0 && j < end {
 			end = j
 		}

@@ -50,23 +50,36 @@ const maxFailureBytes = 4000
 
 // Node is one sub-task in the graph.
 type Node struct {
-	ID            string     `json:"id"` // "T1", "T2", …, "CHECK", "F1"
-	Title         string     `json:"title"`
-	Description   string     `json:"description"`
-	Kind          Kind       `json:"kind"`
-	Role          string     `json:"role,omitempty"` // assigned role; "" = unassigned
-	SuggestedRole string     `json:"suggested_role,omitempty"`
-	DependsOn     []string   `json:"depends_on,omitempty"`
-	Status        Status     `json:"status"`
-	Commands      []string   `json:"commands,omitempty"` // check nodes
-	Summary       string     `json:"summary,omitempty"`
-	Report        *Report    `json:"report,omitempty"` // the worker's closing report, set when the node ends
-	Files         []string   `json:"files,omitempty"`
-	Observed      []string   `json:"observed,omitempty"`   // changed on disk by the agent's own tools
-	FileStats     []FileStat `json:"file_stats,omitempty"` // lines added and removed per file, set when the node ran in a worktree
-	Commit        string     `json:"commit,omitempty"`     // the node's own commit when it ran in a worktree; reachable through the session branch
-	Warnings      []string   `json:"warnings,omitempty"`
-	Skills        []string   `json:"skills,omitempty"` // plugin skill ids the lead chose for this node
+	ID            string   `json:"id"` // "T1", "T2", …, "CHECK", "F1"
+	Title         string   `json:"title"`
+	Description   string   `json:"description"`
+	Kind          Kind     `json:"kind"`
+	Role          string   `json:"role,omitempty"` // assigned role; "" = unassigned
+	SuggestedRole string   `json:"suggested_role,omitempty"`
+	DependsOn     []string `json:"depends_on,omitempty"`
+	Status        Status   `json:"status"`
+	Commands      []string `json:"commands,omitempty"` // check nodes
+	// Skipped marks a check node that ended without running its commands
+	// because no node had changed a non-doc file: it is done, but it did not
+	// pass. LastRunAt is when the check last ran and passed; ForceRun makes the
+	// next run ignore the gate (/check).
+	Skipped   bool       `json:"skipped,omitempty"`
+	LastRunAt time.Time  `json:"last_run_at,omitempty"`
+	ForceRun  bool       `json:"force_run,omitempty"`
+	Summary   string     `json:"summary,omitempty"`
+	Report    *Report    `json:"report,omitempty"` // the worker's closing report, set when the node ends
+	Files     []string   `json:"files,omitempty"`
+	Observed  []string   `json:"observed,omitempty"`   // changed on disk by the agent's own tools
+	FileStats []FileStat `json:"file_stats,omitempty"` // lines added and removed per file, set when the node ran in a worktree
+	Commit    string     `json:"commit,omitempty"`     // the node's own commit when it ran in a worktree; reachable through the session branch
+	Warnings  []string   `json:"warnings,omitempty"`
+	Skills    []string   `json:"skills,omitempty"` // plugin skill ids the lead chose for this node
+	// ReadOnlyTask is set when the lead marked the sub-task "writes": false: the
+	// node runs read-only whatever its role.
+	ReadOnlyTask bool `json:"read_only_task,omitempty"`
+	// Answered is set when the node's full reply was shown to the user as the
+	// answer (a read-only task that ended with one).
+	Answered bool `json:"answered,omitempty"`
 	// Difficulty is the lead's grade (small, medium or large) and
 	// DifficultyReason its one-line reason; both are set only when routing is on.
 	Difficulty       string `json:"difficulty,omitempty"`
@@ -112,6 +125,12 @@ type Node struct {
 	// Limit is set while the node waits for a provider usage limit to lift
 	// (Status waiting). It tells such a node from one that waits for a reply.
 	Limit *LimitInfo `json:"limit,omitempty"`
+	// Denied are the tool calls the runner refused in the current attempt; it
+	// is cleared when a new attempt starts.
+	Denied []runner.Denial `json:"denied,omitempty"`
+	// ExtraAllowed are command programs the user allowed for this node; they
+	// are added to the allow list of its later attempts.
+	ExtraAllowed []string `json:"extra_allowed,omitempty"`
 
 	// replyContext is the excerpt of the previous attempt the engine built when
 	// this attempt started (it can read details that are kept in memory only).
@@ -159,6 +178,10 @@ func cloneReport(r *Report) *Report {
 		return nil
 	}
 	c := *r
+	c.Options = append([]string(nil), r.Options...)
+	if len(r.Options) == 0 {
+		c.Options = nil
+	}
 	return &c
 }
 
@@ -237,6 +260,9 @@ type Graph struct {
 	FixSeq int `json:"fix_seq,omitempty"`
 	// PluginRequests are the plugins the lead asked for, with the answers.
 	PluginRequests []PluginRequest `json:"plugin_requests,omitempty"`
+	// Answer is the lead's direct reply to a question that needed no sub-task;
+	// a graph that has it has no nodes. Not saved.
+	Answer string `json:"-"`
 	// SplitWarnings are the notes of the split that produced the graph (an
 	// unusable skill or plugin dropped). Not saved.
 	SplitWarnings []string `json:"-"`
@@ -466,6 +492,8 @@ func (g *Graph) Clone() *Graph {
 		nn.Activity = append([]runner.Activity(nil), n.Activity...)
 		nn.Attempts = cloneAttempts(n.Attempts)
 		nn.Report = cloneReport(n.Report)
+		nn.Denied = append([]runner.Denial(nil), n.Denied...)
+		nn.ExtraAllowed = append([]string(nil), n.ExtraAllowed...)
 		if n.Spec != nil {
 			sr := *n.Spec
 			nn.Spec = &sr
@@ -630,9 +658,9 @@ func (g *Graph) AddWork(title, desc, role string, nextID int) (*Node, int) {
 
 // Append merges the work nodes of add into g under fresh IDs T<n>, T<n+1>, …
 // (n is at least nextID and above every T number already in g), rewrites their
-// dependencies, merges add's new roles and drops add's CHECK. g's CHECK (created
-// when missing) is moved last, depends on every work node, and is reset to
-// todo. It returns the next free number and the old-to-new ID map. add is not
+// dependencies, merges add's new roles and drops add's CHECK. When at least one
+// added node writes, g's CHECK (created when missing) is moved last, depends on
+// every work node, and is reset to todo; when none does, CHECK is left alone. It returns the next free number and the old-to-new ID map. add is not
 // modified. A dependency naming one of add's own keys follows the renumbering
 // (also when the key collides with an existing ID); one naming another work
 // node already in g is kept; any other dependency is dropped.
@@ -672,6 +700,8 @@ func (g *Graph) Append(add *Graph, nextID int) (newNext int, idMap map[string]st
 		c.Activity = append([]runner.Activity(nil), n.Activity...)
 		c.Attempts = cloneAttempts(n.Attempts)
 		c.Report = cloneReport(n.Report)
+		c.Denied = append([]runner.Denial(nil), n.Denied...)
+		c.ExtraAllowed = append([]string(nil), n.ExtraAllowed...)
 		c.Assign = n.Assign.clone()
 		g.Nodes = append(g.Nodes, &c)
 	}
@@ -704,6 +734,15 @@ func (g *Graph) Append(add *Graph, nextID int) (newNext int, idMap map[string]st
 		}
 	}
 
+	writes := false
+	for _, n := range add.Nodes {
+		if n.Kind == KindWork && !n.ReadOnlyTask {
+			writes = true
+		}
+	}
+	if !writes {
+		return nextID, idMap
+	}
 	check := g.Node("CHECK")
 	if check == nil {
 		check = g.AddCheckDeferred()
@@ -723,7 +762,7 @@ func (g *Graph) Append(add *Graph, nextID int) (newNext int, idMap map[string]st
 		}
 	}
 	check.Status = StatusTodo
-	check.Error, check.Summary, check.Warnings = "", "", nil
+	check.Error, check.Summary, check.Warnings, check.Skipped = "", "", nil, false
 	return nextID, idMap
 }
 

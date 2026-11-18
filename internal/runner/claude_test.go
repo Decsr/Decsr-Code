@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -157,5 +158,37 @@ func TestParseClaudeJSONResponse_CachedTokensInPrompt(t *testing.T) {
 	}
 	if usage.InputTokens != 68996 {
 		t.Errorf("InputTokens: want 68996, got %d", usage.InputTokens)
+	}
+}
+
+func TestStreamClaudeOutput_PermissionDenials(t *testing.T) {
+	stream := `{"type":"result","subtype":"success","result":"x","usage":{"input_tokens":1,"output_tokens":1},"permission_denials":[` +
+		`{"tool_name":"Bash","tool_use_id":"a","tool_input":{"command":"cmake --build build","description":"d"}},` +
+		`{"tool_name":"Bash","tool_use_id":"b","tool_input":{"command":"cmake --build build"}},` +
+		`{"tool_name":"Write","tool_use_id":"c","tool_input":{"file_path":"/x"}}]}
+`
+	f := filepath.Join(t.TempDir(), "stream.ndjson")
+	if err := os.WriteFile(f, []byte(stream), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("cat", f)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ch := make(chan Token, 64)
+	go streamClaudeOutput(cmd, stdout, &bytes.Buffer{}, CompletionRequest{}, "p", ch)
+	var done Token
+	for tok := range ch {
+		if tok.Done {
+			done = tok
+		}
+	}
+	want := []Denial{{Tool: "Bash", Command: "cmake --build build"}, {Tool: "Write"}}
+	if !reflect.DeepEqual(done.Denials, want) {
+		t.Errorf("denials = %+v, want %+v", done.Denials, want)
 	}
 }

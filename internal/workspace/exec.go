@@ -72,6 +72,8 @@ type Event struct {
 	Estimated       bool
 	// Live marks an EventUsage that is a progress snapshot, not the final usage.
 	Live bool
+	// Answer is set for an EventDone of a read-only task: its full reply.
+	Answer string
 	// Effort is set for EventModel; "" = the provider default.
 	Effort string
 	// Runner and Model of the agent that used the tokens (EventUsage), to
@@ -97,9 +99,16 @@ type Result struct {
 	// worktree and changed something.
 	Commit   string
 	Warnings []string
+	// Answer is the full reply of a read-only task, without the REPORT block.
+	Answer string
+	// Skipped is set for a Build & test that did not run because no node had
+	// changed a non-doc file.
+	Skipped bool
 	// Report is the worker's closing report; the zero value (no Status) for a
 	// node that has none, such as Build & test.
 	Report Report
+	// Denied are the tool calls the runner refused during the run.
+	Denied []runner.Denial
 }
 
 // Executor runs one node. It must return promptly when ctx is cancelled.
@@ -174,7 +183,7 @@ func NewExecutorIsolated(root string, cfg config.Config, projectContext string, 
 
 func (x *executor) Run(ctx context.Context, g *Graph, n *Node, emit func(Event)) (Result, error) {
 	if n.Kind == KindCheck {
-		return x.runCheck(ctx, n, emit)
+		return x.runCheck(ctx, g, n, emit)
 	}
 	return x.runWork(ctx, g, n, emit)
 }
@@ -187,6 +196,8 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	if err := role.Agent.ModeError(); err != nil {
 		return Result{}, fmt.Errorf("role %q: %w", role.Name, err)
 	}
+	// A sub-task the lead marked as not writing runs read-only whatever its role.
+	readOnly := role.ReadOnly || n.ReadOnlyTask
 	// cur is the agent that runs the node: the assigned one, else the role's.
 	cur, r, note := x.nodeAgent(role, n)
 	if note != "" {
@@ -231,7 +242,7 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 		}()
 	}
 	var buildCommands []string
-	if x.checkCommands != nil && !role.ReadOnly && role.Agent.EffectiveMode() == config.ModeAgent {
+	if x.checkCommands != nil && !readOnly && role.Agent.EffectiveMode() == config.ModeAgent {
 		buildCommands = x.checkCommands()
 	}
 	before, snapOK := snapshotTree(wx.root, maxSnapshotFiles)
@@ -240,7 +251,7 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	var res agent.WorkerResult
 	var err error
 	for attempt := 0; ; attempt++ {
-		res, err = x.runWorker(ctx, r, wx, cur, role, n, g, rolePrompt, buildCommands, emit, throttle)
+		res, err = x.runWorker(ctx, r, wx, cur, readOnly, role, n, g, rolePrompt, buildCommands, emit, throttle)
 		// A rate limit on the assigned agent before it did any work: the
 		// role's own agent takes over once.
 		if attempt == 0 && usedAssign(n, cur, role) && asRateLimit(err) != nil && res.Usage.OutputTokens == 0 && ctx.Err() == nil {
@@ -265,7 +276,10 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	if err != nil {
 		return Result{}, err
 	}
-	out := Result{Summary: res.Summary, Files: res.Files, Warnings: skillWarnings, Report: res.Report}
+	out := Result{Summary: res.Summary, Files: res.Files, Warnings: skillWarnings, Report: res.Report, Denied: res.Denials}
+	if n.ReadOnlyTask {
+		out.Answer = res.Body
+	}
 	if snapOK {
 		if after, ok := snapshotTree(wx.root, maxSnapshotFiles); ok {
 			out.Observed = diffSnapshots(before, after, res.Files)
@@ -274,16 +288,16 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	for _, sk := range res.Skipped {
 		out.Warnings = append(out.Warnings, "not written: "+sk)
 	}
-	if role.ReadOnly && len(out.Observed) > 0 {
+	if readOnly && len(out.Observed) > 0 {
 		out.Warnings = append(out.Warnings, "read-only role changed files: "+strings.Join(out.Observed, ", "))
 	}
-	if !role.ReadOnly && len(res.Files) == 0 && len(out.Observed) == 0 && len(res.Skipped) == 0 {
+	if !readOnly && len(res.Files) == 0 && len(out.Observed) == 0 && len(res.Skipped) == 0 {
 		out.Warnings = append(out.Warnings, "no files were written")
 	}
 	for _, w := range out.Warnings {
 		emit(Event{NodeID: n.ID, Type: EventOutput, Text: "\u26a0 " + w + "\n"})
 	}
-	if x.iso != nil && !role.ReadOnly {
+	if x.iso != nil && !readOnly {
 		finished = true
 		stats, commit, err := x.iso.FinishCommit(n.ID, n.Title)
 		if err != nil {
@@ -353,7 +367,7 @@ func (x *executor) nodeAgent(role Role, n *Node) (config.AgentConfig, runner.LLM
 }
 
 // runWorker is one worker run with the agent cur.
-func (x *executor) runWorker(ctx context.Context, r runner.LLMRunner, wx executor, cur config.AgentConfig, role Role, n *Node, g *Graph,
+func (x *executor) runWorker(ctx context.Context, r runner.LLMRunner, wx executor, cur config.AgentConfig, readOnly bool, role Role, n *Node, g *Graph,
 	rolePrompt string, buildCommands []string, emit func(Event), throttle *usageThrottle) (agent.WorkerResult, error) {
 	return agent.RunWorker(ctx, r, wx.root, x.cfg, agent.WorkerRequest{
 		RolePrompt:      rolePrompt,
@@ -362,11 +376,11 @@ func (x *executor) runWorker(ctx context.Context, r runner.LLMRunner, wx executo
 		Title:           n.Title,
 		Description:     n.Description,
 		Context:         wx.workContext(g, n),
-		ReadOnly:        role.ReadOnly,
+		ReadOnly:        readOnly,
 		Mode:            role.Agent.EffectiveMode(),
 		MCP:             role.Agent.MCP,
 		BuildCommands:   buildCommands,
-		AllowedCommands: x.cfg.Project.AllowedCommands,
+		AllowedCommands: append(append([]string(nil), x.cfg.Project.AllowedCommands...), n.ExtraAllowed...),
 		OnActivity:      func(a runner.Activity) { emit(Event{NodeID: n.ID, Type: EventActivity, Activity: &a}) },
 		OnUsage: func(u runner.TokenUsage) {
 			if throttle.allow() {
@@ -642,7 +656,11 @@ func truncateMiddle(s string, max int) string {
 	return fmt.Sprintf("%s\n… (%d bytes omitted) …\n%s", head, len(s)-len(head)-len(tail), tail)
 }
 
-func (x *executor) runCheck(ctx context.Context, n *Node, emit func(Event)) (Result, error) {
+func (x *executor) runCheck(ctx context.Context, g *Graph, n *Node, emit func(Event)) (Result, error) {
+	if !n.ForceRun && !ChangedSinceCheck(g, n) {
+		emit(Event{NodeID: n.ID, Type: EventOutput, Text: "Build & test skipped: " + SkippedText + "\n"})
+		return Result{Summary: "skipped · " + SkippedText, Skipped: true}, nil
+	}
 	timeout := x.checkTimeout
 	if timeout <= 0 {
 		timeout = checkTimeout

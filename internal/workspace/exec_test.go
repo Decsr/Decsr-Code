@@ -143,7 +143,7 @@ func TestExecWorkIncludesDependencySummaries(t *testing.T) {
 }
 
 func checkNode(cmds ...string) (*Graph, *Node) {
-	n := &Node{ID: "CHECK", Title: "Build & test", Kind: KindCheck, Commands: cmds}
+	n := &Node{ID: "CHECK", Title: "Build & test", Kind: KindCheck, Commands: cmds, ForceRun: true}
 	return &Graph{Nodes: []*Node{n}}, n
 }
 
@@ -360,6 +360,22 @@ func TestExecReadOnlyRoleWritesNothing(t *testing.T) {
 		t.Error("read-only role wrote a file")
 	}
 	if len(res.Files) != 0 || res.Summary != "report" {
+		t.Errorf("res = %+v", res)
+	}
+}
+
+func TestExecReadOnlyTaskWritesNothingWhateverTheRole(t *testing.T) {
+	f := &execFake{text: "**a.txt**\n```\nhi\n```\n===SUMMARY===\nreport"}
+	ex := newTestExec(t, config.DefaultConfig(), f, nil)
+	g := &Graph{Nodes: []*Node{{ID: "T1", Title: "t", Kind: KindWork, Role: "coder", ReadOnlyTask: true}}}
+	res, err := ex.Run(context.Background(), g, g.Nodes[0], func(Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, serr := os.Stat(filepath.Join(ex.root, "a.txt")); serr == nil {
+		t.Error("a read-only task wrote a file")
+	}
+	if len(res.Files) != 0 || len(res.Warnings) != 0 {
 		t.Errorf("res = %+v", res)
 	}
 }
@@ -849,5 +865,24 @@ func TestExecRejectsUnsupportedMode(t *testing.T) {
 		if len(f.reqs) != 0 {
 			t.Errorf("%+v: the runner must not start", tc.ac)
 		}
+	}
+}
+
+func TestExecAgentModeAddsTheNodesExtraAllowedCommands(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents["coder"] = config.AgentConfig{Runner: "claude", Mode: config.ModeAgent}
+	cfg.Project.AllowedCommands = []string{"make"}
+	f := &execFake{text: "nothing\n===SUMMARY===\nok"}
+	ex := newTestExec(t, cfg, f, nil)
+	g := &Graph{Nodes: []*Node{{ID: "T1", Title: "t", Kind: KindWork, Role: "coder", ExtraAllowed: []string{"cmake"}}}}
+	if _, err := ex.Run(context.Background(), g, g.Nodes[0], func(Event) {}); err != nil {
+		t.Fatal(err)
+	}
+	tools := strings.Join(f.reqs[0].AllowedTools, " ")
+	if !strings.Contains(tools, "Bash(cmake:*)") || !strings.Contains(tools, "Bash(make:*)") {
+		t.Errorf("allowed tools = %s", tools)
+	}
+	if len(ex.cfg.Project.AllowedCommands) != 1 {
+		t.Errorf("the project list was changed: %v", ex.cfg.Project.AllowedCommands)
 	}
 }

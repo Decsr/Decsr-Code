@@ -230,7 +230,11 @@ func buildCompactionInput(pc appctx.ProjectContext, cfg config.Config, root stri
 
 	sb.WriteString("\n### Build / Test / Lint Commands\n\n")
 	test := resolvedTestCmd(cfg, root)
-	if build := lang.CommandsFor(lang.Resolve(cfg.Project.Language, root), root).Build; build != "" {
+	build := cfg.Project.BuildCmd
+	if build == "" {
+		build = lang.CommandsFor(lang.Resolve(cfg.Project.Language, root), root).Build
+	}
+	if build != "" {
 		fmt.Fprintf(&sb, "- Build: `%s`\n", build)
 	}
 	if test != "" {

@@ -22,7 +22,7 @@ func TestRolesOrderAndInheritance(t *testing.T) {
 	for _, r := range roles {
 		names = append(names, r.Name)
 	}
-	want := []string{"pm", "coder", "coder_fixer", "qa", "ux_reviewer", "security", "alpha", "zeta"}
+	want := []string{"pm", "coder", "coder_fixer", "qa", "ux_reviewer", "security", "reviewer", "alpha", "zeta"}
 	if len(names) != len(want) {
 		t.Fatalf("names = %v", names)
 	}
@@ -31,13 +31,13 @@ func TestRolesOrderAndInheritance(t *testing.T) {
 			t.Fatalf("names = %v, want %v", names, want)
 		}
 	}
-	if !roles[0].Builtin || roles[6].Builtin {
+	if !roles[0].Builtin || roles[7].Builtin {
 		t.Error("Builtin flag wrong")
 	}
 	if roles[0].Description != "Plans work, splits tasks and arbitrates feedback." {
 		t.Errorf("pm description = %q", roles[0].Description)
 	}
-	alpha, zeta := roles[6], roles[7]
+	alpha, zeta := roles[7], roles[8]
 	if alpha.Agent.Runner != "codex" || alpha.Agent.Model != "small" || alpha.Agent.Effort != "high" {
 		t.Errorf("alpha = %+v", alpha.Agent)
 	}
@@ -90,9 +90,22 @@ func TestRolesReadOnly(t *testing.T) {
 	for _, r := range Roles(cfg) {
 		got[r.Name] = r.ReadOnly
 	}
-	for name, want := range map[string]bool{"ux_reviewer": true, "security": true, "auditor": true, "coder": false, "qa": false, "alpha": false} {
+	for name, want := range map[string]bool{"ux_reviewer": true, "security": true, "reviewer": true, "auditor": true, "coder": false, "qa": false, "alpha": false} {
 		if got[name] != want {
 			t.Errorf("%s ReadOnly = %v, want %v", name, got[name], want)
 		}
+	}
+}
+
+func TestReviewerIsABuiltinReadOnlyRole(t *testing.T) {
+	r, ok := FindRole(testCfg(), "reviewer")
+	if !ok || !r.Builtin || !r.ReadOnly {
+		t.Fatalf("reviewer = %+v, %v", r, ok)
+	}
+	if r.Description != "Reads the code and reports findings, opinions and summaries; never writes." {
+		t.Errorf("description = %q", r.Description)
+	}
+	if qa, _ := FindRole(testCfg(), "qa"); qa.Description != "Writes tests and reviews code quality and edge cases." || qa.ReadOnly {
+		t.Errorf("qa = %+v", qa)
 	}
 }

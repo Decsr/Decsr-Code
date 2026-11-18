@@ -900,3 +900,15 @@ func TestMerge_WorkspaceLimitAutoRetry(t *testing.T) {
 		t.Fatal("an unset layer cleared the setting")
 	}
 }
+
+func TestMergeBuildCmd(t *testing.T) {
+	dst := Config{Project: ProjectConfig{BuildCmd: "make"}}
+	merge(&dst, Config{})
+	if dst.Project.BuildCmd != "make" {
+		t.Errorf("empty source cleared build_cmd: %q", dst.Project.BuildCmd)
+	}
+	merge(&dst, Config{Project: ProjectConfig{BuildCmd: "ninja"}})
+	if dst.Project.BuildCmd != "ninja" {
+		t.Errorf("build_cmd = %q, want ninja", dst.Project.BuildCmd)
+	}
+}

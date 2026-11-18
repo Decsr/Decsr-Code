@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -43,7 +44,7 @@ func TestParseReport(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			got, body, found := ParseReport(c.in)
-			if found != c.found || got != c.want {
+			if found != c.found || !reflect.DeepEqual(got, c.want) {
 				t.Fatalf("got %+v found=%v, want %+v found=%v", got, found, c.want, c.found)
 			}
 			if body != c.body {
@@ -115,5 +116,55 @@ func TestRunWorkerReport(t *testing.T) {
 	res = run("REPORT\nstatus: done\nsummary: only the report\n", true)
 	if res.Summary != "only the report" {
 		t.Errorf("summary = %q", res.Summary)
+	}
+}
+
+func TestParseReportOptions(t *testing.T) {
+	cases := []struct {
+		name, in string
+		opts     []string
+		rec      int
+	}{
+		{"options and recommended",
+			"REPORT\nstatus: question\nsummary: s\nquestion: Which port?\noptions:\n1. 8080 - matches the dev server\n2) 9090 - separate\n- 7070\nrecommended: 1\n",
+			[]string{"8080 - matches the dev server", "9090 - separate", "7070"}, 1},
+		{"recommended out of range",
+			"REPORT\nstatus: question\nsummary: s\nquestion: q\noptions:\n1. a\n2. b\nrecommended: 5\n",
+			[]string{"a", "b"}, 0},
+		{"recommended without options",
+			"REPORT\nstatus: question\nsummary: s\nquestion: q\nrecommended: 1\n", nil, 0},
+		{"no options", "REPORT\nstatus: question\nsummary: s\nquestion: q\n", nil, 0},
+		{"code fence",
+			"x\n```\nREPORT\nstatus: question\nsummary: s\nquestion: q\noptions:\n1. a - x\n2. b - y\nrecommended: 2.\n```\n",
+			[]string{"a - x", "b - y"}, 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, _, found := ParseReport(c.in)
+			if !found || !reflect.DeepEqual(got.Options, c.opts) || got.Recommended != c.rec {
+				t.Fatalf("got %+v, want options %q recommended %d", got, c.opts, c.rec)
+			}
+			if got.Question != "q" && got.Question != "Which port?" {
+				t.Errorf("question = %q", got.Question)
+			}
+		})
+	}
+}
+
+func TestRunWorkerBodyIsTheReplyWithoutTheReport(t *testing.T) {
+	f := &workerFake{chunks: []string{"## Findings\n\n- one\n- two\n\nREPORT\nstatus: done\nsummary: two findings\n"}}
+	res, err := RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(),
+		WorkerRequest{Title: "T", ReadOnly: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Body != "## Findings\n\n- one\n- two" {
+		t.Errorf("body = %q", res.Body)
+	}
+	f = &workerFake{chunks: []string{"just prose\n"}}
+	res, err = RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(),
+		WorkerRequest{Title: "T", ReadOnly: true}, nil)
+	if err != nil || res.Body != "just prose" {
+		t.Errorf("no report: body %q err %v", res.Body, err)
 	}
 }

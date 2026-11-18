@@ -75,6 +75,18 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## 5. Provider Policy Check
+
+**Every new feature passes the provider policy check before it is called done.**
+
+A feature that starts, schedules, retries or talks to an agent CLI or a provider
+API (claude, codex, opencode, dsh, any HTTP endpoint) is in scope; so is one that
+reads login state. Run every check in [`doc/provider-policy.md`](doc/provider-policy.md)
+against the design before building, and again against the finished diff. The
+check is done when each item is marked pass, or fail with the guard that fixes it.
+Report the result in the hand-off. When a check fails and no guard fits, stop and
+ask the user before building.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.

@@ -60,6 +60,9 @@ type approvalRow struct {
 	Marker           string  // ↓ cheaper than the role's agent, = the same, ↑ dearer, ≠ differs
 	Cost             float64 // estimated USD per task; 0 = unknown
 	Reason           string
+	Role             string // the node's role (or the suggested one)
+	NewRole          bool   // the role does not exist yet: y creates it for this session
+	Access           string // writes or read-only
 }
 
 // approvalCard is everything the card shows.
@@ -157,6 +160,12 @@ func (m workspaceModel) approvalCardData() (approvalCard, bool) {
 		if ra, ok := m.roleAgentOf(n); ok {
 			row.Marker = agentMarker(tab, ra, a)
 		}
+		row.Role = orDefault(n.Role, n.SuggestedRole)
+		row.NewRole = m.newRoleOf(n) != ""
+		row.Access = "writes"
+		if m.readOnlyNode(n) {
+			row.Access = "read-only"
+		}
 		c.Total += a.EstCostUSD
 		c.Rows = append(c.Rows, row)
 	}
@@ -241,12 +250,26 @@ func renderApprovalCard(c approvalCard, width int) []string {
 			text.Render(padRight(truncateOneLine(r.Agent, agentW), agentW)) + " " +
 			acc.Render(orDefault(r.Marker, " ")) + " " + dim.Render(cost)
 		rows = append(rows, line)
+		ind := strings.Repeat(" ", 2+idW+1)
+		var facts []string
+		if r.Role != "" {
+			role := r.Role
+			if r.NewRole {
+				role += " (new · uses the pm's agent)"
+			}
+			facts = append(facts, role)
+		}
+		if r.Access != "" {
+			facts = append(facts, r.Access)
+		}
 		if r.Reason != "" {
-			ind := strings.Repeat(" ", 2+idW+1)
-			rows = append(rows, dim.Render(ind+truncateOneLine(r.Reason, max(iw-len(ind), 4))))
+			facts = append(facts, r.Reason)
+		}
+		if len(facts) > 0 {
+			rows = append(rows, dim.Render(ind+truncateOneLine(strings.Join(facts, " · "), max(iw-len(ind), 4))))
 		}
 	}
-	rows = append(rows, "", text.Render("y approve · n cancel · e edit · ↑↓ select")+dim.Render("  (/approve, /reject)"))
+	rows = append(rows, "", text.Render("y approve · n cancel · e edit agent · a role · ↑↓ select")+dim.Render("  (/approve, /reject)"))
 
 	b := lipgloss.NewStyle().Foreground(ui.Warn)
 	out := make([]string, 0, len(rows)+2)
@@ -272,6 +295,7 @@ func (m workspaceModel) approveAgents() (workspaceModel, tea.Cmd) {
 		m.setNotice("No agents are waiting for approval", true)
 		return m, nil
 	}
+	m = m.adoptNewRoles()
 	n := m.eng.ApproveAssignments()
 	m.g = m.eng.Snapshot()
 	m.say("system", fmt.Sprintf("approved the agent of %d %s", n, pluralize(n, "node", "nodes")))

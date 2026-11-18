@@ -415,6 +415,10 @@ func cardBody(o cardOpts, iw int) []string {
 		if check {
 			word = "Passed in "
 		}
+		if check && n.Skipped {
+			rows = append(rows, dim.Render("Skipped · "+workspace.SkippedText))
+			break
+		}
 		line := "Done"
 		if d := took(); d >= 0 {
 			line = word + feedDuration(d)
@@ -705,6 +709,14 @@ func (m workspaceModel) feedLayout(pw int) (lines []string, spans map[string][2]
 			lines = append(lines, "")
 		}
 		for _, l := range renderApprovalCard(card, cw) {
+			lines = append(lines, pad+l)
+		}
+	}
+	if card, sel, ok := m.activeAsk(); ok && !m.splitting {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		for _, l := range renderAskCard(card, sel, cw) {
 			lines = append(lines, pad+l)
 		}
 	}

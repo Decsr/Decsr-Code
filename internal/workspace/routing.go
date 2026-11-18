@@ -144,10 +144,19 @@ func (r *Router) propose(n *Node) *AgentAssign {
 		role = n.SuggestedRole
 	}
 	ac, ok := r.Role(role)
+	mode := r.Mode
 	if !ok {
-		return nil
+		// A role the lead invented has no agent of its own yet: the node
+		// waits for approval with the pm's agent, which the new role inherits.
+		if n.Role != "" || n.SuggestedRole == "" {
+			return nil
+		}
+		if ac, ok = r.Role("pm"); !ok {
+			return nil
+		}
+		mode = config.RoutingManual
 	}
-	a, why := PickAgent(r.Table, ac, n.Difficulty, r.Mode, r.Connected)
+	a, why := PickAgent(r.Table, ac, n.Difficulty, mode, r.Connected)
 	a.Reason = strings.TrimSpace(n.DifficultyReason)
 	if a.Reason == "" {
 		a.Reason = why
@@ -203,11 +212,25 @@ func (e *Engine) PendingApproval() []*Node {
 
 // ApproveAssignments approves every pending assignment and, when auto mode is
 // on, starts the nodes that became runnable. It returns how many were approved.
-func (e *Engine) ApproveAssignments() int {
+func (e *Engine) ApproveAssignments() int { return e.approve(nil) }
+
+// ApproveNodes is ApproveAssignments for the pending nodes in ids only.
+func (e *Engine) ApproveNodes(ids ...string) int {
+	if len(ids) == 0 {
+		return 0
+	}
+	return e.approve(ids)
+}
+
+func (e *Engine) approve(ids []string) int {
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
 	e.mu.Lock()
 	count := 0
 	for _, n := range e.g.Nodes {
-		if n.AwaitingApproval() {
+		if n.AwaitingApproval() && (ids == nil || want[n.ID]) {
 			n.Assign.Pending = false
 			count++
 		}
@@ -280,6 +303,29 @@ func (e *Engine) RejectSplit() []string {
 	e.mu.Unlock()
 	e.reportSave(err)
 	return ids
+}
+
+// AdoptRole sets the role of a todo or failed work node without touching its
+// agent assignment: the user approved a role the lead invented.
+func (e *Engine) AdoptRole(id, role string) error {
+	e.mu.Lock()
+	n := e.g.Node(id)
+	switch {
+	case n == nil:
+		e.mu.Unlock()
+		return fmt.Errorf("unknown node %s", id)
+	case n.Kind != KindWork:
+		e.mu.Unlock()
+		return fmt.Errorf("node %s does not take a role", id)
+	case !editable(n):
+		e.mu.Unlock()
+		return fmt.Errorf("node %s is %s and cannot be reassigned", id, n.Status)
+	}
+	n.Role = role
+	err := e.saveLocked()
+	e.mu.Unlock()
+	e.reportSave(err)
+	return nil
 }
 
 // SetAssignment sets the agent of a todo or failed work node by hand (source

@@ -21,6 +21,9 @@ import (
 func validAgentRoles() []string {
 	var roles []string
 	for r := range config.DefaultConfig().Agents {
+		if r == "reviewer" { // a Workspace role; the bus has no such agent
+			continue
+		}
 		roles = append(roles, r)
 	}
 	sort.Strings(roles)

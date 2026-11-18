@@ -29,7 +29,7 @@ func approvalHarness(t *testing.T, mode string, w, h int) *wsHarness {
 func TestApprovalCardRendersAtTwoWidths(t *testing.T) {
 	for _, size := range [][2]int{{160, 45}, {100, 40}} {
 		h := approvalHarness(t, config.RoutingAutoRole, size[0], size[1])
-		for _, want := range []string{"Approve agents · 4 nodes · mode auto-role", "T1", "T3", "T4", "T5",
+		for _, want := range []string{"Approve agents · 5 nodes · mode auto-role", "T1", "T2", "T3", "T4", "T5",
 			"medium", "y approve · n cancel · e edit"} {
 			h.want(want)
 		}
@@ -91,7 +91,7 @@ func TestRejectKeyCancelsTheSplit(t *testing.T) {
 	if len(pendingIDs(h)) != 0 || h.m.g.Node("T1") != nil {
 		t.Fatal("n did not cancel the split")
 	}
-	if !transcriptHas(h, "cancelled the split: removed T1, T3, T4, T5") {
+	if !transcriptHas(h, "cancelled the split: removed T1, T2, T3, T4, T5") {
 		t.Errorf("no notice: %+v", h.m.sess.snapshot().Transcript)
 	}
 	h.wantNot("Approve agents")
@@ -118,7 +118,7 @@ func TestEditFlowSavesAManualAssignment(t *testing.T) {
 	if a == nil || a.Source != workspace.SourceManual || !a.Pending || a.Runner == before.Runner || !strings.Contains(a.Model, "my-model") {
 		t.Fatalf("assignment %+v (before %+v)", a, before)
 	}
-	if len(pendingIDs(h)) != 4 {
+	if len(pendingIDs(h)) != 5 {
 		t.Error("a manual edit must not approve the node")
 	}
 }
@@ -207,7 +207,7 @@ func TestUnattendedRunShowsNoApprovalCard(t *testing.T) {
 
 func TestArrowsMoveTheCardSelection(t *testing.T) {
 	h := approvalHarness(t, config.RoutingAutoRole, 160, 45)
-	h.key("down", "down")
+	h.key("down", "down", "down")
 	if got := h.m.approvalTarget().ID; got != "T4" {
 		t.Fatalf("selected %s, want T4", got)
 	}

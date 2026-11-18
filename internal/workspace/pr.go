@@ -374,6 +374,8 @@ func PRBody(s Session) string {
 	switch {
 	case check == nil:
 		b.WriteString("Not run.\n")
+	case check.Status == StatusDone && check.Skipped:
+		b.WriteString("Skipped: " + SkippedText + ".\n")
 	case check.Status == StatusDone:
 		b.WriteString("Passed.\n")
 	case check.Status == StatusFailed:

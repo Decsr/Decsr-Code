@@ -232,6 +232,9 @@ func (m workspaceModel) autoAfterEvent(ev workspace.Event) (workspaceModel, tea.
 	if ev.Type == workspace.EventFailed {
 		return m.autoFix(n.ID)
 	}
+	if n.Skipped {
+		return m, nil // nothing changed: nothing to open a pull request for
+	}
 	if lvl == autoUnattended {
 		return m.autoPR()
 	}

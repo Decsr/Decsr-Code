@@ -75,9 +75,12 @@ type wsDeps struct {
 	newEngine func(g *workspace.Graph, save func(*workspace.Graph) error, summary func() string, iso *workspace.Isolator) *workspace.Engine
 	// isolator returns the worktree isolator of a session, nil when its nodes
 	// share the checkout. Nil means no isolation.
-	isolator  func(session string) *workspace.Isolator
-	saveRole  func(name string, ac config.AgentConfig) (config.Config, error) // persists and returns the reloaded config
-	checkCmds func() []string
+	isolator func(session string) *workspace.Isolator
+	saveRole func(name string, ac config.AgentConfig) (config.Config, error) // persists and returns the reloaded config
+	// sessionRole makes a role known to the node executor for this session
+	// only; nil when the executor reads the model's config.
+	sessionRole func(name string, ac config.AgentConfig)
+	checkCmds   func() []string
 
 	listProfiles   func() []string
 	saveProfile    func(name string, agents map[string]config.AgentConfig, routing config.RoutingProfile) error
@@ -187,11 +190,22 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 	var mu sync.Mutex
 	cur := cfg
 	var pluginAgents map[string]config.PluginAgent // set by deps.loadPlugins
+	sessionAgents := map[string]config.AgentConfig{}
 	getCfg := func() config.Config {
 		mu.Lock()
 		defer mu.Unlock()
 		c := cur
 		c.PluginAgents = pluginAgents
+		if len(sessionAgents) > 0 {
+			agents := make(map[string]config.AgentConfig, len(c.Agents)+len(sessionAgents))
+			for k, v := range sessionAgents {
+				agents[k] = v
+			}
+			for k, v := range c.Agents { // a saved role wins over the session one
+				agents[k] = v
+			}
+			c.Agents = agents
+		}
 		return c
 	}
 	setCfg := func(c config.Config) { mu.Lock(); cur = c; mu.Unlock() }
@@ -218,8 +232,12 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 		c := getCfg()
 		cmds := lang.CommandsFor(lang.Resolve(c.Project.Language, root), root)
 		var out []string
-		if cmds.Build != "" {
-			out = append(out, cmds.Build)
+		build := cmds.Build
+		if c.Project.BuildCmd != "" {
+			build = c.Project.BuildCmd
+		}
+		if build != "" {
+			out = append(out, build)
 		}
 		if c.Project.TestCmd != "" {
 			out = append(out, c.Project.TestCmd)
@@ -287,6 +305,11 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 			engines = append(engines, e)
 			engMu.Unlock()
 			return e
+		},
+		sessionRole: func(name string, ac config.AgentConfig) {
+			mu.Lock()
+			sessionAgents[name] = ac
+			mu.Unlock()
 		},
 		saveRole: func(name string, ac config.AgentConfig) (config.Config, error) {
 			if err := config.SaveProjectRole(root, name, ac); err != nil {
@@ -555,8 +578,11 @@ func (p *wsSess) saveGraph(g *workspace.Graph) error {
 type workspaceModel struct {
 	root string
 	cfg  config.Config
-	deps wsDeps
-	now  func() time.Time
+	// sessRoles are the roles the user approved from a split for this session
+	// only; they are not in project.yaml until /roles save.
+	sessRoles map[string]config.AgentConfig
+	deps      wsDeps
+	now       func() time.Time
 
 	width, height int
 	screen        wsScreen
@@ -674,6 +700,13 @@ type workspaceModel struct {
 	infoText []string
 	infoTop  int
 
+	// question and refused-command cards
+	askHidden map[string]bool // cards hidden with Esc, by card key
+	askKey    string          // card the cursor belongs to
+	askSel    int             // cursor of that card
+
+	runEnded []string // nodes that ended since the last run summary
+
 	// inbox (N) and go-to palette (Ctrl+K)
 	inboxIdx    int
 	inboxAutos  []inboxAutoRun // last automation runs, read when the inbox or palette opens
@@ -740,6 +773,7 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...Work
 		feedFollow:   true,
 		feedExpanded: map[string]bool{},
 		feedCache:    &feedCache{},
+		sessRoles:    map[string]config.AgentConfig{},
 	}
 	m.resize()
 	if _, err := workspace.MigrateLegacy(root); err != nil {
@@ -999,6 +1033,9 @@ func (m workspaceModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.stopReview()
 		m.say("error", "lead review cancelled")
 		return m, nil
+	}
+	if next, cmd, ok := m.askKeyPress(msg); ok {
+		return next, cmd
 	}
 	if m.focus != wsFocusPrompt {
 		if isBurst(msg) {
@@ -1316,6 +1353,16 @@ func (m workspaceModel) onSplitDone(msg wsSplitDoneMsg) (tea.Model, tea.Cmd) {
 		m.say("error", oneLine(msg.err.Error()))
 		return m, nil
 	}
+	if msg.g != nil && msg.g.Answer != "" {
+		m.sess.update(func(s *workspace.Session) {
+			s.In += msg.usage.InputTokens
+			s.Out += msg.usage.OutputTokens
+		})
+		m.input.Reset()
+		m.say("lead", msg.g.Answer)
+		m.saveSession()
+		return m, nil
+	}
 	if msg.g == nil || len(msg.g.Nodes) == 0 {
 		m.restoreTask()
 		m.say("error", "the lead returned no sub-tasks. Try describing the task differently")
@@ -1328,6 +1375,12 @@ func (m workspaceModel) onSplitDone(msg wsSplitDoneMsg) (tea.Model, tea.Cmd) {
 	m.input.Reset()
 	var next tea.Model
 	var cmd tea.Cmd
+	before := map[string]bool{}
+	if m.hasNodes() {
+		for _, n := range m.g.Nodes {
+			before[n.ID] = true
+		}
+	}
 	if m.eng == nil || !m.hasNodes() {
 		next, cmd = m.openGraph(msg.g)
 	} else {
@@ -1345,7 +1398,8 @@ func (m workspaceModel) onSplitDone(msg wsSplitDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	m = m.askPlugins()
 	m, autoCmd := m.autoAfterGraph()
-	return m, tea.Batch(cmd, autoCmd)
+	m, roCmd := m.startReadOnlyPlan(newWorkNodes(m.g, before))
+	return m, tea.Batch(cmd, autoCmd, roCmd)
 }
 
 // restoreTask puts the task being split back into the input for editing.
@@ -1381,16 +1435,24 @@ func idList(ids []string) string {
 
 // openGraph starts the engine on the first graph of a session.
 func (m workspaceModel) openGraph(g *workspace.Graph) (tea.Model, tea.Cmd) {
-	// The Build & test node is always there; without known commands it asks
-	// for them when it runs.
-	var cmds []string
-	if m.deps.checkCmds != nil {
-		cmds = m.deps.checkCmds()
+	// Build & test is added only when a sub-task writes; without known
+	// commands it asks for them when it runs.
+	writes := false
+	for _, n := range g.Nodes {
+		if n.Kind == workspace.KindWork && !n.ReadOnlyTask {
+			writes = true
+		}
 	}
-	if len(cmds) > 0 {
-		g.AddCheck(cmds)
-	} else {
-		g.AddCheckDeferred()
+	if writes {
+		var cmds []string
+		if m.deps.checkCmds != nil {
+			cmds = m.deps.checkCmds()
+		}
+		if len(cmds) > 0 {
+			g.AddCheck(cmds)
+		} else {
+			g.AddCheckDeferred()
+		}
 	}
 	var ids []string
 	for _, n := range g.Nodes {
@@ -1531,7 +1593,14 @@ func (m workspaceModel) onEvent(msg wsEventMsg) (tea.Model, tea.Cmd) {
 	case workspace.EventDone:
 		m.setNotice("✓ "+ev.NodeID+" done", false)
 		m.sayQueuedReplyStarted(ev.NodeID)
-		if n := m.g.Node(ev.NodeID); m.iso != nil && n != nil && n.Kind == workspace.KindCheck {
+		if ev.Answer != "" {
+			role := ""
+			if n := m.g.Node(ev.NodeID); n != nil {
+				role = orDefault(n.Role, "agent")
+			}
+			m.say("lead", ev.NodeID+" · "+role+":\n\n"+ev.Answer)
+		}
+		if n := m.g.Node(ev.NodeID); m.iso != nil && n != nil && n.Kind == workspace.KindCheck && !n.Skipped {
 			m.say("system", "Build & test passed. Use /merge to bring the result into your checkout.")
 		}
 	case workspace.EventWaiting:
@@ -1551,12 +1620,14 @@ func (m workspaceModel) onEvent(msg wsEventMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	m.g = m.eng.Snapshot()
+	m = m.askAfterEvent(ev)
 	m.notifyEvent(ev)
 	if m.screen == wsScreenOutput {
 		m.refreshOutput()
 	}
 	m, autoCmd := m.autoAfterEvent(ev)
 	m, coordCmd := m.coordAfterEvent(ev)
+	m = m.summaryAfterEvent(ev)
 	var diffCmd tea.Cmd
 	if ev.Type == workspace.EventActivity && ev.NodeID == m.outNode && ev.Activity != nil &&
 		(ev.Activity.Kind == runner.ActEdit || ev.Activity.Kind == runner.ActWrite) {

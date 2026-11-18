@@ -307,6 +307,31 @@ func (e *Engine) AcceptSuggestions(defined func(string) bool) int {
 	return count
 }
 
+// AllowCommands adds command programs to the allow list of a work or fix node
+// for its later attempts. Each program is kept once.
+func (e *Engine) AllowCommands(id string, programs []string) error {
+	e.mu.Lock()
+	n := e.g.Node(id)
+	if n == nil || n.Kind != KindWork {
+		e.mu.Unlock()
+		return fmt.Errorf("unknown work node %s", id)
+	}
+	for _, p := range programs {
+		p = strings.TrimSpace(p)
+		have := p == ""
+		for _, x := range n.ExtraAllowed {
+			have = have || x == p
+		}
+		if !have {
+			n.ExtraAllowed = append(n.ExtraAllowed, p)
+		}
+	}
+	serr := e.saveLocked()
+	e.mu.Unlock()
+	e.reportSave(serr)
+	return nil
+}
+
 // AddFix adds a fix node for a failed check node and returns its ID.
 func (e *Engine) AddFix(checkID string) (string, error) {
 	e.mu.Lock()
@@ -372,6 +397,33 @@ func (e *Engine) AddWork(title, desc, role string, nextID int) (string, int) {
 	e.mu.Unlock()
 	e.reportSave(err)
 	return f.ID, next
+}
+
+// QueueCheck makes Build & test ready to run now whatever changed: it adds the
+// CHECK node (with commands, or deferred when there are none) when the graph has
+// none, else resets it to todo. It fails while Build & test is running.
+func (e *Engine) QueueCheck(commands []string) error {
+	e.mu.Lock()
+	c := e.g.Node("CHECK")
+	switch {
+	case c == nil:
+		if len(commands) > 0 {
+			c = e.g.AddCheck(commands)
+		} else {
+			c = e.g.AddCheckDeferred()
+		}
+	case c.Status == StatusRunning:
+		e.mu.Unlock()
+		return errors.New("Build & test is already running")
+	default:
+		c.Status = StatusTodo
+		c.Error, c.Summary, c.Warnings, c.Skipped = "", "", nil, false
+	}
+	c.ForceRun = true
+	err := e.saveLocked()
+	e.mu.Unlock()
+	e.reportSave(err)
+	return nil
 }
 
 // Run starts one node now.
@@ -491,6 +543,9 @@ func (e *Engine) startLocked(parent context.Context, n *Node) started {
 	n.Error = ""
 	n.Summary = ""
 	n.Report = nil
+	n.Skipped = false
+	n.Answered = false
+	n.Denied = nil
 	n.Files = nil
 	n.Observed = nil
 	n.FileStats = nil
@@ -652,6 +707,12 @@ func (e *Engine) runNode(s started) {
 		n.Limit = nil
 		n.Status = StatusDone
 		n.Summary = res.Summary
+		if n.Kind == KindCheck {
+			n.Skipped = res.Skipped
+			if !res.Skipped {
+				n.LastRunAt = n.EndedAt
+			}
+		}
 		if res.Report.Status != "" {
 			rep := res.Report
 			n.Report = &rep
@@ -659,17 +720,23 @@ func (e *Engine) runNode(s started) {
 				n.Status = StatusWaiting
 			}
 		}
+		n.Denied = append([]runner.Denial(nil), res.Denied...)
 		n.Files = append([]string(nil), res.Files...)
 		n.Observed = append([]string(nil), res.Observed...)
 		n.FileStats = append([]FileStat(nil), res.FileStats...)
 		n.Commit = res.Commit
 		n.Warnings = append([]string(nil), res.Warnings...)
 		fin = Event{NodeID: id, Type: EventDone, Text: n.Summary}
+		if n.Status == StatusDone && n.Kind == KindWork && n.ReadOnlyTask && strings.TrimSpace(res.Answer) != "" {
+			n.Answered = true
+			fin.Answer = res.Answer
+		}
 		if n.Status == StatusWaiting {
 			fin = Event{NodeID: id, Type: EventWaiting, Text: waitingText(n)}
 		}
 		overlaps = e.markOverlapsLocked(n)
 	}
+	n.ForceRun = false
 	e.checkBudgetLocked()
 	// A reply that came in while the node ran starts the next attempt now,
 	// whatever way this one ended.

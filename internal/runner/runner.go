@@ -52,6 +52,15 @@ type Token struct {
 	// runner learns it (for example from the CLI's init event). Empty on
 	// every other token.
 	Model string
+	// Denials are the tool calls the runner refused, sent on the Done token.
+	Denials []Denial
+}
+
+// Denial is one tool call a runner refused because it was not on the allow
+// list. Command is set for Bash only.
+type Denial struct {
+	Tool    string `json:"tool"`
+	Command string `json:"command,omitempty"`
 }
 
 // CompletionRequest describes what to send to the LLM.

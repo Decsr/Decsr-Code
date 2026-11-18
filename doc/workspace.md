@@ -29,23 +29,29 @@ Code, QA and so on) is unchanged; see [Reaching the classic pipeline](#reaching-
    `Enter` (`Alt+Enter` adds a new line). A second task in the same session is
    added to the existing graph (see [Sessions](#sessions)).
 2. **Split.** The lead (the `pm` agent's runner and model) splits the task into
-   nodes. Each node has a title, a description, the nodes it depends on and a
-   *suggested* role. If the reply is unusable (no result, a dependency cycle, a
+   nodes. Each node has a title, a description, the nodes it depends on, the
+   role the lead gives it and a `writes` flag (see [Lean runs](#lean-runs)).
+   If the task is a question the project context already answers, the lead
+   answers it in the chat and adds no nodes. If the reply is unusable (no result, a dependency cycle, a
    dependency on a node that does not exist) you see one error line and can
    send the task again. If the lead gives several sub-tasks but no role for any
    of them, it is asked once more for the complete answer. The lead's full raw
    answer of the last split is saved to `.decsr/workspace_split.txt`, so you can
    see what it actually said. After a successful split the focus moves to the
    graph and the first new node is selected.
-3. **Assign.** Every node starts unassigned. Press `a` on a node to pick its
-   role, or `A` to accept every suggestion that is a defined role. If the lead
-   suggests a role you have not defined, the picker offers to create it.
-4. **Run.** `r` runs the selected node, `R` runs every assigned node as soon as
-   the nodes it depends on are done. Up to 3 nodes run at once.
-5. **Check.** DECSR always adds a last node, **Build & test**, that depends on
-   all the others and runs your language's build and test commands (no agent
-   involved). See [Build & test and fix nodes](#build--test-and-fix-nodes) for
-   when its commands are chosen.
+3. **Assign.** The lead assigns each node a role that is defined, so the node
+   is ready as soon as the plan is approved. Press `a` on a node to pick another
+   role. A role the lead invents is shown on the plan card as
+   `new · uses the pm's agent`; `y` creates it for this session (see
+   [Approval](#approval)). `A` still accepts suggestions that are defined roles.
+4. **Run.** After `y` on the plan card the nodes start; `r` runs the selected
+   node, `R` runs every assigned node as soon as the nodes it depends on are
+   done. Up to 3 nodes run at once. A plan of read-only nodes starts at once.
+5. **Check.** When a node writes, DECSR adds a last node, **Build & test**,
+   that depends on all the others and runs your language's build and test
+   commands (no agent involved), but only if a node changed a file that is not
+   documentation. See [Build & test and fix nodes](#build--test-and-fix-nodes)
+   for when its commands are chosen and when it is skipped.
 
 ## Layout
 
@@ -433,11 +439,13 @@ prompt and lands there.
 | `/project` | Switch to another project (see [Switching project](#switching-project)) |
 | `/profile` | Save or apply a profile of role settings (see [Profiles](#profiles)) |
 | `/connect [provider]` | Save an API key for DeepSeek, OpenAI, OpenRouter, Groq or a custom provider (see [Connect a provider](#connect-a-provider)) |
-| `/roles` (`/agents`) | List all roles, with their skills, and create a new one |
+| `/roles` (`/agents`) | List all roles, with their skills, and create a new one; `/roles save <name>` writes a role created from a plan card for this session to `project.yaml` |
+| `/check` | Run Build & test now, even when nothing changed: adds the node when the graph has none, or resets it to todo (see [Build & test and fix nodes](#build--test-and-fix-nodes)) |
 | `/plugin` (`/plugins`) | List plugins; `/plugin available`, `/plugin install <name>`, `/plugin enable <name>`, `/plugin disable <name>` and `/plugin reload` (see [Plugins](#plugins)) |
 | `/status` | Project path, language, profile, session, node counts, roles with runner/model/effort, parallel limit, custom commands and skills found |
 | `/cost` | Tokens in and out per node and per role, the lead's usage, and the total |
 | `/approve`, `/reject` | The same as `y` and `n` on the approval card: approve the proposed agents and start the runnable nodes, or cancel the split (see [Approval](#approval)) |
+| `/answer` | Show the question or refused-command card that was hidden with `Esc` (see [Question cards](#question-cards)) |
 | `/routing [auto-connected\|auto-role\|manual]` | Show the routing mode and where it comes from (this session, a profile, the project or the default); with a mode, set it for this session and save it to `project.yaml` (see [Agent routing](#agent-routing)) |
 | `/rank` | Fetch the model rankings from Artificial Analysis with the key saved by `decsr connect artificialanalysis`, save them to `~/.decsr/rankings.json` and show the table (sorted by balance score, with the request count and the models that map to no runner). The fetch runs in the background; with no key the view says how to connect and shows the built-in fallback tiers. Data: Artificial Analysis (artificialanalysis.ai) |
 | `/coordinator [on\|off]` | Show or set, for this session, whether the lead reviews each finished batch (see [Coordinator mode](#coordinator-mode)) |
@@ -729,6 +737,26 @@ profile keeps what the project already has, so applying it only adds skills.
 Open decsr, run `/plugin` to see the plugins and `/profile plugins` to apply
 the profile.
 
+## Lean runs
+
+A task runs only what it needs.
+
+- **`writes`.** Each sub-task has `"writes": true|false` in the lead's output;
+  a missing field means `true`. A node with `writes: false` runs read-only
+  whatever its role, the same way a read-only role does.
+- **Roles.** The lead assigns the role of each node. It is told to use only the
+  roles the task needs: a review, question or audit is normally one sub-task by
+  one role with `writes: false`, and `qa` or review sub-tasks are added only
+  when you asked for them or the change is large.
+- **Direct answer.** A question the project context already answers (what the
+  project does, where something lives, an opinion on a plan) is answered by the
+  lead in the chat, as one call like a split: no nodes and no Build & test. A
+  question that needs more reading becomes one read-only node.
+- **Answers.** When a `writes: false` node ends, its whole reply (without the
+  closing `REPORT` block) is printed in the chat under `T1 · reviewer:`,
+  rendered as Markdown like the lead's messages. The run summary line for the
+  node says `answer above`. The output screen keeps the full output as before.
+
 ## Agent routing
 
 By default each node runs on the agent of its role. Routing lets the lead's
@@ -770,22 +798,37 @@ with the model that actually ran.
 
 ### Approval
 
-After a split, in every mode, the proposed agents wait for your approval and
-nothing starts until you give it. The Workspace shows one card at the end of
-the feed:
+After a split, in every mode, the plan waits for your approval when any node
+writes, and nothing starts until you give it. The Workspace shows one plan card
+at the end of the feed, in manual routing too:
 
 ```
-Approve agents · 4 nodes · mode auto-connected · est. $0.62
+Approve agents · 3 nodes · mode auto-connected · est. $0.62
 ▸ T1 Data model          small   claude · haiku · low         ↓   $0.04
-     small: claude haiku low is the best fit
+     coder · writes · small: claude haiku low is the best fit
   T2 Command parser      large   claude · opus · medium       =   $0.31
+     coder · writes · large: the role's agent
+  T3 Security pass       medium  claude · opus · medium       =   $0.20
+     security · read-only · medium: the role's agent
 ```
 
 Each node has one row: its ID and title, the grade (`small`, `medium`,
-`large`), the agent as `runner · model · effort`, a marker, the estimated cost
-per task (`–` when unknown) and, dim on the next line, the reason. The marker
-compares the pick with the role's own agent: `↓` cheaper, `=` the same, `↑`
-dearer (a manual pick), `≠` different with an unknown cost.
+`large`), the agent as `runner · model · effort`, a marker and the estimated
+cost per task (`–` when unknown). Dim on the next line are its role, `writes`
+or `read-only`, and the reason. The marker compares the pick with the role's
+own agent: `↓` cheaper, `=` the same, `↑` dearer (a manual pick), `≠` different
+with an unknown cost.
+
+A role the lead invented shows as `docs_writer (new · uses the pm's agent)`.
+`y` creates it for this session only: it has no agent of its own, so it uses
+the `pm` agent's runner, model and effort, and it is not written to
+`project.yaml` until you run `/roles save docs_writer`. A session-only role is
+not there after you leave the Workspace.
+
+A plan whose nodes all have `writes: false`, all with a defined role, skips the
+card and starts at once (subject to the budget and the parallel limit). In an
+automation or at autonomy level 2 or 3 the usual unattended approval applies
+instead.
 
 | Key | Action |
 |-----|--------|
@@ -793,8 +836,9 @@ dearer (a manual pick), `≠` different with an unknown cost.
 | `n` (or `/reject`) | Cancel the split: its nodes are removed and a notice says which |
 | `↑` `↓` | Select a node (the selected row is marked `▸`) |
 | `e` | Edit the agent of the selected node |
+| `a` | Pick another role for the selected node |
 
-`a` already picks the role of a node, so only `e` opens the agent editor.
+`e` opens the agent editor.
 It has a runner (the role's own, the connected ranked runners and the local
 ones), a model (`←` `→` cycle the ranked models of the runner, or type any id)
 and an effort (`←` `→`). Where a ranking exists, the editor shows the balance
@@ -814,8 +858,10 @@ split.
 ## Roles
 
 A role is a name, a one-line description and a runner, model and effort. The
-six built-in roles are `pm`, `coder`, `coder_fixer`, `qa`, `ux_reviewer` and
-`security`; they keep their own prompts. Any other key under `agents:` in
+seven built-in roles are `pm`, `coder`, `coder_fixer`, `qa`, `ux_reviewer`,
+`security` and `reviewer`; they keep their own prompts. `reviewer` reads the
+code and reports findings, opinions and summaries and never writes; `qa`
+writes tests and reviews code quality and edge cases. Any other key under `agents:` in
 `.decsr/project.yaml` is a custom role:
 
 ```yaml
@@ -838,8 +884,8 @@ description and `read_only` flag of all roles, when it saves.
 ### Read-only roles
 
 A role with `read_only: true` reports and never changes files: whatever file
-blocks its reply contains are discarded, and the prompt tells it so. `ux_reviewer`
-and `security` are always read-only. The role form has a third field, **Can
+blocks its reply contains are discarded, and the prompt tells it so. `ux_reviewer`,
+`security` and `reviewer` are always read-only. The role form has a third field, **Can
 change files** (`yes` by default; toggle with `←`/`→` or `Space`), and a role
 saved with `no` gets `read_only: true`. The picker and the inspector show
 `read-only` next to such roles. Assigning one is allowed; DECSR says
@@ -1015,6 +1061,8 @@ REPORT
 status: done | blocked | question
 summary: <one or two sentences>
 question: <only when status is question: the exact question for the user>
+options: <only when status is question: numbered lines, see below>
+recommended: <number of the option the worker recommends>
 ```
 
 decsr reads the last `REPORT` line of the reply. Key names are case-insensitive;
@@ -1041,6 +1089,113 @@ node (`report` in the session file) and in each archived attempt.
 - Autonomy levels 2 and 3 never answer or fix a waiting node: it always waits
   for you. The lead of [coordinator mode](#coordinator-mode) sees the question
   but never answers it.
+
+### Question cards
+
+A worker that asks a question gives 2 to 4 options and says which one it
+recommends:
+
+```
+REPORT
+status: question
+summary: need a port for the health check
+question: Which port should the health check use?
+options:
+1. 8080 - matches the dev server
+2. 9090 - separate from app traffic
+recommended: 1
+```
+
+Option lines are numbered (`1.`, `1)`) or start with `- `; the text before the
+first ` - ` is the answer and the rest is the reason. A `recommended` number
+outside the list is ignored, and a report without options still parses as
+before (so does one for `blocked`). The options are stored on the node's
+report (`options`, `recommended`).
+
+When a node ends waiting with a question, the chat says `T2 asks: <question>`
+(`T2 is blocked: <summary>` for a blocked report, with no card) and a card shows
+under the feed:
+
+```
+◇ T2 asks · Add the /health endpoint
+Which port should the health check use?
+› 1. 8080 (Recommended) - matches the dev server
+  2. 9090 - separate from app traffic
+  3. Type your own answer
+```
+
+| Key | Action |
+|---|---|
+| `↑` `↓` | Move the cursor; it starts on the recommended option, else the first |
+| `1`-`9` | Pick that option |
+| `Enter` | Choose the option under the cursor |
+| `Esc` | Hide the card; the node stays waiting and the inbox item stays |
+
+Picking an option replies to the node with `Answer: <option>`, as `@T2 Answer:
+<option>` would. `Type your own answer` focuses the prompt filled with `@T2 `.
+`/answer` (or opening the question from the inbox) shows a hidden card again.
+With several waiting questions one card shows at a time, oldest first. A
+question without options gets a card with only `Type your own answer`. The card
+takes keys only while the feed is shown and the prompt is not in focus, so
+nothing is taken while you type; when a question arrives and the prompt is
+empty, the focus moves to the feed.
+
+### Refused commands
+
+With the `claude` runner in agent mode, the final event of a run lists the tool
+calls Claude Code refused because they are not on the allow list (see [Agent
+mode](#agent-mode)); decsr reads `permission_denials` from it and keeps them on
+the node for the current attempt (`denied` in the session file, cleared when a
+new attempt starts). Commands Claude Code treats as read-only are not refused.
+When a node ends (done, waiting or failed) with refused `Bash` commands, a card
+shows after any question card of that node:
+
+```
+⚠ T2 was refused 1 command
+cmake --build build -j8
+› 1. Allow for T2 and retry (Recommended)
+  2. Always allow `cmake` in this project and retry
+  3. No
+```
+
+The program of a command is its first word after `VAR=val` assignments; a chain
+split on `&&`, `||`, `;` and `|` lists each program that is not allowed yet.
+
+- **Allow for T2**: the programs are added to the node's own list
+  (`extra_allowed` in the session file) that its later attempts pass as extra
+  allowed commands, then T2 gets the reply ``The command `<cmd>` is now allowed.
+  Run it and continue.`` and starts its next attempt.
+- **Always allow**: the programs are also appended to `project.allowed_commands`
+  in `.decsr/project.yaml`; the node retries as above. Other nodes use the new
+  entry from the next session.
+- **No** (or `Esc`) hides the card.
+
+Nothing is allowed without a key press, at every autonomy level and in
+automation runs: the card waits for you. A role marked read-only never gets the
+allow options; the chat shows an info line. A refused tool other than `Bash`
+(`Write`, `Edit`, `WebFetch`, ...) also gets an info line only.
+
+### Run summary
+
+When a run ends, meaning nothing runs and nothing can start, the chat gets one
+message built from the graph (no model writes it):
+
+```
+Run finished · 3 done · 1 waiting · 0 failed
+✓ T1 Add /health endpoint - Added the handler and route. (2 files)
+✓ T2 Write tests - Added table tests for the handler. (1 file)
+◇ T3 Pick a port - waits for your answer
+✓ Build & test passed
+Next: answer T3, /merge to bring the result into your checkout, or type a follow-up task.
+```
+
+It lists each work or fix node that ended since the previous summary, with the
+summary of its report (else of the node) cut to the chat width, the number of
+files it changed, the short error of a failed node, and the Build & test line
+(`passed`, `failed`, `not run` or `– Build & test skipped · nothing changed`).
+A read-only node whose reply was printed in the chat reads `answer above`. The `Next:` line names only what applies:
+waiting nodes, `/merge` when the session is isolated and Build & test passed,
+and `@T1 ...` to retry a failed node. It appears at every autonomy level.
 
 Reply to the node (`m`, or `@T3 <message>`) to answer. The reply archives the
 attempt, with its report, and starts the next one. Its context includes what the
@@ -1548,9 +1703,31 @@ at the next tick. Build & test is not run again before the automatic push.
 
 ## Build & test and fix nodes
 
-The `CHECK` node ("Build & test") needs no agent. It is always in the graph. It
-runs the build and test commands for the project's language (see Project Setup
-for the language) once every other node is done.
+The `CHECK` node ("Build & test") needs no agent. It is added when a split has
+at least one node that writes (a plan of read-only nodes gets none), and a
+follow-up split adds it, or moves and resets it, only when one of its new nodes
+writes. It runs the build and test commands for the project's language (see
+Project Setup for the language) once every other node is done.
+
+For a C or C++ project with a `CMakePresets.json` (and optional
+`CMakeUserPresets.json`) it uses the presets: the first non-hidden configure
+preset that has a build preset, built with `cmake --preset <name> && cmake
+--build --preset <build>`, and tested with `ctest --preset <test>` when a test
+preset exists, else `ctest --test-dir <binaryDir> --output-on-failure`. When the
+preset's `CMAKE_MAKE_PROGRAM` lives under a `Tools/<name>/` directory that also
+holds `CMake/bin/cmake`, that `cmake` and `ctest` are used instead of the ones
+on `PATH`. Without presets the commands are `cmake -S . -B build && cmake
+--build build` and `ctest --test-dir build --output-on-failure`. Set
+`project.build_cmd` and `project.test_cmd` in the project config to replace the
+detected build and test commands.
+
+When its turn comes it runs only if a node ended after the last passed run of
+Build & test and changed a file that is not documentation (`*.md`, anything
+under `doc/` or `docs/`, `LICENSE*`), judged from the node's files, the files
+seen on disk and its diff stats. Otherwise it ends as `skipped · nothing
+changed`: it is done, but not passed, so the run summary says `– Build & test
+skipped`, no `/merge` hint is given, and autonomy levels 2 and 3 add no fix node
+and open no pull request after it. `/check` runs it now whatever changed.
 
 When the task is split, DECSR resolves those commands if it can and stores them
 on the node. If none are known yet (for example the project has no files), the

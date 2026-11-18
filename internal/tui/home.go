@@ -857,7 +857,7 @@ func (m HomeModel) renderInfoCard(contentWidth int) string {
 			} else {
 				row("AGENTS", fmt.Sprintf("all %d · %s / %s", len(m.cachedOverrides), first.runner, first.model))
 			}
-			shortRole := map[string]string{"pm": "PM", "coder": "Coder", "coder_fixer": "Fixer", "qa": "QA", "ux_reviewer": "UX", "security": "Sec"}
+			shortRole := map[string]string{"pm": "PM", "coder": "Coder", "coder_fixer": "Fixer", "qa": "QA", "ux_reviewer": "UX", "security": "Sec", "reviewer": "Rev"}
 			var legend []string
 			for _, ov := range m.cachedOverrides {
 				label := shortRole[ov.role]
@@ -1224,7 +1224,7 @@ type agentOverride struct {
 // any effort that differs from the global default.
 func resolveOverrides(agents map[string]config.AgentConfig, defaultRunner, defaultModel, defaultEffort string) []agentOverride {
 	var overrides []agentOverride
-	roles := []string{"pm", "coder", "coder_fixer", "qa", "ux_reviewer", "security"}
+	roles := []string{"pm", "coder", "coder_fixer", "qa", "ux_reviewer", "security", "reviewer"}
 	for _, role := range roles {
 		if ac, ok := agents[role]; ok {
 			r := ac.Runner

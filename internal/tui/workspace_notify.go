@@ -63,7 +63,7 @@ func (m workspaceModel) notifyEvent(ev workspace.Event) {
 	n := m.g.Node(ev.NodeID)
 	switch ev.Type {
 	case workspace.EventDone:
-		if n != nil && n.Kind == workspace.KindCheck {
+		if n != nil && n.Kind == workspace.KindCheck && !n.Skipped {
 			body := "Build & test passed"
 			if m.iso != nil {
 				body += " — /merge to apply"

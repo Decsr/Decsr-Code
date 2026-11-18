@@ -25,11 +25,12 @@ var builtinDescriptions = map[string]string{
 	"qa":          "Writes tests and reviews code quality and edge cases.",
 	"ux_reviewer": "Reviews user-facing flows, wording and usability.",
 	"security":    "Audits code for vulnerabilities and unsafe patterns.",
+	"reviewer":    "Reads the code and reports findings, opinions and summaries; never writes.",
 }
 
 // readOnlyBuiltin lists the built-in roles that only review and report,
 // whatever the config says.
-var readOnlyBuiltin = map[string]bool{"ux_reviewer": true, "security": true}
+var readOnlyBuiltin = map[string]bool{"ux_reviewer": true, "security": true, "reviewer": true}
 
 // Roles returns the built-in roles in config.BuiltinRoles order, then custom
 // roles sorted by name, then plugin roles ("<plugin>:<agent>") sorted by name. A custom role without runner/model inherits the pm

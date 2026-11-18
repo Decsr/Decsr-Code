@@ -430,6 +430,9 @@ func (a *QAAgent) fallbackTestCmds() []string {
 	if language == "go" {
 		build = goBuildCmd
 	}
+	if a.cfg.Project.BuildCmd != "" {
+		build = a.cfg.Project.BuildCmd
+	}
 	tests := cmds.Test
 	if a.cfg.Project.TestCmd != "" {
 		tests = []string{a.cfg.Project.TestCmd}

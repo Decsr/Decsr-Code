@@ -136,6 +136,10 @@ func commandPrograms(cmd string) []string {
 	return out
 }
 
+// CommandPrograms is the program of each part of a command line (see
+// commandPrograms), for the allow list prefixes a refused command needs.
+func CommandPrograms(cmd string) []string { return commandPrograms(cmd) }
+
 func isAssignment(w string) bool {
 	i := strings.Index(w, "=")
 	if i <= 0 {
@@ -217,6 +221,7 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 	// usage limit ("... limit reached ∙ resets 2pm"). The same text may also
 	// arrive as assistant text, so it is reported even after text was emitted.
 	var limited *RateLimitError
+	var denials []Denial
 
 	for scanner.Scan() {
 		line := bytes.TrimSpace(scanner.Bytes())
@@ -270,6 +275,7 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 					emitted.WriteString(delta)
 				}
 			}
+			denials = claudeDenials(evt.PermissionDenials)
 			if in := evt.Usage.promptTokens(); in > 0 || evt.Usage.OutputTokens > 0 {
 				finalUsage = TokenUsage{
 					InputTokens:  in,
@@ -305,7 +311,28 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 			Estimated:    true,
 		}
 	}
-	ch <- Token{Done: true, Usage: &finalUsage}
+	ch <- Token{Done: true, Usage: &finalUsage, Denials: denials}
+}
+
+// claudeDenials turns the refused tool calls of a result event into Denials,
+// each tool and command once.
+func claudeDenials(in []claudePermissionDenial) []Denial {
+	var out []Denial
+	seen := map[Denial]bool{}
+	for _, d := range in {
+		if d.ToolName == "" {
+			continue
+		}
+		dn := Denial{Tool: d.ToolName}
+		if d.ToolName == "Bash" {
+			dn.Command = strings.TrimSpace(d.ToolInput.Command)
+		}
+		if !seen[dn] {
+			seen[dn] = true
+			out = append(out, dn)
+		}
+	}
+	return out
 }
 
 // computeDelta returns the suffix of next that is not already in already.
@@ -331,6 +358,16 @@ type claudeStreamEvent struct {
 	Result  string                  `json:"result"`
 	IsError bool                    `json:"is_error"`
 	Usage   claudeStreamUsageFields `json:"usage"`
+	// PermissionDenials is set on the result event: the tool calls the
+	// permission mode refused.
+	PermissionDenials []claudePermissionDenial `json:"permission_denials"`
+}
+
+type claudePermissionDenial struct {
+	ToolName  string `json:"tool_name"`
+	ToolInput struct {
+		Command string `json:"command"`
+	} `json:"tool_input"`
 }
 
 type claudeStreamMessage struct {

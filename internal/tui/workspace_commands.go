@@ -50,7 +50,10 @@ func (m workspaceModel) commandList() []wsCommand {
 		{name: "/resume", desc: "continue a saved session of this project", run: workspaceModel.cmdResume},
 		{name: "/project", desc: "switch to another project", run: workspaceModel.cmdProject},
 		{name: "/profile", desc: "save or apply a set of role settings", run: workspaceModel.cmdProfile},
-		{name: "/roles", aliases: []string{"/agents"}, desc: "list roles, create a new one", run: func(m workspaceModel, _ string) (tea.Model, tea.Cmd) {
+		{name: "/roles", aliases: []string{"/agents"}, args: "[save <name>]", desc: "list roles, create a new one; save keeps a role of this session in project.yaml", run: func(m workspaceModel, args string) (tea.Model, tea.Cmd) {
+			if args != "" {
+				return m.cmdRolesSave(args)
+			}
 			m.overlay = wsOverlayRoles
 			m.pickIdx = 0
 			m.pickNode = ""
@@ -61,6 +64,8 @@ func (m workspaceModel) commandList() []wsCommand {
 		{name: "/status", desc: "project, session, roles and limits", run: workspaceModel.cmdStatus},
 		{name: "/cost", desc: "tokens per node and per role", run: workspaceModel.cmdCost},
 		{name: "/approve", desc: "approve the agents of the split and start the runnable nodes (the same as y)", run: workspaceModel.cmdApprove},
+		{name: "/answer", desc: "show the question or refused command that waits for you", run: workspaceModel.cmdAnswer},
+		{name: "/check", desc: "run Build & test now, even when nothing changed", run: workspaceModel.cmdCheck},
 		{name: "/reject", desc: "cancel the split that waits for approval (the same as n)", run: workspaceModel.cmdReject},
 		{name: "/routing", args: "[auto-connected|auto-role|manual]", desc: "show or set how agents are picked for the nodes of a split", run: workspaceModel.cmdRouting},
 		{name: "/rank", desc: "fetch model rankings from Artificial Analysis and show them", run: workspaceModel.cmdRank},
@@ -913,6 +918,16 @@ func orDefault(s, def string) string {
 // never read from or written to a config file.
 func (m workspaceModel) withPluginAgents(c config.Config) config.Config {
 	c.PluginAgents = m.plug.AgentRoles()
+	if len(m.sessRoles) > 0 {
+		agents := make(map[string]config.AgentConfig, len(c.Agents)+len(m.sessRoles))
+		for k, v := range m.sessRoles {
+			agents[k] = v
+		}
+		for k, v := range c.Agents { // a saved role wins over the session one
+			agents[k] = v
+		}
+		c.Agents = agents
+	}
 	return c
 }
 

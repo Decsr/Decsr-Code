@@ -304,6 +304,10 @@ func (m workspaceModel) inboxJump(it inboxItem) (tea.Model, tea.Cmd) {
 		}
 		return m.openInfo("Automation "+it.ref, lines), nil
 	}
+	if it.kind == inboxQuestion {
+		m = m.unhideNodeAsk(it.ref)
+		m.showGraph = false
+	}
 	return m.selectNode(it.ref), nil
 }
 

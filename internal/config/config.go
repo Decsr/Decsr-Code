@@ -222,6 +222,7 @@ type ProjectConfig struct {
 	Name           string        `yaml:"name,omitempty"`
 	Language       string        `yaml:"language,omitempty"`
 	ModulePath     string        `yaml:"module_path,omitempty"`
+	BuildCmd       string        `yaml:"build_cmd,omitempty"`
 	TestCmd        string        `yaml:"test_cmd,omitempty"`
 	LintCmd        string        `yaml:"lint_cmd,omitempty"`
 	MaxFixAttempts int           `yaml:"max_fix_attempts,omitempty"`
@@ -547,6 +548,9 @@ func merge(dst *Config, src Config) {
 	if src.Project.ModulePath != "" {
 		dst.Project.ModulePath = src.Project.ModulePath
 	}
+	if src.Project.BuildCmd != "" {
+		dst.Project.BuildCmd = src.Project.BuildCmd
+	}
 	if src.Project.TestCmd != "" {
 		dst.Project.TestCmd = src.Project.TestCmd
 	}
@@ -772,7 +776,7 @@ func merge(dst *Config, src Config) {
 }
 
 // BuiltinRoles are the agent roles shipped with DECSR, in display order.
-var BuiltinRoles = []string{"pm", "coder", "coder_fixer", "qa", "ux_reviewer", "security"}
+var BuiltinRoles = []string{"pm", "coder", "coder_fixer", "qa", "ux_reviewer", "security", "reviewer"}
 
 // IsBuiltinRole reports whether name is one of the built-in roles.
 func IsBuiltinRole(name string) bool {
@@ -833,6 +837,24 @@ func SaveProjectRoutingMode(root, mode string) error {
 		return fmt.Errorf("read %s: %w", ProjectFilename, err)
 	}
 	cfg.Routing.Mode = NormalizeRoutingMode(mode)
+	return Save(root, cfg)
+}
+
+// SaveProjectAllowedCommand appends prefix to project.allowed_commands in
+// <root>/.decsr/project.yaml, keeping the rest of the project settings. It
+// fails without touching the file when project.yaml exists but cannot be
+// parsed.
+func SaveProjectAllowedCommand(root, prefix string) error {
+	cfg, err := loadFile(filepath.Join(root, GlobalDir), ProjectFilename)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", ProjectFilename, err)
+	}
+	for _, c := range cfg.Project.AllowedCommands {
+		if c == prefix {
+			return nil
+		}
+	}
+	cfg.Project.AllowedCommands = append(cfg.Project.AllowedCommands, prefix)
 	return Save(root, cfg)
 }
 

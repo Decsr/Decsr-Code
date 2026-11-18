@@ -41,6 +41,9 @@ func DefaultConfig() Config {
 			"security": {
 				Skills: []string{"security"},
 			},
+			"reviewer": {
+				Skills: []string{"reviewer"},
+			},
 			"pr": {
 				Skills: []string{"pr"},
 			},

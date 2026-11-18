@@ -67,14 +67,15 @@ func TestParseSplitUnknownRoleBecomesNewRole(t *testing.T) {
 	}
 }
 
-func TestParseSplitNeverAssigns(t *testing.T) {
+func TestParseSplitAssignsDefinedRolesOnly(t *testing.T) {
 	g, err := ParseSplit("x", happy, testRoles())
 	if err != nil {
 		t.Fatal(err)
 	}
+	want := map[string]string{"T1": "coder", "T2": "", "T3": "qa"}
 	for _, nd := range g.Nodes {
-		if nd.Role != "" {
-			t.Errorf("%s assigned %q", nd.ID, nd.Role)
+		if nd.Role != want[nd.ID] {
+			t.Errorf("%s role %q, want %q", nd.ID, nd.Role, want[nd.ID])
 		}
 	}
 }
@@ -405,5 +406,58 @@ func TestParseSplitKeyAliases(t *testing.T) {
 	}
 	if !reflect.DeepEqual(n[3].DependsOn, []string{"A"}) {
 		t.Errorf("n3 = %+v", n[3])
+	}
+}
+
+func TestParseSplitWritesFlag(t *testing.T) {
+	out := `===TASKS===
+[{"key":"T1","title":"Review","description":"d","role":"reviewer","writes":false,"depends_on":[]},
+ {"key":"T2","title":"Fix","description":"d","role":"coder","writes":true,"depends_on":[]},
+ {"key":"T3","title":"Old output","description":"d","role":"coder","depends_on":[]}]
+===END===`
+	g, err := ParseSplit("x", out, testRoles())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"T1": true, "T2": false, "T3": false}
+	for _, nd := range g.Nodes {
+		if nd.ReadOnlyTask != want[nd.ID] {
+			t.Errorf("%s ReadOnlyTask = %v, want %v", nd.ID, nd.ReadOnlyTask, want[nd.ID])
+		}
+	}
+	if g.Nodes[0].Role != "reviewer" {
+		t.Errorf("reviewer role = %q", g.Nodes[0].Role)
+	}
+	c := g.Clone()
+	if !c.Nodes[0].ReadOnlyTask || c.Nodes[1].ReadOnlyTask {
+		t.Error("Clone lost the flag")
+	}
+}
+
+func TestParseSplitAnswer(t *testing.T) {
+	out := "===ANSWER===\nIt is a Go CLI.\n\nSee `internal/tui`.\n===END==="
+	g, err := ParseSplit("what is this", out, testRoles())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Answer != "It is a Go CLI.\n\nSee `internal/tui`." || len(g.Nodes) != 0 {
+		t.Errorf("answer %q nodes %d", g.Answer, len(g.Nodes))
+	}
+	if _, err := ParseSplit("x", "===ANSWER===\n===END===", testRoles()); err == nil {
+		t.Error("an empty answer must be an error")
+	}
+	// Tasks win when both are present.
+	both := out + "\n===TASKS===\n[{\"key\":\"T1\",\"title\":\"a\",\"description\":\"d\",\"role\":\"coder\",\"depends_on\":[]}]\n===END==="
+	if g, err := ParseSplit("x", both, testRoles()); err != nil || len(g.Nodes) != 1 || g.Answer != "" {
+		t.Errorf("both: %v %+v", err, g)
+	}
+}
+
+func TestSplitPromptHasTheLeanRules(t *testing.T) {
+	p := BuildSplitPrompt("task", testRoles(), "ctx")
+	for _, want := range []string{"You assign each sub-task", `"writes": false`, "===ANSWER===", "ONE\n  role"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
 	}
 }

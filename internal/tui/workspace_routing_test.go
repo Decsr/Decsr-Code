@@ -30,8 +30,8 @@ func TestSplitProposesPendingAgentsInEveryMode(t *testing.T) {
 	for _, mode := range []string{"", config.RoutingManual, config.RoutingAutoRole, config.RoutingAutoConnected} {
 		h := routingHarness(t, mode)
 		h.toGraph()
-		// Defined roles only: T1 coder, T3 qa, T4 coder, T5 security.
-		if got := strings.Join(pendingIDs(h), ","); got != "T1,T3,T4,T5" {
+		// T2 has a new role: it waits with the pm's agent.
+		if got := strings.Join(pendingIDs(h), ","); got != "T1,T2,T3,T4,T5" {
 			t.Fatalf("mode %q: pending %s", mode, got)
 		}
 		want := mode
@@ -97,7 +97,7 @@ func TestUnattendedRunApprovesTheAgents(t *testing.T) {
 	if h.status("T1") != workspace.StatusRunning {
 		t.Errorf("T1 is %s, want running", h.status("T1"))
 	}
-	h.wantAuto("approved the agent of 4 nodes")
+	h.wantAuto("approved the agent of 5 nodes")
 }
 
 func TestUnattendedRunWaitsWhenAutoApproveIsOff(t *testing.T) {
@@ -107,7 +107,7 @@ func TestUnattendedRunWaitsWhenAutoApproveIsOff(t *testing.T) {
 	off := false
 	h.m.cfg.Routing = config.RoutingConfig{Mode: config.RoutingAutoRole, AutoApprove: &off}
 	h.toGraph()
-	if len(pendingIDs(h)) != 4 {
+	if len(pendingIDs(h)) != 5 {
 		t.Fatalf("pending %v", pendingIDs(h))
 	}
 	if h.eng.Running() != 0 {

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -18,6 +19,10 @@ type Report struct {
 	Status   string `json:"status"` // ReportDone, ReportBlocked or ReportQuestion
 	Summary  string `json:"summary,omitempty"`
 	Question string `json:"question,omitempty"`
+	// Options are the answers a question offers; Recommended is the 1-based
+	// index of the advised one, 0 for none.
+	Options     []string `json:"options,omitempty"`
+	Recommended int      `json:"recommended,omitempty"`
 }
 
 // Waits reports whether the node must wait for the user: a question or a
@@ -35,11 +40,12 @@ func (r Report) Ask() string {
 }
 
 // reportInstruction is appended to every worker prompt.
-const reportInstruction = "\n\nAfter that, END your reply with exactly this block (the last lines of the reply, nothing after it):\n\nREPORT\nstatus: done | blocked | question\nsummary: <one or two sentences>\nquestion: <only when status is question: the exact question for the user>\n\nUse \"done\" when the sub-task is complete, \"blocked\" when you cannot continue without outside\nhelp (say what in the summary), and \"question\" when you need an answer from the user first."
+const reportInstruction = "\n\nAfter that, END your reply with exactly this block (the last lines of the reply, nothing after it):\n\nREPORT\nstatus: done | blocked | question\nsummary: <one or two sentences>\nquestion: <only when status is question: the exact question for the user>\noptions: <only when status is question: 2 to 4 numbered lines, one per answer>\n1. <option> - <one-line reason or trade-off>\n2. <option> - <...>\nrecommended: <number of the option you recommend>\n\nFor a question, give 2 to 4 options, put the recommended option first and state its number after \"recommended:\". Options are optional for \"blocked\".\n\nUse \"done\" when the sub-task is complete, \"blocked\" when you cannot continue without outside\nhelp (say what in the summary), and \"question\" when you need an answer from the user first."
 
 var (
 	reportMark = regexp.MustCompile("(?i)^[\\s>*_`#-]*report[\\s*_`:#]*$")
-	reportKey  = regexp.MustCompile("(?i)^[\\s>*_`-]*(status|summary|question)[\\s*_`]*:[\\s*_`]*(.*)$")
+	reportKey  = regexp.MustCompile("(?i)^[\\s>*_`-]*(status|summary|question|options|recommended)[\\s*_`]*:[\\s*_`]*(.*)$")
+	optionLine = regexp.MustCompile(`^\s*(?:\d+[.)]|[-*])\s+(.+)$`)
 	fenceLine  = regexp.MustCompile("^\\s*(```|~~~)")
 )
 
@@ -101,5 +107,16 @@ func parseReportBlock(lines []string) (Report, bool) {
 	default:
 		status = ReportDone
 	}
-	return Report{Status: status, Summary: join("summary"), Question: join("question")}, true
+	rep := Report{Status: status, Summary: join("summary"), Question: join("question")}
+	for _, l := range vals["options"] {
+		if m := optionLine.FindStringSubmatch(l); m != nil {
+			if o := strings.Trim(strings.TrimSpace(m[1]), "*_` "); o != "" {
+				rep.Options = append(rep.Options, o)
+			}
+		}
+	}
+	if n, err := strconv.Atoi(strings.Trim(strings.TrimSpace(join("recommended")), ".)")); err == nil && n >= 1 && n <= len(rep.Options) {
+		rep.Recommended = n
+	}
+	return rep, true
 }

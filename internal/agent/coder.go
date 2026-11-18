@@ -1310,6 +1310,9 @@ func (a *CoderAgent) ensureGoMod() {
 
 // buildCmd returns the build command for the project language.
 func (a *CoderAgent) buildCmd() string {
+	if a.cfg.Project.BuildCmd != "" {
+		return a.cfg.Project.BuildCmd
+	}
 	language := a.detectLanguage()
 	if language == "go" {
 		return goBuildCmd
