@@ -62,7 +62,7 @@ func TestClaudeMCPRoleKeepsUserServers(t *testing.T) {
 		if strings.Contains(joined, "--strict-mcp-config") || strings.Contains(joined, "--mcp-config") {
 			t.Errorf("agent=%v: mcp role still passes the MCP flags: %q", agent, got)
 		}
-		if !strings.Contains(joined, "--setting-sources project,local") {
+		if !strings.Contains(joined, "--setting-sources user,project,local") {
 			t.Errorf("agent=%v: --setting-sources missing: %q", agent, got)
 		}
 	}

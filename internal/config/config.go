@@ -93,7 +93,16 @@ type WorkspaceConfig struct {
 	// on or off. nil = on, except for the claude runner on a subscription
 	// login, where it is off and the node waits for the user's retry.
 	LimitAutoRetry *bool `yaml:"limit_auto_retry,omitempty"`
+
+	// AutoCompact compacts the lead's conversation in front of a message the
+	// user sends, once its last turn used more than 70% of the model's context
+	// window. nil = on.
+	AutoCompact *bool `yaml:"auto_compact,omitempty"`
 }
+
+// AutoCompactOn reports whether the lead's conversation is compacted by itself
+// before a user-sent message (the default).
+func (w WorkspaceConfig) AutoCompactOn() bool { return w.AutoCompact == nil || *w.AutoCompact }
 
 // RoutingConfig tunes the model rankings used to pick an agent per node.
 type RoutingConfig struct {
@@ -688,6 +697,10 @@ func merge(dst *Config, src Config) {
 	if src.Workspace.LimitAutoRetry != nil {
 		v := *src.Workspace.LimitAutoRetry
 		dst.Workspace.LimitAutoRetry = &v
+	}
+	if src.Workspace.AutoCompact != nil {
+		v := *src.Workspace.AutoCompact
+		dst.Workspace.AutoCompact = &v
 	}
 	if len(src.Routing.Aliases) > 0 {
 		if dst.Routing.Aliases == nil {

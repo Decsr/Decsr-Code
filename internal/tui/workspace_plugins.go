@@ -163,6 +163,10 @@ func (m workspaceModel) onInstalled(msg wsInstallMsg) (tea.Model, tea.Cmd) {
 	}
 	m.installing, m.cancelInstall = "", nil
 	name := workspace.Sanitize(msg.name)
+	if m.instLeadName == msg.name {
+		m.instLeadName = ""
+		m.recordInstall(workspace.InstallAction{Kind: workspace.InstallDecsrPlugin, Name: msg.name}, msg.err == nil, "")
+	}
 	if msg.err != nil {
 		m, _ = m.markPlugin(msg.name, workspace.PluginDeclined)
 		m.pluginSay("error", fmt.Sprintf("could not install %s: %s (try again with /plugin install %s)", name, oneLine(workspace.SanitizeText(msg.err.Error())), name))

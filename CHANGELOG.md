@@ -7,7 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Workspace: the lead is a chat. Every message goes to the lead as one
+  conversation and the lead answers in the chat by default; it creates nodes
+  only when the message assigns work (or for a job too big to read in one turn,
+  as one read-only reviewer node). It reads the project itself with read-only
+  tools (claude: `Read`, `Grep`, `Glob` and `git log|diff|status|show`, dontAsk,
+  no MCP; codex and dsh in their read-only modes) and never edits files. A reply
+  without a node section is a plain answer: no plan card, no error, no second
+  call. The lead's CLI conversation is kept per session and resumed on each
+  turn (a new one starts, with a chat line, when the lead's agent changes or a
+  resume fails); the first message carries a project map (language, instruction
+  files, up to 30 `doc/` and `docs/` paths, the 20 newest exports, memory notes)
+  instead of file contents. Runners without tools keep the one-shot call.
+- Workspace: `/clear` starts a truly fresh session (no chat, graph, summary or
+  lead conversation; the old session stays in `/resume`). `/compact [focus]`
+  now has the lead summarize the conversation and the nodes, starts a new lead
+  conversation from the summary and still folds finished nodes; the chat shows
+  `compacted · ≈42K → 3K tokens`.
+
 ### Added
+- Workspace: MCP in nodes. The lead may mark a sub-task with `"mcp": ["github"]`
+  (server names from `claude mcp list`). On the claude runner only that node
+  loads your MCP servers and may use only the named servers' tools
+  (`mcp__<server>` allow rules); other nodes stay without MCP. The plan card
+  shows `uses MCP: …` and always waits for `y`, at every autonomy level; an
+  automation run stops with `needs you: T2 uses MCP`. Another runner gets a
+  warning on the card and runs without MCP. The lead and `/compact` see `mcp: …`.
+- Workspace: install from the chat. Asked to install something, the lead looks it
+  up (decsr's catalog, the marketplaces you added, `claude plugin list
+  --available`, `claude mcp list`: four read-only `claude` lookups were added to
+  its tools) and proposes an `===INSTALL===` action: a decsr plugin, a Claude
+  Code plugin (`claude plugin install <plugin>@<marketplace> --scope local`) or
+  an MCP server for the claude runner (`claude mcp add --scope local …`; `user`
+  scope only when you ask for all projects). decsr shows a card with the exact
+  command and the `⚠ untrusted` mark where it applies, and runs it itself only
+  after your `y`, at every autonomy level; automation runs skip it and leave an
+  inbox item. A marketplace-declared command gets a second card and
+  `--accept-command <sha256>`; `-y` is never used. Values marked `<ask>`
+  (tokens, headers) are asked in a hidden input and never written to the chat,
+  session or logs. Installs are kept in the session (no secrets) and reported
+  to the lead.
+- Workspace: a muted line under the lead's reply shows its current step
+  (`lead · reading internal/runner/claude.go`, `lead · searching "x"`,
+  `lead · git log`) and collapses to `read 4 files · 2 searches` when it ends.
+- Workspace: `workspace.auto_compact` (on by default, listed in `/config`)
+  compacts the lead's conversation before a message you send when its last turn
+  used more than 70% of the model's context window, and prints an `auto ›`
+  line. It never runs in the background, on a timer or in an unattended run.
 - Workspace: `/usage` shows the plan limits like claude's own `/usage`: a meter
   per window (current session 5h, current week, Opus and Sonnet weeks when
   reported) with the share used, a warning past the warning level and the reset

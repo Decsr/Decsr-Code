@@ -98,14 +98,20 @@ func TestParseChangesOnlyAnswerStillFailsWithoutAnything(t *testing.T) {
 func TestFollowUpPromptListsLiveGraph(t *testing.T) {
 	live := liveFixture()
 	live[0].Files = []string{"a.go", "b.go"}
-	p := buildSplitPrompt("task", testRoles(), "ctx", []string{"T1", "T2", "T3", "T4"}, 5, SplitOptions{Live: live})
-	for _, want := range []string{`T1 "Parser" [running] role coder`, "files: a.go, b.go", `T3 "Flags" [todo]`, "===CHANGES===", "MUST list it in `depends_on`", "`T5`"} {
+	msg := followUpMessage([]string{"T1", "T2", "T3", "T4"}, 5, live)
+	for _, want := range []string{`T1 "Parser" [running] role coder`, "files: a.go, b.go", `T3 "Flags" [todo]`, "Next free id: T5"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message lacks %q", want)
+		}
+	}
+	p := BuildSplitPrompt(testRoles())
+	for _, want := range []string{"===CHANGES===", "MUST list it in `depends_on`", "Never reuse"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q", want)
 		}
 	}
-	if strings.Contains(BuildSplitPrompt("x", testRoles(), "c"), "CHANGES") {
-		t.Error("a fresh split must not mention changes")
+	if followUpMessage(nil, 0, nil) != "" {
+		t.Error("a fresh graph has no node section")
 	}
 }
 

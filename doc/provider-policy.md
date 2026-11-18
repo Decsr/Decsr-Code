@@ -50,7 +50,19 @@ Re-read these when a check is unclear or a rule may have changed:
 - Routing in unattended runs: guarded (`routingConnected` drops claude).
 - Refused commands (claude runner): a command is allowed only by the user's
   key press on its card; no autonomy level and no automation run allows one.
+- Installs from the chat (decsr plugins, `claude plugin install`, `claude mcp
+  add`): pass. Installs: proposed by the lead, run by decsr only after the
+  user's key press; never `-y`; secrets asked hidden and never stored by decsr.
+  The lead only has read-only `claude ... list|get` lookups, workers get no
+  install command, automation runs skip installs, and decsr runs the unmodified
+  `claude` binary through its documented flags.
+- MCP: only nodes the lead marks and the user approves load MCP, claude runner
+  only, tools limited to the named servers. decsr runs no MCP server itself, a
+  plan with an MCP node always waits for the user's `y`, and an automation run
+  stops instead of starting it.
 - `/autonomy 3` on a subscription: **open**, it needs a warning or a block.
+- Lead chat: read-only tools, user-started turns only; auto-compact runs only
+  in front of a user-started turn.
 - Plan limits in `/usage` and `/status`: pass. They come only from the
   `rate_limit_event` lines the claude CLI prints during runs the user started,
   saved in `~/.decsr/plan-limits.json`. decsr calls no account endpoint, starts

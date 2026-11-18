@@ -101,7 +101,7 @@ The sidebar (from 100 columns) lists nodes and saved sessions. The feed shows on
 
 ### Workspace and graph
 
-The lead splits your task into nodes with titles, dependencies, a role and a `writes` flag. Up to 3 nodes run at once. A last **Build & test** node runs your language's build and test commands (C and C++ projects use `CMakePresets.json`; set `project.build_cmd` and `project.test_cmd` to replace them). It runs only when code changed, otherwise it ends as `skipped · nothing changed`; `/check` runs it anyway. In a git repository every node gets its own worktree. Set `workspace.isolation: shared` to work in your checkout instead. See [Workspace](doc/workspace.md#flow) and [Build & test](doc/workspace.md#build--test-and-fix-nodes).
+The Workspace is a chat with the lead. It answers your questions itself, reading the project with read-only tools (it never edits files), and splits work you assign into nodes with titles, dependencies, a role and a `writes` flag. One lead conversation per session is resumed turn by turn; `/compact [focus]` summarizes it, `/clear` starts over, and `workspace.auto_compact` compacts it before a message when it nears the context limit. See [The lead chat](doc/workspace.md#the-lead-chat). Up to 3 nodes run at once. A last **Build & test** node runs your language's build and test commands (C and C++ projects use `CMakePresets.json`; set `project.build_cmd` and `project.test_cmd` to replace them). It runs only when code changed, otherwise it ends as `skipped · nothing changed`; `/check` runs it anyway. In a git repository every node gets its own worktree. Set `workspace.isolation: shared` to work in your checkout instead. See [Workspace](doc/workspace.md#flow) and [Build & test](doc/workspace.md#build--test-and-fix-nodes).
 
 ### Lean runs and plan card
 
@@ -133,7 +133,7 @@ You can type a new task while nodes run. The lead sees the live graph, may chang
 
 ### Sessions, profiles and extensions
 
-Each project keeps its sessions in `.decsr/sessions/`. `decsr resume` or `/resume` continues one, `/clear` starts a new one and `/compact` folds finished nodes into a summary. `/model profile` saves your role settings for any project. Markdown files in `.decsr/commands/` and `.decsr/skills/` add your own commands and skills. Claude-format plugins add commands, skills and roles; `/plugin` is a manager with the tabs Installed, Discover, Marketplaces (asks for trust on first install) and Stats; it can also import plugins from Claude Code. See [Sessions](doc/workspace.md#sessions), [Profiles](doc/workspace.md#profiles), [Custom commands and skills](doc/workspace.md#custom-commands-and-skills) and [Plugins](doc/workspace.md#plugins).
+Each project keeps its sessions in `.decsr/sessions/`. `decsr resume` or `/resume` continues one, `/clear` starts a new one and `/compact` folds finished nodes into a summary. `/model profile` saves your role settings for any project. Markdown files in `.decsr/commands/` and `.decsr/skills/` add your own commands and skills. Claude-format plugins add commands, skills and roles; `/plugin` is a manager with the tabs Installed, Discover, Marketplaces (asks for trust on first install) and Stats; it can also import plugins from Claude Code. Ask the lead in the chat to install a plugin or an MCP server (decsr plugin, Claude Code plugin or MCP server for the claude runner): decsr shows a card with the exact command and runs it only after your `y`, never with `-y`, and asks secrets in a hidden input it does not store. See [Sessions](doc/workspace.md#sessions), [Profiles](doc/workspace.md#profiles), [Custom commands and skills](doc/workspace.md#custom-commands-and-skills), [Plugins](doc/workspace.md#plugins) and [Installing from the chat](doc/workspace.md#installing-from-the-chat).
 
 ### Issues and Spec Kit import
 
@@ -188,7 +188,7 @@ Full key reference: [Workspace keys](doc/workspace.md#keys) and [Commands](doc/w
 
 | Runner | Kind | Agent mode | Notes |
 |---|---|---|---|
-| `claude` | CLI | yes | Claude CLI. Worker runs are lean: they skip your global MCP servers and plugins. Set `mcp: true` on a role to keep them. |
+| `claude` | CLI | yes | Claude CLI. Worker runs are lean: they skip your global MCP servers and plugins. Set `mcp: true` on a role to keep them, or let the lead mark a node with the MCP servers it needs: that node (after your `y` on the plan card) loads your servers and may use only the named ones. |
 | `codex` | CLI | yes | Codex CLI. |
 | `opencode` | CLI | yes | OpenCode. The default runner. |
 | `copilot` | CLI | no | GitHub Copilot CLI. |

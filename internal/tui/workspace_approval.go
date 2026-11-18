@@ -61,9 +61,11 @@ type approvalRow struct {
 	Marker           string  // ↓ cheaper than the role's agent, = the same, ↑ dearer, ≠ differs
 	Cost             float64 // estimated USD per task; 0 = unknown
 	Reason           string
-	Role             string // the node's role (or the suggested one)
-	NewRole          bool   // the role does not exist yet: y creates it for this session
-	Access           string // writes or read-only
+	Role             string   // the node's role (or the suggested one)
+	NewRole          bool     // the role does not exist yet: y creates it for this session
+	Access           string   // writes or read-only
+	MCP              []string // MCP servers the lead marked for the node
+	MCPWarn          bool     // the node's agent is not claude: it runs without MCP
 }
 
 // approvalCard is everything the card shows.
@@ -201,6 +203,8 @@ func (m workspaceModel) approvalCardData() (approvalCard, bool) {
 		if m.readOnlyNode(n) {
 			row.Access = "read-only"
 		}
+		row.MCP = n.MCP
+		row.MCPWarn = len(n.MCP) > 0 && a.Runner != "claude"
 		c.Total += a.EstCostUSD
 		c.Rows = append(c.Rows, row)
 	}
@@ -314,6 +318,12 @@ func renderApprovalCard(c approvalCard, width int) []string {
 				line = dim.Render(line)
 			}
 			rows = append(rows, ansi.Truncate(ind+lead+line, max(iw, 4), "…"))
+		}
+		if len(r.MCP) > 0 {
+			rows = append(rows, ansi.Truncate(ind+dim.Render("uses MCP: "+strings.Join(r.MCP, ", ")), max(iw, 4), "…"))
+		}
+		if r.MCPWarn {
+			rows = append(rows, ansi.Truncate(ind+lipgloss.NewStyle().Foreground(ui.Warn).Render("⚠ MCP needs a claude agent; "+r.ID+" will run without it"), max(iw, 4), "…"))
 		}
 	}
 	if len(c.Changes) > 0 {

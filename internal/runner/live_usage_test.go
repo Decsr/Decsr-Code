@@ -69,7 +69,7 @@ func TestClaudeLiveUsageIsCumulativeAndFinalWins(t *testing.T) {
 	if fmt.Sprint(progress) != fmt.Sprint(want) {
 		t.Errorf("progress = %+v, want %+v", progress, want)
 	}
-	if done.Usage == nil || *done.Usage != (TokenUsage{InputTokens: 40, CachedTokens: 35, OutputTokens: 10}) {
+	if done.Usage == nil || *done.Usage != (TokenUsage{InputTokens: 40, CachedTokens: 35, OutputTokens: 10, ContextTokens: 23}) {
 		t.Errorf("final usage = %+v", done.Usage)
 	}
 }

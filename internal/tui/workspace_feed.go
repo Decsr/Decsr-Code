@@ -739,10 +739,13 @@ func (m workspaceModel) feedLayout(pw int) (lines []string, spans map[string][2]
 			lines = append(lines, "")
 		}
 		lines = append(lines, pad+lipgloss.NewStyle().Foreground(ui.Accent).Bold(true).Render("Lead")+"  "+
-			lipgloss.NewStyle().Foreground(ui.Text).Render(spin+" splitting the task…  (Esc cancels)"))
+			lipgloss.NewStyle().Foreground(ui.Text).Render(spin+" "+m.leadLabel()+"  (Esc cancels)"))
 		if m.stream != nil {
 			if last := m.stream.lastLine(); last != "" {
 				lines = append(lines, pad+"  "+lipgloss.NewStyle().Foreground(ui.Muted).Render(truncateOneLine(last, cw-2)))
+			}
+			if step := m.stream.act.Line(); step != "" {
+				lines = append(lines, pad+"  "+lipgloss.NewStyle().Foreground(ui.Muted).Render(truncateOneLine(step, cw-2)))
 			}
 		}
 	}

@@ -67,33 +67,41 @@ func TestAppendKeepsExistingDependency(t *testing.T) {
 
 func TestSplitWithPromptAndNumbering(t *testing.T) {
 	fake := &chunkRunner{chunks: []string{followUp}}
-	_, _, err := SplitNext(t.Context(), fake, "m", "task", testRoles(), "ctx", []string{"T1", "T2", "T3"}, 7, nil)
+	_, _, err := leadSplit(t.Context(), fake, "m", "task", testRoles(), "ctx", []string{"T1", "T2", "T3"}, 7, SplitOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	p := fake.req.SystemPrompt
-	for _, want := range []string{"T1, T2, T3", "`T7`", "Never reuse", "MAY list an existing ID"} {
+	for _, want := range []string{"Never reuse", "MAY list an existing ID"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q", want)
+		}
+	}
+	msg := fake.req.Messages[0].Content
+	for _, want := range []string{"T1, T2, T3", "Next free id: T7", "ctx"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message lacks %q", want)
 		}
 	}
 	if strings.Contains(p, "{{") {
 		t.Error("unreplaced placeholder")
 	}
 	fake2 := &chunkRunner{chunks: []string{followUp}}
-	_, _, _ = SplitWith(t.Context(), fake2, "m", "task", testRoles(), "ctx", []string{"T1", "T3"}, nil)
-	if !strings.Contains(fake2.req.SystemPrompt, "`T4`") {
-		t.Error("SplitWith must number after the highest T")
+	_, _, _ = leadSplit(t.Context(), fake2, "m", "task", testRoles(), "ctx", []string{"T1", "T3"}, 0, SplitOptions{}, nil)
+	if !strings.Contains(fake2.req.Messages[0].Content, "Next free id: T4") {
+		t.Error("the lead must number after the highest T")
 	}
-	if p := BuildSplitPrompt("x", testRoles(), "c"); strings.Contains(p, "Follow-up") {
-		t.Error("fresh split must not mention follow-ups")
+	_, _, _ = leadSplit(t.Context(), fake2, "m", "task", testRoles(), "ctx", nil, 0, SplitOptions{}, nil)
+	if strings.Contains(fake2.req.Messages[0].Content, "Next free id") {
+		t.Error("a fresh graph has no node section")
 	}
 }
 
 func TestSplitPromptNoPlaceholderCapture(t *testing.T) {
-	p := BuildSplitPrompt("{{PROJECT_CONTEXT}}", testRoles(), "CTX")
-	if strings.Count(p, "CTX") != 1 {
-		t.Errorf("context substituted into the task text")
+	fake := &chunkRunner{chunks: []string{followUp}}
+	_, _, _ = leadSplit(t.Context(), fake, "m", "{{ROLES}}", testRoles(), "CTX", nil, 0, SplitOptions{}, nil)
+	if strings.Count(fake.req.SystemPrompt, "{{ROLES}}") != 0 || !strings.HasPrefix(fake.req.Messages[0].Content, "{{ROLES}}") {
+		t.Errorf("placeholder text of the task was substituted")
 	}
 }
 

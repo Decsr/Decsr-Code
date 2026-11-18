@@ -171,8 +171,8 @@ T
 
 func TestSplitPromptRoutingSectionKeepsPrefix(t *testing.T) {
 	roles := []Role{{Name: "coder", Description: "Codes"}}
-	off := buildSplitPrompt("task", roles, "ctx", nil, 0, SplitOptions{})
-	on := buildSplitPrompt("task", roles, "ctx", nil, 0, SplitOptions{Routing: true})
+	off := buildSplitPrompt(roles, SplitOptions{})
+	on := buildSplitPrompt(roles, SplitOptions{Routing: true})
 	if strings.Contains(off, `"difficulty"`) || !strings.Contains(on, `"difficulty"`) {
 		t.Fatal("the grading instruction belongs to the routing modes only")
 	}

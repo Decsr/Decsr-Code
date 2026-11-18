@@ -41,8 +41,8 @@ func TestWorkspaceCompactNoticeCountsKeptNodes(t *testing.T) {
 	h.toGraph()
 	h.wsMarkDone("T1", "T2")
 	h.key("tab")
-	h.typeCmd("/compact")
-	h.want("compacted 1 finished node; kept 1 that unfinished nodes still depend on")
+	h.compact("")
+	h.want("folded 1 finished node; kept 1 that unfinished nodes still depend on")
 	if h.m.g.Node("T2") == nil || h.m.g.Node("T1") != nil {
 		t.Fatalf("graph: %+v", h.m.g.Nodes)
 	}

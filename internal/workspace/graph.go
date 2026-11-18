@@ -74,6 +74,10 @@ type Node struct {
 	Commit    string     `json:"commit,omitempty"`     // the node's own commit when it ran in a worktree; reachable through the session branch
 	Warnings  []string   `json:"warnings,omitempty"`
 	Skills    []string   `json:"skills,omitempty"` // plugin skill ids the lead chose for this node
+	// MCP names the MCP servers (as `claude mcp list` shows them) the lead
+	// marked for this node. Only a claude run with the user's approval loads
+	// them, and its tools are limited to these servers.
+	MCP []string `json:"mcp,omitempty"`
 	// ReadOnlyTask is set when the lead marked the sub-task "writes": false: the
 	// node runs read-only whatever its role.
 	ReadOnlyTask bool `json:"read_only_task,omitempty"`
@@ -278,6 +282,13 @@ type Graph struct {
 	// Answer is the lead's direct reply to a question that needed no sub-task;
 	// a graph that has it has no nodes. Not saved.
 	Answer string `json:"-"`
+	// Chat is the lead's reply text that came with new nodes or changes. Not
+	// saved.
+	Chat string `json:"-"`
+	// Installs are the installs the lead proposed in its reply, and
+	// InstallWarnings the actions dropped from them. Not saved.
+	Installs        []InstallAction `json:"-"`
+	InstallWarnings []string        `json:"-"`
 	// SplitWarnings are the notes of the split that produced the graph (an
 	// unusable skill or plugin dropped). Not saved.
 	SplitWarnings []string `json:"-"`
@@ -507,6 +518,7 @@ func (g *Graph) Clone() *Graph {
 		nn.FileStats = append([]FileStat(nil), n.FileStats...)
 		nn.Warnings = append([]string(nil), n.Warnings...)
 		nn.Skills = append([]string(nil), n.Skills...)
+		nn.MCP = append([]string(nil), n.MCP...)
 		nn.Activity = append([]runner.Activity(nil), n.Activity...)
 		nn.Attempts = cloneAttempts(n.Attempts)
 		nn.Report = cloneReport(n.Report)
@@ -527,6 +539,8 @@ func (g *Graph) Clone() *Graph {
 	c.PluginRequests = append([]PluginRequest(nil), g.PluginRequests...)
 	c.SplitWarnings = append([]string(nil), g.SplitWarnings...)
 	c.Changes = append([]Change(nil), g.Changes...)
+	c.Installs = append([]InstallAction(nil), g.Installs...)
+	c.InstallWarnings = append([]string(nil), g.InstallWarnings...)
 	return &c
 }
 
@@ -716,6 +730,7 @@ func (g *Graph) Append(add *Graph, nextID int) (newNext int, idMap map[string]st
 		c.FileStats = append([]FileStat(nil), n.FileStats...)
 		c.Warnings = append([]string(nil), n.Warnings...)
 		c.Skills = append([]string(nil), n.Skills...)
+		c.MCP = append([]string(nil), n.MCP...)
 		c.Activity = append([]runner.Activity(nil), n.Activity...)
 		c.Attempts = cloneAttempts(n.Attempts)
 		c.Report = cloneReport(n.Report)

@@ -87,7 +87,7 @@ func TestAutomationSendsTheTaskAndSetsTheTimeout(t *testing.T) {
 		t.Fatal("the task did not start a split")
 	}
 	h.finishSplit()
-	if len(h.tasks) != 1 || h.tasks[0] != "do it" || !h.m.hasNodes() {
+	if len(h.tasks) != 1 || h.tasks[0] != autoTaskPrefix+"do it" || !h.m.hasNodes() {
 		t.Errorf("tasks %q", h.tasks)
 	}
 }
@@ -102,6 +102,38 @@ func TestAutomationSplitFailureEndsTheRun(t *testing.T) {
 		t.Errorf("result %+v quitting %v", a.result, h.m.quitting)
 	}
 	if !notes.has(notify.Failed, "automation nightly failed: lead unreachable") {
+		t.Errorf("notes %+v", notes.notes)
+	}
+}
+
+func TestAutomationTaskIsAnAssignment(t *testing.T) {
+	h, _ := autoRun(t, 2, true)
+	h.send(wsAutoTaskMsg{})
+	h.finishSplit()
+	if len(h.tasks) != 1 || !strings.HasPrefix(h.tasks[0], "This is an assigned task: create the nodes for it.") || !strings.HasSuffix(h.tasks[0], "do it") {
+		t.Errorf("tasks = %q", h.tasks)
+	}
+	// The chat shows the task as written, not the wrapper.
+	for _, l := range h.m.sess.snapshot().Transcript {
+		if l.Who == "you" && l.Text != "do it" {
+			t.Errorf("you line = %q", l.Text)
+		}
+	}
+}
+
+func TestAutomationPlainAnswerEndsTheRun(t *testing.T) {
+	h, notes := autoRun(t, 2, true)
+	h.graph = chatAnswer("Nothing to change, the tests already pass.")
+	h.send(wsAutoTaskMsg{})
+	h.finishSplit()
+	a := h.m.auto
+	if !a.finished || !strings.HasPrefix(a.result.Result, "failed: the lead only answered in the chat and created no nodes: Nothing to change") || !h.m.quitting {
+		t.Errorf("result %+v quitting %v", a.result, h.m.quitting)
+	}
+	if !transcriptHas(h, "Nothing to change, the tests already pass.") {
+		t.Error("the answer is not in the chat log")
+	}
+	if !notes.has(notify.Failed, "automation nightly failed: the lead only answered") {
 		t.Errorf("notes %+v", notes.notes)
 	}
 }

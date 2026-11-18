@@ -85,6 +85,11 @@ func (m workspaceModel) autoApproveAgents() (_ workspaceModel, wait bool) {
 	if p == 0 && len(m.pendingChanges) == 0 {
 		return m, false
 	}
+	if ids := mcpNodeIDs(m.g.PendingApproval()); len(ids) > 0 {
+		m.autoSay(mcpNeedsYou(ids) + ": they wait for your approval")
+		m.notifyNote(notify.NeedsYou, "The plan uses MCP and needs your approval")
+		return m, true
+	}
 	if !m.cfg.Routing.ApproveUnattended() {
 		m.autoSay(fmt.Sprintf("%d %s and %d %s wait for approval (routing.auto_approve is off)", p, pluralize(p, "node", "nodes"), len(m.pendingChanges), pluralize(len(m.pendingChanges), "change", "changes")))
 		m.notifyNote(notify.NeedsYou, "The agents of the split need your approval")

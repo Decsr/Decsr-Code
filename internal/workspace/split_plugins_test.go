@@ -33,7 +33,7 @@ func splitOpts(t *testing.T) SplitOptions {
 
 func TestSplitPromptListsSkillsAndCatalog(t *testing.T) {
 	opts := splitOpts(t)
-	p := buildSplitPrompt("task", testRoles(), "ctx", nil, 0, opts)
+	p := buildSplitPrompt(testRoles(), opts)
 	for _, want := range []string{
 		"## Installed skills", "- sp:tdd: Test first", "- sp:debug: long long",
 		"## Plugins you can suggest", "- modern-cpp: Modern C++ Skills: modern-cpp.", "- off (disabled): Disabled one Skills: x.",
@@ -60,7 +60,7 @@ func TestSplitPromptListsSkillsAndCatalog(t *testing.T) {
 }
 
 func TestSplitPromptEmptyPluginSections(t *testing.T) {
-	p := BuildSplitPrompt("task", testRoles(), "ctx")
+	p := BuildSplitPrompt(testRoles())
 	if !strings.Contains(p, "(none installed)") || !strings.Contains(p, "\n(none)\n") {
 		t.Errorf("empty sections missing:\n%s", p)
 	}
@@ -74,7 +74,7 @@ func TestSplitPromptCapsSkillLines(t *testing.T) {
 		files["skills/s"+string(rune('a'+i/26))+string(rune('a'+i%26))+"/SKILL.md"] = "---\ndescription: d\n---\nbody"
 	}
 	mkHomePlugin(t, home, "big", files)
-	p := buildSplitPrompt("t", testRoles(), "", nil, 0, SplitOptions{Plugins: plugins.Load(root)})
+	p := buildSplitPrompt(testRoles(), SplitOptions{Plugins: plugins.Load(root)})
 	if n := strings.Count(p, "\n- big:"); n != 60 {
 		t.Errorf("%d skill lines, want 60", n)
 	}
@@ -164,7 +164,7 @@ func TestParseSplitPluginsOnlyCatalog(t *testing.T) {
 func TestSplitOptsUsesOptionsInPrompt(t *testing.T) {
 	opts := splitOpts(t)
 	fake := &chunkRunner{chunks: []string{happy}}
-	if _, _, err := SplitOpts(t.Context(), fake, "m", "task", testRoles(), "ctx", nil, 0, opts, nil); err != nil {
+	if _, _, err := leadSplit(t.Context(), fake, "m", "task", testRoles(), "ctx", nil, 0, opts, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(fake.req.SystemPrompt, "- sp:tdd: Test first") {

@@ -29,6 +29,7 @@ const (
 	inboxPlugin                      // a plugin question is unanswered
 	inboxBudget                      // the budget warning (info)
 	inboxAutomation                  // an automation run that failed or needs you (info)
+	inboxInstall                     // an install an automation run skipped (info)
 )
 
 // inboxItem is one line of the inbox. Items of the first six kinds need the
@@ -61,6 +62,7 @@ type inboxInput struct {
 	limit     float64
 	warnPct   int
 	autos     []inboxAutoRun
+	installs  []workspace.InstallRecord
 	dismissed []string
 	needsOnly bool
 }
@@ -158,11 +160,21 @@ func buildInbox(in inboxInput) (need, info []inboxItem) {
 	}
 	for _, a := range in.autos {
 		res := strings.ToLower(a.entry.Result)
-		if !strings.HasPrefix(res, "failed") && res != "needs you" && res != "timed out" && res != "budget reached" {
+		if !strings.HasPrefix(res, "failed") && !strings.HasPrefix(res, "needs you") && res != "timed out" && res != "budget reached" {
 			continue
 		}
 		it := inboxItem{kind: inboxAutomation, id: "auto:" + a.name + ":" + a.entry.Start.Format(time.RFC3339), ref: a.name, glyph: "·",
 			label: a.name, info: true, text: "automation " + oneLine(workspace.SanitizeText(a.entry.Result)), right: inboxAge(in.now, a.entry.End)}
+		if !gone[it.id] {
+			info = append(info, it)
+		}
+	}
+	for _, r := range in.installs {
+		if r.Note != installNeedsYou {
+			continue
+		}
+		it := inboxItem{kind: inboxInstall, id: "install:" + r.Name + ":" + r.At.Format(time.RFC3339), ref: r.Name, glyph: "·",
+			label: "Install " + workspace.Sanitize(r.Name), info: true, text: "needs you: an automation run skipped it (" + installKindLabel(r.Kind) + ")", right: inboxAge(in.now, r.At)}
 		if !gone[it.id] {
 			info = append(info, it)
 		}
@@ -216,6 +228,7 @@ func (m workspaceModel) inboxInputOf(needsOnly bool) inboxInput {
 		in.limit, in.warnPct = budgetOf(m.liveCfg(), s)
 		in.spent = m.use().spent
 		in.autos = m.inboxAutos
+		in.installs = s.Installs
 	}
 	return in
 }

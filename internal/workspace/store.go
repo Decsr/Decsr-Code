@@ -113,6 +113,7 @@ func (g *Graph) Sanitize() {
 	for _, n := range g.Nodes {
 		n.Title, n.Description = Sanitize(n.Title), SanitizeText(n.Description)
 		n.Skills = validSkillIDs(n.Skills)
+		n.MCP, _ = CleanMCPNames(n.MCP)
 	}
 	var reqs []PluginRequest
 	for _, r := range g.PluginRequests {

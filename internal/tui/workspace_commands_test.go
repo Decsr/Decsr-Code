@@ -268,8 +268,8 @@ func TestWorkspaceCompactFoldsAndFeedsNextSplit(t *testing.T) {
 	h.toGraph()
 	h.wsMarkDone("T1", "T3")
 	h.key("tab")
-	h.typeCmd("/compact")
-	h.want("compacted 2 finished nodes")
+	h.compact("")
+	h.want("folded 2 finished nodes")
 	g := h.eng.Snapshot()
 	if g.Node("T1") != nil || g.Node("T3") != nil || g.Node("T2") == nil || g.Node("CHECK") == nil {
 		t.Fatalf("graph after compact: %+v", g.Nodes)
@@ -295,10 +295,12 @@ func TestWorkspaceCompactFoldsAndFeedsNextSplit(t *testing.T) {
 	if g := h.eng.Snapshot(); g.Node("T6") == nil || g.Node("T1") != nil {
 		t.Fatalf("IDs must continue after compaction: %+v", g.Nodes)
 	}
-	// Nothing finished any more: compacting again is a no-op.
+	// Nothing finished any more: compacting again only summarizes the chat.
 	h.key("tab")
-	h.typeCmd("/compact")
-	h.want("nothing to compact")
+	h.compact("")
+	if len(h.compactIns) != 2 || h.m.g.Node("T6") == nil {
+		t.Fatalf("second compact: %d calls, graph %+v", len(h.compactIns), h.m.g.Nodes)
+	}
 }
 
 func TestWorkspaceCompactNothingToFold(t *testing.T) {
@@ -307,8 +309,11 @@ func TestWorkspaceCompactNothingToFold(t *testing.T) {
 	h.want("nothing to compact")
 	h.toGraph()
 	h.key("tab")
-	h.typeCmd("/compact")
-	h.want("nothing to compact")
+	h.compact("")
+	h.want("compacted · ≈")
+	if h.m.g.Node("T1") == nil || len(h.m.g.Nodes) != 6 {
+		t.Fatalf("unfinished nodes must stay: %+v", h.m.g.Nodes)
+	}
 }
 
 func TestWorkspaceBusyCommandsRefused(t *testing.T) {

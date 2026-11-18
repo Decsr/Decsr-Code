@@ -901,8 +901,9 @@ func TestCompactLeavesSummaryLineInFeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.m.g = h.eng.Snapshot()
-	h.typeCmd("/compact")
-	h.want("compacted")
+	h.compact("")
+	h.want("compacted · ≈")
+
 }
 
 func TestSidebarScrollsToKeepSelectionVisible(t *testing.T) {

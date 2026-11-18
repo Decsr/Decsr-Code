@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -313,7 +314,7 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 	}
 	out := Result{Summary: res.Summary, Files: res.Files, Warnings: skillWarnings, Report: res.Report, Denied: res.Denials}
 	if n.ReadOnlyTask {
-		out.Answer = res.Body
+		out.Answer = answerBody(res.Body)
 	}
 	if snapOK {
 		if after, ok := snapshotTree(wx.root, maxSnapshotFiles); ok {
@@ -434,6 +435,11 @@ func (x *executor) runWorker(ctx context.Context, r runner.LLMRunner, wx executo
 			message = n.Reply
 		}
 	}
+	// Only a claude run loads MCP servers, and only the ones the lead marked.
+	var mcpServers []string
+	if cur.Runner == "claude" {
+		mcpServers = n.MCP
+	}
 	return agent.RunWorker(ctx, r, wx.root, x.cfg, agent.WorkerRequest{
 		KeepSession:   runner.CanResume(cur.Runner),
 		ResumeID:      resume,
@@ -451,6 +457,7 @@ func (x *executor) runWorker(ctx context.Context, r runner.LLMRunner, wx executo
 		ReadOnly:        readOnly,
 		Mode:            role.Agent.EffectiveMode(),
 		MCP:             role.Agent.MCP,
+		MCPServers:      mcpServers,
 		BuildCommands:   buildCommands,
 		AllowedCommands: append(append([]string(nil), x.cfg.Project.AllowedCommands...), n.ExtraAllowed...),
 		OnActivity:      func(a runner.Activity) { emit(Event{NodeID: n.ID, Type: EventActivity, Activity: &a}) },
@@ -877,4 +884,17 @@ func diffSnapshots(before, after map[string]fileStamp, written []string) []strin
 	}
 	sort.Strings(out)
 	return out
+}
+
+// sectionMarker matches a worker section line such as ===SUMMARY===.
+var sectionMarker = regexp.MustCompile(`(?m)^[ \t]*===[A-Z][A-Z_]*===[ \t]*$`)
+
+// answerBody is the part of a read-only reply that is shown in the chat as the
+// answer: the text before the first section marker (===SUMMARY===). The
+// output screen keeps the full text.
+func answerBody(body string) string {
+	if loc := sectionMarker.FindStringIndex(body); loc != nil {
+		return strings.TrimSpace(body[:loc[0]])
+	}
+	return body
 }

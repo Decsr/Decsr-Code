@@ -100,10 +100,39 @@ func TestParseSplitTolerant(t *testing.T) {
 	}
 }
 
+func TestParseSplitPlainChatAnswer(t *testing.T) {
+	g, err := ParseSplit("what is this", "It is a Go CLI.\n\nSee `internal/tui`.", testRoles())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Answer != "It is a Go CLI.\n\nSee `internal/tui`." || len(g.Nodes) != 0 || len(g.Changes) != 0 {
+		t.Errorf("graph = %+v", g)
+	}
+	// An empty TASKS section with a reply is the same plain answer.
+	g, err = ParseSplit("x", "Nothing to do.\n===TASKS===\n[]\n===END===", testRoles())
+	if err != nil || g.Answer != "Nothing to do." {
+		t.Errorf("empty tasks: %v %+v", err, g)
+	}
+}
+
+func TestParseSplitChatWithNodes(t *testing.T) {
+	g, err := ParseSplit("x", "I will add it.\n\n"+happy, testRoles())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Chat != "I will add it." || g.Answer != "" || len(g.Nodes) != 3 {
+		t.Errorf("chat=%q answer=%q nodes=%d", g.Chat, g.Answer, len(g.Nodes))
+	}
+	g, err = ParseSplit("x", happy, testRoles())
+	if err != nil || g.Chat != "" {
+		t.Errorf("no reply text: %v chat=%q", err, g.Chat)
+	}
+}
+
 func TestParseSplitErrors(t *testing.T) {
 	wrap := func(js string) string { return "===TASKS===\n" + js + "\n===END===" }
 	tests := map[string]string{
-		"no marker":    "just some text",
+		"empty answer": "  \n",
 		"invalid json": wrap(`[{"key":`),
 		"empty array":  wrap(`[]`),
 		"cycle":        wrap(`[{"key":"T1","title":"a","role":"coder","depends_on":["T2"]},{"key":"T2","title":"b","role":"coder","depends_on":["T1"]}]`),
@@ -123,14 +152,11 @@ func TestParseSplitErrors(t *testing.T) {
 
 func TestBuildSplitPromptListsRoles(t *testing.T) {
 	roles := testRoles()
-	p := BuildSplitPrompt("build the thing", roles, "CTX-MARKER")
+	p := BuildSplitPrompt(roles)
 	for _, r := range roles {
 		if !strings.Contains(p, "- "+r.Name+": "+r.Description) {
 			t.Errorf("missing role line for %s", r.Name)
 		}
-	}
-	if !strings.Contains(p, "build the thing") || !strings.Contains(p, "CTX-MARKER") {
-		t.Error("task or context missing")
 	}
 	if strings.Contains(p, "{{") {
 		t.Error("unreplaced placeholder")
@@ -154,6 +180,12 @@ func (c *chunkRunner) Complete(_ context.Context, req runner.CompletionRequest) 
 	return ch, nil
 }
 
+// leadSplit sends task to the lead as the first turn of a conversation, without tools.
+func leadSplit(ctx context.Context, r runner.LLMRunner, model, task string, roles []Role, projectCtx string, existing []string, next int, opts SplitOptions, onToken func(string)) (*Graph, runner.TokenUsage, error) {
+	res, err := RunLead(ctx, r, LeadTurn{Task: task, Roles: roles, Opts: opts, Existing: existing, Next: next, Model: model, Context: projectCtx}, onToken)
+	return res.Graph, res.Usage, err
+}
+
 func TestSplitStreams(t *testing.T) {
 	a, b := len(happy)/3, 2*len(happy)/3
 	r := &chunkRunner{
@@ -161,7 +193,7 @@ func TestSplitStreams(t *testing.T) {
 		usage:  &runner.TokenUsage{InputTokens: 10, OutputTokens: 20},
 	}
 	var seen strings.Builder
-	g, u, err := Split(context.Background(), r, "m", "task", testRoles(), "ctx", func(s string) { seen.WriteString(s) })
+	g, u, err := leadSplit(context.Background(), r, "m", "task", testRoles(), "", nil, 0, SplitOptions{}, func(s string) { seen.WriteString(s) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,14 +208,14 @@ func TestSplitStreams(t *testing.T) {
 	}
 	// nil onToken must not panic.
 	r2 := &chunkRunner{chunks: []string{happy}}
-	if _, _, err := Split(context.Background(), r2, "m", "task", testRoles(), "", nil); err != nil {
+	if _, _, err := leadSplit(context.Background(), r2, "m", "task", testRoles(), "", nil, 0, SplitOptions{}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestSplitRunnerError(t *testing.T) {
 	r := &runner.MockRunner{}
-	if _, _, err := Split(context.Background(), r, "m", "t", testRoles(), "", nil); err == nil {
+	if _, _, err := leadSplit(context.Background(), r, "m", "t", testRoles(), "", nil, 0, SplitOptions{}, nil); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -305,7 +337,7 @@ func TestParseSplitFriendlyJSONError(t *testing.T) {
 }
 
 func TestBuildSplitPromptMarksReadOnly(t *testing.T) {
-	p := BuildSplitPrompt("t", testRoles(), "")
+	p := BuildSplitPrompt(testRoles())
 	if !strings.Contains(p, "- security: Audits code for vulnerabilities and unsafe patterns. (read-only: reviews and reports, cannot change files)") {
 		t.Errorf("security not marked read-only:\n%s", p)
 	}
@@ -340,7 +372,7 @@ const noRoles = `===TASKS===
 func TestSplitRetriesWhenNoRoles(t *testing.T) {
 	r := &seqRunner{replies: []string{noRoles, happy}}
 	var seen strings.Builder
-	g, u, err := Split(context.Background(), r, "m", "task", testRoles(), "", func(s string) { seen.WriteString(s) })
+	g, u, err := leadSplit(context.Background(), r, "m", "task", testRoles(), "", nil, 0, SplitOptions{}, func(s string) { seen.WriteString(s) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +398,7 @@ func TestSplitRetriesWhenNoRoles(t *testing.T) {
 func TestSplitRetryKeepsFirstWhenRetryIsWorse(t *testing.T) {
 	for _, second := range []string{"garbage", noRoles} {
 		r := &seqRunner{replies: []string{noRoles, second}}
-		g, _, err := Split(context.Background(), r, "m", "task", testRoles(), "", nil)
+		g, _, err := leadSplit(context.Background(), r, "m", "task", testRoles(), "", nil, 0, SplitOptions{}, nil)
 		if err != nil || len(g.Nodes) != 2 || len(r.reqs) != 2 {
 			t.Fatalf("second=%q g=%v err=%v calls=%d", second, g, err, len(r.reqs))
 		}
@@ -375,12 +407,12 @@ func TestSplitRetryKeepsFirstWhenRetryIsWorse(t *testing.T) {
 
 func TestSplitNoRetryWhenRolesPresentOrSingleNode(t *testing.T) {
 	r := &seqRunner{replies: []string{happy}}
-	if _, _, err := Split(context.Background(), r, "m", "task", testRoles(), "", nil); err != nil || len(r.reqs) != 1 {
+	if _, _, err := leadSplit(context.Background(), r, "m", "task", testRoles(), "", nil, 0, SplitOptions{}, nil); err != nil || len(r.reqs) != 1 {
 		t.Fatalf("err=%v calls=%d", err, len(r.reqs))
 	}
 	one := wrapTasks(`[{"key":"T1","title":"a"}]`)
 	r = &seqRunner{replies: []string{one}}
-	if _, _, err := Split(context.Background(), r, "m", "task", testRoles(), "", nil); err != nil || len(r.reqs) != 1 {
+	if _, _, err := leadSplit(context.Background(), r, "m", "task", testRoles(), "", nil, 0, SplitOptions{}, nil); err != nil || len(r.reqs) != 1 {
 		t.Fatalf("single: err=%v calls=%d", err, len(r.reqs))
 	}
 }
@@ -454,8 +486,8 @@ func TestParseSplitAnswer(t *testing.T) {
 }
 
 func TestSplitPromptHasTheLeanRules(t *testing.T) {
-	p := BuildSplitPrompt("task", testRoles(), "ctx")
-	for _, want := range []string{"You assign each sub-task", `"writes": false`, "===ANSWER===", "ONE\n  role"} {
+	p := BuildSplitPrompt(testRoles())
+	for _, want := range []string{"plain chat answer", `"writes": false`, "NEVER create, change", "ONE role"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q", want)
 		}
@@ -464,7 +496,7 @@ func TestSplitPromptHasTheLeanRules(t *testing.T) {
 
 func TestSplitPromptCutsLongRoleDescriptions(t *testing.T) {
 	long := strings.Repeat("word ", 400)
-	p := buildSplitPrompt("t", []Role{{Name: "big", Description: long}}, "ctx", nil, 0, SplitOptions{})
+	p := buildSplitPrompt([]Role{{Name: "big", Description: long}}, SplitOptions{})
 	if strings.Contains(p, long) || !strings.Contains(p, "- big: word word") {
 		t.Errorf("role description not cut:\n%.300s", p)
 	}

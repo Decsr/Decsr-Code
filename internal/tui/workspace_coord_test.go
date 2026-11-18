@@ -577,7 +577,7 @@ func TestRemovedCostCountsInSpendAndBudget(t *testing.T) {
 		t.Fatal("budget not reached before compact")
 	}
 	r.m.setFocus(wsFocusPrompt)
-	r.typeCmd("/compact")
+	r.compact("")
 	if r.m.g.Node("T1") != nil {
 		t.Fatal("T1 was not folded")
 	}

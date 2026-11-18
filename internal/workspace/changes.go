@@ -42,6 +42,7 @@ type Change struct {
 type LiveNode struct {
 	ID, Title, Status, Role, Description string
 	Files                                []string
+	MCP                                  []string
 	// Started is true once the node ran at least once.
 	Started bool
 }
@@ -66,6 +67,7 @@ func LiveNodes(g *Graph) []LiveNode {
 			ID: n.ID, Title: Sanitize(n.Title), Status: string(n.Status), Role: orRole(n),
 			Description: cutRunes(Sanitize(n.Description), maxLiveDescRunes),
 			Started:     !n.NotStarted(),
+			MCP:         n.MCP,
 		}
 		seen := map[string]bool{}
 		add := func(p string) {
@@ -103,6 +105,9 @@ func liveSection(live []LiveNode) string {
 		}
 		if n.Description != "" && n.Description != n.Title {
 			sb.WriteString(": " + n.Description)
+		}
+		if len(n.MCP) > 0 {
+			sb.WriteString(" | mcp: " + strings.Join(n.MCP, ", "))
 		}
 		if len(n.Files) > 0 {
 			files := n.Files

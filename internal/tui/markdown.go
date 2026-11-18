@@ -44,7 +44,7 @@ func renderMarkdown(src string, width int) (lines []string, ok bool) {
 	if !markdownActive(width) || strings.TrimSpace(src) == "" {
 		return nil, false
 	}
-	r := mdRenderer(width)
+	r := mdRenderer(mdWrapWidth)
 	if r == nil {
 		return nil, false
 	}
@@ -54,8 +54,8 @@ func renderMarkdown(src string, width int) (lines []string, ok bool) {
 	if err != nil {
 		return nil, false
 	}
-	lines = strings.Split(out, "\n")
-	for i, l := range lines {
+	var wrapped []string
+	for _, l := range strings.Split(out, "\n") {
 		l = mdTrailSGR.ReplaceAllString(mdTrailing.ReplaceAllString(l, ""), "")
 		switch {
 		case strings.TrimSpace(ansi.Strip(l)) == "":
@@ -63,11 +63,9 @@ func renderMarkdown(src string, width int) (lines []string, ok bool) {
 		case strings.Contains(l, "\x1b["):
 			l += "\x1b[0m" // every line is self-contained
 		}
-		lines[i] = l
-		if ansi.StringWidth(lines[i]) > width {
-			lines[i] = ansi.Truncate(lines[i], width, "")
-		}
+		wrapped = append(wrapped, wrapMdLine(l, width)...)
 	}
+	lines = wrapped
 	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
 		lines = lines[:len(lines)-1]
 	}
@@ -75,6 +73,45 @@ func renderMarkdown(src string, width int) (lines []string, ok bool) {
 		lines = lines[1:]
 	}
 	return lines, len(lines) > 0
+}
+
+// mdWrapWidth is the word wrap handed to glamour. Glamour wraps a paragraph
+// twice when it also indents it, which leaves single words on a line of their
+// own, so it renders wide and wrapMdLine wraps once at the real width.
+const mdWrapWidth = 4000
+
+var mdListMarker = regexp.MustCompile(`^( *)(• |[0-9]+\. )`)
+
+// wrapMdLine wraps one rendered line at width, at spaces; a word longer than
+// the line is split. A list item keeps a hanging indent. Table and rule lines
+// are cut, not wrapped.
+func wrapMdLine(l string, width int) []string {
+	if ansi.StringWidth(l) <= width {
+		return []string{l}
+	}
+	plain := ansi.Strip(l)
+	if strings.ContainsAny(plain, "│┌├└─┼") {
+		return []string{ansi.Truncate(l, width, "")}
+	}
+	indent := 0
+	if m := mdListMarker.FindStringSubmatch(plain); m != nil {
+		indent = len(m[1]) + len([]rune(m[2]))
+	}
+	if indent >= width-8 {
+		indent = 0
+	}
+	pad := strings.Repeat(" ", indent)
+	var out []string
+	for i, part := range strings.Split(ansi.Wrap(l, width-indent, ""), "\n") {
+		if i > 0 {
+			part = pad + part
+		}
+		if strings.Contains(part, "\x1b[") && !strings.HasSuffix(part, "\x1b[0m") {
+			part += "\x1b[0m"
+		}
+		out = append(out, part)
+	}
+	return out
 }
 
 // mdRenderer returns the renderer of a width and theme, building it once.

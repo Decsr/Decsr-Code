@@ -107,6 +107,10 @@ func (m workspaceModel) cmdClear(string) (tea.Model, tea.Cmd) {
 	if m.busy() {
 		return m.refuseBusy()
 	}
+	if m.splitting || m.reviewing {
+		m.say("system", "wait for the lead: it is still working on the last request (Esc cancels)")
+		return m, nil
+	}
 	if m.hasNodes() {
 		if _, _, done, _ := m.g.Counts(); done < len(m.g.Nodes) {
 			m.confirm = wsConfirm{kind: "clear", text: "Start a new session? y/n"}
@@ -142,35 +146,6 @@ func (m workspaceModel) cmdMerge(string) (tea.Model, tea.Cmd) {
 	if err != nil {
 		m.say("error", oneLine(err.Error()))
 		return m, nil
-	}
-	m.say("system", msg)
-	return m, nil
-}
-
-func (m workspaceModel) cmdCompact(string) (tea.Model, tea.Cmd) {
-	if m.busy() {
-		return m.refuseBusy()
-	}
-	if m.eng == nil {
-		m.say("system", "nothing to compact")
-		return m, nil
-	}
-	folded, kept, err := m.applyCompact()
-	if err != nil {
-		m.say("error", oneLine(err.Error()))
-		return m, nil
-	}
-	if folded == 0 {
-		if kept > 0 {
-			m.say("system", fmt.Sprintf("nothing to compact; %d finished %s still needed by unfinished nodes", kept, pluralize(kept, "node is", "nodes are")))
-		} else {
-			m.say("system", "nothing to compact")
-		}
-		return m, nil
-	}
-	msg := fmt.Sprintf("compacted %d finished %s", folded, pluralize(folded, "node", "nodes"))
-	if kept > 0 {
-		msg += fmt.Sprintf("; kept %d that unfinished nodes still depend on", kept)
 	}
 	m.say("system", msg)
 	return m, nil

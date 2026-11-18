@@ -30,6 +30,9 @@ const (
 type SplitOptions struct {
 	Plugins plugins.Set
 	Catalog []plugins.CatalogEntry
+	// Markets are the marketplaces the user added; the lead may propose an
+	// install from them.
+	Markets []plugins.Marketplace
 	// Routing asks the lead to grade each sub-task (difficulty and reason),
 	// which the agent picker uses.
 	Routing bool
@@ -98,6 +101,36 @@ func catalogSection(set plugins.Set, cat []plugins.CatalogEntry) string {
 	}
 	if len(lines) == 0 {
 		return "(none)"
+	}
+	return strings.Join(lines, "\n")
+}
+
+// maxMarketLines caps the marketplace plugins listed in the split prompt.
+const maxMarketLines = 60
+
+// marketsSection is the body of "Marketplaces the user added": their plugins,
+// one line each, with the repo and whether the user trusts it.
+func marketsSection(markets []plugins.Marketplace) string {
+	var lines []string
+	for _, mk := range markets {
+		trust := "untrusted"
+		if mk.Trusted {
+			trust = "trusted"
+		}
+		for _, e := range mk.Entries {
+			line := fmt.Sprintf("- %s (%s, %s)", Sanitize(e.Name), Sanitize(mk.Repo), trust)
+			if d := cutRunes(Sanitize(e.Description), maxSkillDescRunes); d != "" {
+				line += ": " + d
+			}
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return "(none)"
+	}
+	if len(lines) > maxMarketLines {
+		more := len(lines) - maxMarketLines
+		lines = append(lines[:maxMarketLines], fmt.Sprintf("- … and %d more", more))
 	}
 	return strings.Join(lines, "\n")
 }

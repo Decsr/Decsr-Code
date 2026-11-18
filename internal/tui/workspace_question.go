@@ -44,6 +44,8 @@ type askCard struct {
 	Progs []string // askActAllow and askActAlways: the programs to allow
 	Cmds  []string // the refused commands
 	Hint  string   // the key line, when it is not the usual one
+	// Strict makes the hot keys the only choice: no cursor, no numbers, no Enter.
+	Strict bool
 }
 
 // askOptionSplit cuts "8080 - matches the dev server" into label and reason.
@@ -80,7 +82,13 @@ func questionCard(n *workspace.Node) askCard {
 // is left out.
 func (m workspaceModel) askCards() []askCard {
 	if m.g == nil {
-		return nil
+		var out []askCard
+		for _, c := range m.installCards() {
+			if !m.askHidden[c.Key] {
+				out = append(out, c)
+			}
+		}
+		return out
 	}
 	nodes := make([]*workspace.Node, 0, len(m.g.Nodes))
 	for _, n := range m.g.Nodes {
@@ -102,6 +110,9 @@ func (m workspaceModel) askCards() []askCard {
 		if c, ok := m.deniedCard(n); ok {
 			add(c)
 		}
+	}
+	for _, c := range m.installCards() {
+		add(c)
 	}
 	if len(m.followups) > 0 {
 		add(followCard(m.followups, m.followSeq))
@@ -145,7 +156,13 @@ func renderAskCard(c askCard, sel, width int) []string {
 			rows = append(rows, text.Render(l))
 		}
 	}
+	if c.Strict {
+		rows = append(rows, acc.Render("› ")+text.Render(c.Hint))
+	}
 	for i, o := range c.Opts {
+		if c.Strict {
+			break
+		}
 		mark, st := "  ", text
 		if i == sel {
 			mark, st = acc.Render("› "), acc.Bold(true)
@@ -163,6 +180,9 @@ func renderAskCard(c askCard, sel, width int) []string {
 	keys := fmt.Sprintf("↑↓ move · 1-%d pick · Enter choose · Esc later", min(len(c.Opts), 9))
 	if c.Hint != "" {
 		keys = c.Hint
+	}
+	if c.Strict {
+		keys = "Esc later"
 	}
 	rows = append(rows, "", dim.Render(keys+"  (/answer brings it back)"))
 
@@ -186,6 +206,19 @@ func (m workspaceModel) askKeyPress(msg tea.KeyMsg) (next tea.Model, cmd tea.Cmd
 		return m, nil, false
 	}
 	k := msg.String()
+	if c.Strict {
+		if k == "esc" {
+			m.hideAsk(c)
+			return m, nil, true
+		}
+		for i, o := range c.Opts {
+			if o.Hot == k {
+				nm, cmd := m.askChoose(c, i)
+				return nm, cmd, true
+			}
+		}
+		return m, nil, false
+	}
 	move := func(d int) (tea.Model, tea.Cmd, bool) {
 		m.askKey, m.askSel = c.Key, min(max(sel+d, 0), len(c.Opts)-1)
 		return m, nil, true
@@ -229,8 +262,17 @@ func (m *workspaceModel) hideAsk(c askCard) {
 // askChoose runs the option i of card c.
 func (m workspaceModel) askChoose(c askCard, i int) (tea.Model, tea.Cmd) {
 	o := c.Opts[i]
-	n := m.g.Node(c.Node)
 	m.askKey = ""
+	switch o.Act {
+	case askActInstall:
+		return m.installYes()
+	case askActInstallNo:
+		return m.installNo(), nil
+	}
+	var n *workspace.Node
+	if m.g != nil {
+		n = m.g.Node(c.Node)
+	}
 	switch o.Act {
 	case askActAnswer:
 		return m.replyKeepingDraft(c.Node, "Answer: "+o.Label)

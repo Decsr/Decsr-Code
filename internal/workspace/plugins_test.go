@@ -101,7 +101,7 @@ func TestParseSplitKeepsKnownPluginRole(t *testing.T) {
 	if got := g.Nodes[1].SuggestedRole; strings.Contains(got, ":") || len(g.NewRoles) != 1 || g.NewRoles[0].Name != got {
 		t.Errorf("unknown plugin role should be normalized as a new role: %q %+v", got, g.NewRoles)
 	}
-	if p := BuildSplitPrompt("t", Roles(cfg), ""); !strings.Contains(p, "fd:code-reviewer: Reviews") {
+	if p := BuildSplitPrompt(Roles(cfg)); !strings.Contains(p, "fd:code-reviewer: Reviews") {
 		t.Error("split prompt does not offer the plugin role")
 	}
 }

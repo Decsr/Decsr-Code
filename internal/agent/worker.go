@@ -26,6 +26,9 @@ type WorkerRequest struct {
 	Mode string
 	// MCP keeps the user's own MCP servers for a Claude run.
 	MCP bool
+	// MCPServers are the MCP servers the lead marked for this node (Claude
+	// only). The run loads the user's servers and may use only these.
+	MCPServers []string
 	// BuildCommands are the project's build and test commands an agent-mode
 	// Claude run may execute.
 	BuildCommands []string
@@ -146,6 +149,10 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 	}
 	if agentMode {
 		creq.AllowedTools = runner.AgentTools(req.BuildCommands, req.AllowedCommands, req.ReadOnly)
+		if rules := runner.MCPServerRules(req.MCPServers); len(rules) > 0 {
+			creq.MCP = true
+			creq.AllowedTools = append(creq.AllowedTools, rules...)
+		}
 	}
 	ch, err := r.Complete(ctx, creq)
 	if err != nil {

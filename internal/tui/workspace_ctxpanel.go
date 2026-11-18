@@ -57,7 +57,7 @@ func buildContext(c config.Config, summary string, overview, pack, mem string) c
 	if sample.Prompt != "" {
 		rolePrompt = sample.Prompt
 	}
-	leadTpl := len(workspace.BuildSplitPrompt("", roles, ""))
+	leadTpl := len(workspace.BuildSplitPrompt(roles))
 	workerTpl := len(strings.NewReplacer("{{MODE}}", "", "{{ROLE}}", rolePrompt, "{{CONTEXT}}", "").Replace(prompts.MustLoad("ws-worker")))
 	sum := len(strings.TrimSpace(summary))
 	d := ctxData{role: sample.Name}

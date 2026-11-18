@@ -1,8 +1,9 @@
 # Workspace
 
-The Workspace is the screen `decsr` opens by default. You type a task in the
-prompt, a lead agent splits it into sub-tasks, you decide which agent does each
-one, and the assigned sub-tasks run in parallel. Every sub-task is a node in a
+The Workspace is the screen `decsr` opens by default. It is a chat with a lead
+agent. Ask it about the project and it answers; give it work and it splits the
+work into sub-tasks, you decide which agent does each one, and the assigned
+sub-tasks run in parallel. Every sub-task is a node in a
 graph, so you can see who does what and what is waiting on what.
 
 It is one screen. The top line shows `◆ decsr`, the project and, when nodes run
@@ -24,15 +25,16 @@ Code, QA and so on) is unchanged; see [Reaching the classic pipeline](#reaching-
 ## Flow
 
 1. **Chat.** The prompt starts focused. No repository compaction runs at
-   start; the lead only gets a cheap, locally collected project summary (plus
-   `.decsr/context_pack.md` if one already exists). Type a task and press
+   start; the lead gets a short project map and reads the files itself (see
+   [The lead chat](#the-lead-chat)). Type a message and press
    `Enter` (`Alt+Enter` adds a new line). A second task in the same session is
    added to the existing graph (see [Sessions](#sessions)); you can send it
    while nodes run (see [Chatting while nodes run](#chatting-while-nodes-run)).
-2. **Split.** The lead (the `pm` agent's runner and model) splits the task into
+2. **Split.** When the message assigns work, the lead (the `pm` agent's runner
+   and model) splits it into
    nodes. Each node has a title, a description, the nodes it depends on, the
    role the lead gives it and a `writes` flag (see [Lean runs](#lean-runs)).
-   If the task is a question the project context already answers, the lead
+   If the message is a question or asks for an opinion, the lead
    answers it in the chat and adds no nodes. If the reply is unusable (no result, a dependency cycle, a
    dependency on a node that does not exist) you see one error line and can
    send the task again. If the lead gives several sub-tasks but no role for any
@@ -458,8 +460,8 @@ prompt and lands there.
 | Command | What it does |
 |---|---|
 | `/help [command]` | The commands by group; `/help <command>` shows its forms and an example |
-| `/clear` | Save this session and start a new, empty one (asks first when nodes are unfinished) |
-| `/compact` | Fold finished nodes into the session summary (see [Compact](#compact)) |
+| `/clear` | Save this session and start a new, empty one: no chat, graph, summary or lead conversation (asks first when nodes are unfinished) |
+| `/compact [focus]` | The lead summarizes the chat and the nodes, a new lead conversation starts from the summary, and finished nodes are folded (see [Compact](#compact)) |
 | `/resume` | Pick a saved session of this project |
 | `/rename <title>` | Set the title of this session (saved) |
 | `/export` | Write the session to `.decsr/exports/<session id>.md` (title, transcript, summary, each node with role, status, files and summary) |
@@ -508,7 +510,7 @@ Approving or cancelling a plan is `y` and `n` on the plan card; `/approve` and
 | Command | What it does |
 |---|---|
 | `/project` | Switch to another project (see [Switching project](#switching-project)) |
-| `/config [list\|get <key>\|set <key> <value>]` | Panel of the settings by section with their values; `Enter` edits one with the same checks as `set`. `get` shows one, or `set` changes one and save it in `project.yaml`. Keys are dotted, such as `workspace.max_parallel`, `workspace.isolation`, `workspace.budget_usd`, `workspace.coordinator`, `routing.mode`, `ui.theme`, `ui.icons`, `project.language`, `project.build_cmd`; a value is checked before it is saved. `ui.theme` and `ui.tmux` apply at the next start. `/config` and `/config list` open the panel; `/menu` opens the classic menu |
+| `/config [list\|get <key>\|set <key> <value>]` | Panel of the settings by section with their values; `Enter` edits one with the same checks as `set`. `get` shows one, or `set` changes one and save it in `project.yaml`. Keys are dotted, such as `workspace.max_parallel`, `workspace.isolation`, `workspace.budget_usd`, `workspace.coordinator`, `workspace.auto_compact`, `routing.mode`, `ui.theme`, `ui.icons`, `project.language`, `project.build_cmd`; a value is checked before it is saved. `ui.theme` and `ui.tmux` apply at the next start. `/config` and `/config list` open the panel; `/menu` opens the classic menu |
 | `/provider [list\|add <name>\|remove <name>\|test <name>]` | Panel of the saved providers and the keys set in the environment, masked: `a` adds, `x` removes (asks first), `t` tests the key under the cursor; `list` prints them in the chat; `add` opens the key entry (see [Connect a provider](#connect-a-provider)); `remove` asks first and deletes the saved key; `test` lists the models of the provider with its key |
 | `/memory [search <query>\|add <text>]` | Panel of the project memory (`MEMORY.md`, the pinned facts); `search` shows the best matches of the memory index and `add` appends a fact |
 | `/doctor` | Runs the setup checks of `decsr doctor` in the background and lists each as `✓`, `⚠` or `✗` with the fix hint |
@@ -552,7 +554,10 @@ project's sessions.
   (a dependency on an ID that is neither new nor in the graph still rejects the
   split). Build & test is reset to not started and waits for every work node
   again.
-- `/clear` saves the session and starts a new one. The old one stays in `/resume`.
+- `/clear` saves the session and starts a new one with an empty chat, an empty
+  graph, no summary and a new lead conversation. Nothing of the old session is
+  sent to the lead again. The old one stays in `/resume`, with its own lead
+  conversation. `/clear` is refused while the lead is working or nodes run.
 - `/resume` lists the project's sessions newest first (`title - 3/7 done - 2h
   ago`, the current one marked). `Enter` loads one (the current session is saved
   first), `d` deletes one after `y/n`, `Esc` closes. Nodes that were running
@@ -564,8 +569,24 @@ project's sessions.
 
 ### Compact
 
-`/compact` makes no model call. A finished work or fix node (status done) is
-removed from the graph and written into the session summary as one line:
+`/compact [focus]` asks the lead for one summary of the conversation. It gets the
+earlier summary, the chat lines of the current lead conversation, each node
+with its status, role, files and result, the open questions (nodes that ask or
+failed) and the optional focus. The call has no tools and the summary aims at
+2,000 tokens. Then:
+
+- `Session.Summary` becomes that summary and the lead conversation is dropped:
+  the next message starts a new conversation seeded with the summary.
+- The chat shows `compacted · ≈42K → 3K tokens`: the size before is the prompt
+  size of the lead's last turn (an estimate of what the call read when there was
+  no turn yet), the size after is an estimate of the summary.
+- Finished nodes are folded as described next and a second line says how many
+  (`folded 3 finished nodes; kept 1 that unfinished nodes still depend on`).
+- When the call fails nothing changes and the error is shown. `/compact` while
+  nodes run is refused, and it says `nothing to compact` when the session has no
+  chat, summary or nodes yet.
+
+Folding a finished work or fix node (status done) removes it from the graph and written into the session summary as one line:
 `- T1 <title> [<role>]: <first 400 characters of its summary> (files: a, b)`,
 but only when no unfinished node depends on it (every node that depends on it is
 folded too). A finished node that a todo, running or failed node still needs
@@ -573,16 +594,26 @@ stays, so that node keeps the work it builds on; the notice says how many were
 kept, for example `compacted 3 finished nodes; kept 1 that unfinished nodes
 still depend on`. Nodes that stay keep their edges to each other; a dependency
 on a removed node is dropped. Build & test stays. The summary is capped at
-12,000 characters (oldest lines go first). It is given to the lead on the next
-task and to every worker as an `Earlier in this session` section of its context
-(the most recent 4,000 characters). Running it again with nothing to fold says
-`nothing to compact`.
+12,000 characters (oldest lines go first). It is given to the lead on the first
+message of its next conversation and to every worker as an `Earlier in this
+session` section of its context (the most recent 4,000 characters).
 
-At autonomy level 2 and 3 `/compact` runs by itself once 10 or more work and
+At autonomy level 2 and 3 the finished nodes are folded by themselves, without
+a model call, once 10 or more work and
 fix nodes are done and nothing runs (not while automation is paused or the
 budget is reached). It writes `auto › compacted 10 finished nodes` and runs
 again only after the count has dropped below 10 and reached it again. At
 level 1 the prompt suggests `/compact` instead.
+
+**Auto-compact.** `workspace.auto_compact` (on by default, `/config`) compacts
+the lead's conversation by itself, only in front of a message you send: when
+the previous lead turn used more than 70% of the model's context window (200K
+for claude, 1M for a `1m` model, 128K for other runners; `max_context_tokens`
+of the `pm` agent overrides it), decsr runs the compaction first, prints
+`auto › compacted the conversation (≈150K → 3K tokens)` and then sends your
+message as the first turn of the new conversation. If the compaction fails, the
+message is sent in the old conversation. Nothing compacts in the background, on
+a timer or in an unattended run; with the setting off only `/compact` does.
 
 The cost of folded nodes is kept (`removed_cost_usd` in the graph) and still counts toward the spent total and the budget; the same holds for nodes the lead cancels.
 
@@ -836,6 +867,75 @@ asks the same question and installs one; the lead's requests only ever name
 catalog plugins, and a name that is neither in the catalog nor in an added
 marketplace is refused.
 
+### Installing from the chat
+
+Ask the lead in the chat: "install the code-review plugin", "add the GitHub MCP
+server". The lead looks the thing up with read-only commands (decsr's catalog
+and the marketplaces you added are in its prompt; it may also run `claude plugin
+list --available --json`, `claude plugin list --json`, `claude plugin
+marketplace list --json`, and `claude mcp list`). With exactly
+one match it proposes an install; with several or none it asks you in its reply
+(numbered options, one marked Recommended) or asks for the URL or command. It
+never invents a source. Workers are never given install commands.
+
+A proposal is an `===INSTALL===` section in the lead's reply, a JSON array of
+actions (`kind`, `name`, `source`, `args`, `transport`, `env`, `headers`,
+`scope`, `why`), closed by `===END===`. An action with an unknown kind, no name
+or source, or a scope other than `local` or `user` is dropped with a chat
+warning. decsr then shows one card per action, oldest first:
+
+```
+⬇ Install · Claude Code plugin · code-review@claude-plugins-official
+Reviews pull requests with specialised agents.
+runs: claude plugin install code-review@claude-plugins-official --scope local
+scope: this project only (local)
+› y install · n skip
+```
+
+Only `y` and `n` act on the card (no Enter, no number, no cursor), and only when
+the prompt is not focused, so typing never answers it. Esc hides it, `/answer`
+brings it back. Nothing installs without the `y`, at every autonomy level; an
+automation run never installs: it prints `⚠ install needs you: skipped <name>`
+and leaves an info item in the inbox. An install can run while nodes run (it
+does not touch their worktrees). Esc cancels a running install; it also stops
+after 3 minutes.
+
+| Kind | What `y` does | Scope |
+|---|---|---|
+| `decsr-plugin` | decsr's own installer, as `/plugin install` (the card is the confirmation; a marketplace you have not trusted asks its trust question first) | all projects (`~/.decsr/plugins`) |
+| `claude-plugin` | `claude plugin install <plugin>@<marketplace> --scope local --json` | `local` = this project only; `user` only when you asked for all projects |
+| `claude-mcp` | `claude mcp add --scope local --transport <t> <name> …` (argv, no shell) | same |
+
+Untrusted mark: the card shows `⚠ untrusted: …` for a Claude Code plugin whose
+marketplace is not `claude-plugins-official` (or not named), for a decsr plugin
+of a marketplace you have not trusted, and for every MCP server (it runs or
+connects to third-party code); a stdio server adds `this server will run:
+<program args>`, an http or sse server `connects to: <url>`.
+
+When a marketplace declares a command that runs while a Claude Code plugin
+installs, claude reports it instead of installing. decsr then shows a second
+card with the command in full and `⚠ this plugin runs a command when installed`;
+`y` runs the install again with `--accept-command <sha256>` for exactly that
+command. decsr never passes `-y`.
+
+Secrets: the lead writes `<ask>` where a secret belongs (an env value, a header
+such as `Authorization: Bearer <ask>`, an argument); a literal value under a
+name like `*_KEY`, `*_TOKEN` or `Authorization` is replaced by `<ask>` too. The
+card masks it as `••••`. After `y`, a hidden input asks for each value. The
+value goes only into the argv of the one `claude mcp add` command: decsr does
+not write it to the chat, the session file, the logs or its config (an error
+line that echoes it is masked). claude itself stores it in its own config, and
+other users of the machine can see it in the process list while the command
+runs. After a successful `claude mcp add` the chat adds `workers use it only on
+nodes the lead marks for MCP`: all other workers still run without MCP servers
+(see [MCP in nodes](#mcp-in-nodes)).
+
+Each outcome is one chat line: `✓ installed code-review (plugin, this
+project)`, `✓ installed github (MCP server, this project)` or `✗ install
+failed: <first error line>`. The session keeps name, kind, scope, result and
+time of each install (no secret value); `/compact` and the lead's next message
+carry them, so the lead knows what was installed.
+
 ### Recommended set
 
 `scripts/install-plugins.sh` (needs git; `--dry-run` previews, `--uninstall`
@@ -860,6 +960,52 @@ profile keeps what the project already has, so applying it only adds skills.
 Open decsr, run `/plugin` to see the plugins and `/model profile apply plugins` to apply
 the profile.
 
+## The lead chat
+
+Every message you type goes to the lead as one conversation. The lead answers
+in the chat (Markdown) and creates nodes only when the message assigns work.
+
+- **Reading.** The lead reads the project itself, with read-only tools. For
+  claude that is `Read`, `Grep`, `Glob` and `Bash` limited to `git log`,
+  `git diff`, `git status` and `git show` (`--permission-mode dontAsk`, no
+  `Write` or `Edit`, no MCP servers, no web, no build or test commands). codex
+  runs in its read-only sandbox, dsh in its read-only preset; opencode has no
+  read-only switch, so the lead prompt is what keeps it from writing. The lead
+  never edits a file: every change is made by a worker node, with the role and
+  agent the lead picks.
+- **When it creates nodes.** When you assign work: a change, a fix, a feature,
+  a refactor, tests or docs. Also one read-only reviewer node for a job too big
+  to read in one turn (a whole-project audit). A question, an explanation, an
+  opinion or a small review is answered in the chat. A reply that has no node
+  section is a plain answer: no plan card, no error and no second call. The
+  reply text that comes with new nodes is shown above the `split into ...` line.
+- **One conversation.** The session keeps the lead's own CLI conversation
+  (`lead_session_id`, `lead_runner`, `lead_model` in the session file). The
+  first turn keeps it and later turns resume it (claude `--resume`, codex
+  `exec resume`, opencode `--session`, dsh `--session-id`), sending only your
+  message and the live nodes, so the system prompt and the history stay cached.
+  When the lead's runner or model changes, or a resume fails, a new conversation
+  starts with the summary and the chat says so (`⚠ lead: could not resume the
+  conversation, started fresh with the summary`). Runners without tools (the API
+  presets: deepseek, openai, openrouter, groq, custom) make one call per
+  message without a conversation, with the project overview and the summary
+  every time.
+- **Project map.** The first message of a conversation carries a map instead of
+  file contents: the language, which of `AGENTS.md`, `CLAUDE.md`, `README*` and
+  `CONTRIBUTING*` exist, up to 30 paths under `doc/` and `docs/`, the 20 newest
+  `.decsr/exports/*.md`, the context pack if there is one and the project
+  memory notes (cut at 2K characters). The lead reads what it needs. `CLAUDE.md`
+  is not sent to claude, which loads it itself.
+- **Activity line.** While the lead works, one muted line under the message
+  shows its step: `lead · reading internal/runner/claude.go`,
+  `lead · searching "RateLimit"`, `lead · git log`. When the reply ends it
+  becomes `read 4 files · 2 searches` (nothing when no tool was used).
+- **Usage.** The lead's tokens count as the lead (`pm`) in `/usage`.
+- **Starting over.** `/clear` starts a new session and a new conversation;
+  `/compact` summarizes the conversation and starts a new one from the summary;
+  `workspace.auto_compact` does that before a message when the conversation is
+  near the context limit (see [Compact](#compact)).
+
 ## Lean runs
 
 A task runs only what it needs.
@@ -871,10 +1017,10 @@ A task runs only what it needs.
   roles the task needs: a review, question or audit is normally one sub-task by
   one role with `writes: false`, and `qa` or review sub-tasks are added only
   when you asked for them or the change is large.
-- **Direct answer.** A question the project context already answers (what the
-  project does, where something lives, an opinion on a plan) is answered by the
-  lead in the chat, as one call like a split: no nodes and no Build & test. A
-  question that needs more reading becomes one read-only node.
+- **Chat answer.** A question, an explanation, an opinion or a small review is
+  answered by the lead in the chat after it read the files it needs: no nodes
+  and no Build & test. A job that is too big to read in one turn (a whole-project
+  audit) becomes one read-only node.
 - **Answers.** When a `writes: false` node ends, its whole reply (without the
   closing `REPORT` block) is printed in the chat under `T1 · reviewer:`,
   rendered as Markdown like the lead's messages. The run summary line for the
@@ -938,14 +1084,17 @@ with the nodes, with an `auto ›` line, unless `routing.auto_approve` is `false
 
 Every prompt is kept small, because the agent steps send it again and again.
 
-- **One-shot calls** (the lead's split, a direct answer, the coordinator
-  review) run claude with all built-in tools off (`--tools ""`), so no tool
-  schemas are sent. Other runners have no such switch.
-- **The lead** gets the roles (each description cut to one short line), the
-  installed skills (id and a description of at most 80 characters), the
-  plugin catalog on one line per plugin, the project overview (structure, file
-  list, recent commits, capped at 10K characters, without source excerpts),
-  the summary of the finished work and, for a follow-up, the live graph.
+- **One-shot calls** (the coordinator review, `/compact`, and the lead of a
+  runner without tools) run claude with all built-in tools off (`--tools ""`), so no
+  tool schemas are sent. Other runners have no such switch.
+- **The lead** has a stable system prompt (rules, output format, roles with each
+  description cut to one short line, the installed skills with a description of
+  at most 80 characters, the plugin catalog on one line per plugin). Each message
+  carries your text and, when nodes exist, the live graph and the next free id.
+  The first message of a conversation also carries the project map and the
+  summary of the earlier work (see [The lead chat](#the-lead-chat)). A lead
+  without tools gets the project overview (structure, file list, recent commits,
+  capped at 10K characters, without source excerpts) instead of the map.
 - **A worker** gets the project context, the summaries and files of its
   dependencies, the skills of its role and its task. It does not get the source
   excerpts when it runs as an agent (it can read the files), nor the text its
@@ -993,6 +1142,39 @@ role; only the runner, model and effort are replaced. If the picked runner is
 not connected when the node starts, or its first call hits a rate limit, the
 node runs on the role's agent instead and the node records why. Cost is priced
 with the model that actually ran.
+
+### MCP in nodes
+
+A worker's own claude process runs MCP servers; decsr never runs one. A node
+runs without MCP unless the lead marks it: a sub-task has an optional
+`"mcp": ["github"]`, the server names as `claude mcp list` shows them (they can
+contain spaces and colons, such as `claude.ai Google Drive` or
+`plugin:open-design:open-design`). The lead looks the names up with that
+read-only command and marks a node only when the task needs a server's tools
+("read GitHub issue 12 through the GitHub MCP"). A name that is empty, longer
+than 80 characters or has control characters is dropped with a chat warning.
+
+For a marked node on the claude runner decsr drops the empty strict MCP config,
+so claude loads the servers you configured, and adds one allow rule per named
+server to `--allowedTools`: `mcp__<server>`, where `<server>` is the name with
+every character outside `A-Za-z0-9_-` replaced by `_` (`claude.ai Google Drive`
+becomes `mcp__claude_ai_Google_Drive`). The rule allows all tools of that
+server; with `--permission-mode dontAsk` the tools of every other server are
+refused. `--tools` still lists built-in tools only. Such a run (and a role with
+`mcp: true`) also passes `--setting-sources user,project,local`, because
+user-scope servers and claude.ai connectors are only read with the user source:
+an MCP node therefore also loads your global Claude settings (hooks included),
+and its tools are still limited by the allow list. A node without `mcp` keeps
+today's arguments. The role option `mcp: true` still keeps all your servers for
+every node of the role.
+
+The plan card shows `uses MCP: github, google-workspace` under the node, and a
+plan with an MCP node always waits for `y`, even when every node is read-only
+and at every autonomy level. An automation run stops with `needs you: T2 uses
+MCP` in the inbox instead of starting. On a node whose agent is not claude the
+card shows `⚠ MCP needs a claude agent; T2 will run without it` (`e` switches
+the agent); codex, opencode and dsh never get MCP. The lead and `/compact` see
+which nodes used MCP (`mcp: github`).
 
 ### Approval
 
@@ -1242,7 +1424,7 @@ each archived attempt, and resumes it with the CLI's own flag:
 
 | Runner | Id comes from | Resume |
 |---|---|---|
-| claude | `system`/`init` event, `session_id` | `--resume <id>` (a node run no longer passes `--no-session-persistence`; one-shot calls such as the lead split, direct answers, the coordinator review and pings still do) |
+| claude | `system`/`init` event, `session_id` | `--resume <id>` (a node run or a lead turn no longer passes `--no-session-persistence`; one-shot calls such as the coordinator review, `/compact` and pings still do) |
 | codex | `thread.started`, `thread_id` | `codex exec resume <id> -` (the prompt comes on stdin; the sandbox is set with `-c sandbox_mode=...`) |
 | opencode | `sessionID` of the events | `--session <id>` |
 | dsh | `session` event, `sessionId` | `--session-id <id>` |

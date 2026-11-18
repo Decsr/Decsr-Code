@@ -912,3 +912,19 @@ func TestMergeBuildCmd(t *testing.T) {
 		t.Errorf("build_cmd = %q, want ninja", dst.Project.BuildCmd)
 	}
 }
+
+func TestMerge_WorkspaceAutoCompact(t *testing.T) {
+	var dst Config
+	if !dst.Workspace.AutoCompactOn() {
+		t.Fatal("auto_compact is on by default")
+	}
+	off := false
+	merge(&dst, Config{Workspace: WorkspaceConfig{AutoCompact: &off}})
+	if dst.Workspace.AutoCompactOn() {
+		t.Fatal("auto_compact: false was not merged")
+	}
+	merge(&dst, Config{})
+	if dst.Workspace.AutoCompactOn() {
+		t.Fatal("an unset auto_compact must not reset the merged value")
+	}
+}

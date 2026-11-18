@@ -20,6 +20,11 @@ type TokenUsage struct {
 	CachedTokens int
 	OutputTokens int
 	Estimated    bool
+	// ContextTokens is the prompt size of the last model call of the run, the
+	// part of the conversation the model had in view. 0 when the runner does
+	// not report it; InputTokens then stands in for it. Unlike InputTokens it
+	// does not add up over the tool steps of one run.
+	ContextTokens int
 }
 
 // ConvMessage is a single turn in a conversation.

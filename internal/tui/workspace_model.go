@@ -41,7 +41,7 @@ const (
 
 const (
 	wsInputHint     = "Type a task, / for commands"
-	wsSplittingHint = "The lead is splitting your task…"
+	wsSplittingHint = "The lead is working on your message…"
 )
 
 // WorkspaceResult tells the caller why the Workspace closed.
@@ -67,10 +67,12 @@ type WorkspaceOptions struct {
 // wsDeps are the seams between the model and the outside world. The optional
 // ones fall back to the real implementations when nil.
 type wsDeps struct {
-	// split asks the lead to split task; earlier is the session summary and
-	// the current nodes ("" for a fresh session). existing are the node IDs
-	// already in the graph and next the first number for new sub-tasks.
-	split func(ctx context.Context, task, earlier string, existing []string, live []workspace.LiveNode, next int, routing bool, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error)
+	// split sends a message to the lead: its chat reply and the nodes it
+	// creates. The text and the tool activity stream into the stream.
+	split func(ctx context.Context, req wsLeadReq, stream *wsStream) (workspace.LeadResult, error)
+	// compact asks the lead for the summary of a conversation (/compact and
+	// the compaction before a message); nil disables it.
+	compact func(ctx context.Context, input string, onToken func(string)) (string, runner.TokenUsage, error)
 	// review asks the lead to review the graph after a batch (the coordinator);
 	// nil disables reviews.
 	review func(ctx context.Context, in workspace.ReviewInput) (workspace.ReviewResult, runner.TokenUsage, error)
@@ -98,6 +100,9 @@ type wsDeps struct {
 	installMarket func(ctx context.Context, repo string, e plugins.CatalogEntry) error
 	// fetchMarket reads the marketplace.json of a GitHub repo.
 	fetchMarket func(ctx context.Context, repo string) (plugins.MarketFetch, error)
+	// claudeCLI runs the claude program for the installs the lead proposed
+	// (plugin install, mcp add); nil runs the installed claude.
+	claudeCLI func(ctx context.Context, argv []string) (stdout, stderr string, err error)
 	// ghRun runs gh and git for /pr; nil runs the real programs.
 	ghRun workspace.CmdRunner
 	// notify sends a "needs you" note; nil sends nothing.
@@ -122,6 +127,9 @@ type wsDeps struct {
 }
 
 func (d *wsDeps) fillDefaults(root string) {
+	if d.claudeCLI == nil {
+		d.claudeCLI = workspace.ClaudeCLI{Dir: root}.Run
+	}
 	if d.listProfiles == nil {
 		d.listProfiles = config.ListProfiles
 	}
@@ -273,39 +281,64 @@ func RunWorkspace(root string, cfg config.Config, opts WorkspaceOptions) (Worksp
 		return out
 	}
 
+	// leadAgent is the config, the lead's agent and its runner.
+	leadAgent := func() (config.Config, config.AgentConfig, runner.LLMRunner, error) {
+		c := getCfg()
+		agents := make(map[string]config.AgentConfig, len(c.Agents))
+		for k, v := range c.Agents {
+			agents[k] = v
+		}
+		c.Agents = agents
+		runner.ApplyModelMemory(&c)
+		pm := c.Agents["pm"]
+		r, err := runner.New(pm, nil, c.PromptLanguage)
+		if err != nil {
+			return c, pm, nil, fmt.Errorf("lead runner: %w", err)
+		}
+		return c, pm, r, nil
+	}
+
 	var engMu sync.Mutex
 	var engines []*workspace.Engine
 	deps := wsDeps{
 		notify: wsSendNote,
 		cfg:    getCfg,
 		doctor: opts.Doctor,
-		split: func(ctx context.Context, task, earlier string, existing []string, live []workspace.LiveNode, next int, routing bool, onToken func(string)) (*workspace.Graph, runner.TokenUsage, error) {
-			c := getCfg()
-			agents := make(map[string]config.AgentConfig, len(c.Agents))
-			for k, v := range c.Agents {
-				agents[k] = v
-			}
-			c.Agents = agents
-			runner.ApplyModelMemory(&c)
-			pm := c.Agents["pm"]
-			r, err := runner.New(pm, nil, c.PromptLanguage)
+		split: func(ctx context.Context, req wsLeadReq, stream *wsStream) (workspace.LeadResult, error) {
+			c, pm, r, err := leadAgent()
 			if err != nil {
-				return nil, runner.TokenUsage{}, fmt.Errorf("lead runner: %w", err)
+				return workspace.LeadResult{}, err
 			}
-			pc := contextFor(pm.Runner, true, true)
-			if earlier != "" {
-				pc += "\n\n## Earlier in this session\n" + earlier
+			rn := leadRunnerName(pm)
+			tools := runner.CanResume(rn)
+			pc := ""
+			if tools {
+				pc = workspace.ProjectMap(root, lang.Resolve(c.Project.Language, root))
+			} else {
+				pc = contextFor(pm.Runner, true, true)
 			}
 			var raw strings.Builder
-			opts := workspace.SplitOptions{Plugins: plugins.Load(root), Catalog: plugins.Catalog(), Routing: routing, Live: live}
-			g, u, err := workspace.SplitOpts(ctx, r, pm.Model, task, workspace.Roles(c), pc, existing, next, opts, func(s string) {
+			turn := workspace.LeadTurn{
+				Task: req.task, Roles: workspace.Roles(c),
+				Opts:     workspace.SplitOptions{Plugins: plugins.Load(root), Catalog: plugins.Catalog(), Markets: plugins.LoadMarketplaces(), Routing: req.routing, Live: req.live},
+				Existing: req.existing, Next: req.next,
+				Runner: rn, Model: pm.Model, Dir: root, Tools: tools,
+				Conv: req.conv, Summary: req.summary, Context: pc,
+				Activity: &stream.act,
+			}
+			res, err := workspace.RunLead(ctx, r, turn, func(s string) {
 				raw.WriteString(s)
-				if onToken != nil {
-					onToken(s)
-				}
+				stream.add(s)
 			})
 			writeSplitRaw(root, raw.String())
-			return g, u, err
+			return res, err
+		},
+		compact: func(ctx context.Context, input string, onToken func(string)) (string, runner.TokenUsage, error) {
+			_, pm, r, err := leadAgent()
+			if err != nil {
+				return "", runner.TokenUsage{}, err
+			}
+			return workspace.RunCompact(ctx, r, pm.Model, input, onToken)
 		},
 		review: func(ctx context.Context, in workspace.ReviewInput) (workspace.ReviewResult, runner.TokenUsage, error) {
 			c := getCfg()
@@ -440,6 +473,7 @@ const (
 	wsOverlayAgent
 	wsOverlayHelp
 	wsOverlayPanel
+	wsOverlayInstallSecret
 )
 
 // wsConfirm is a pending y/n question. kind: quit | menu | clear | delsession
@@ -458,6 +492,8 @@ type wsStream struct {
 	mu   sync.Mutex
 	cur  string // text after the last newline
 	done string // last non-empty finished line
+	// act follows the lead's tool steps for the line under the reply.
+	act workspace.LeadActivity
 }
 
 const wsStreamCur = 8192
@@ -506,6 +542,14 @@ type (
 		g     *workspace.Graph
 		usage runner.TokenUsage
 		err   error
+		lead  workspace.LeadResult // the conversation and what the tools did
+	}
+	// wsCompactDoneMsg is the end of a compaction of the lead's conversation.
+	wsCompactDoneMsg struct {
+		gen     int
+		summary string
+		usage   runner.TokenUsage
+		err     error
 	}
 	wsEventMsg struct {
 		eng *workspace.Engine
@@ -633,33 +677,37 @@ type workspaceModel struct {
 	noticeErr     bool
 
 	// session and prompt
-	sess         *wsSess
-	nSaved       int                    // saved sessions of this project, for the empty state
-	sugDismissed string                 // suggestionKey of the suggestion hidden by Esc or accepting
-	spec         *workspace.SpecFeature // newest specs/*/tasks.md with an open task; nil = none
-	custom       []workspace.CustomCommand
-	plug         plugins.Set
-	input        textarea.Model
-	scroll       int // chat lines scrolled up from the newest
-	cmdIdx       int
-	cmdPicked    bool // the highlight was moved with the arrows
-	splitting    bool
-	startIssue   string  // /issue arguments to run at start
-	startCmd     tea.Cmd // command of the session opened at start
-	auto         *wsAuto // automation run; nil in a normal Workspace
-	splitGen     int
-	splitTask    string
-	cancelSplit  context.CancelFunc
-	stream       *wsStream
-	iso          *workspace.Isolator // worktree isolation of this session; nil = shared checkout
-	isoAnnounced bool                // the isolation line was shown
-	pr           wsPRState           // pull request loop (/pr)
-	autoPaused   bool                // S paused the automation of /autonomy
-	autoWarned   bool                // the lowered level 3 was announced
-	reviewDirty  bool                // a node ended since the last lead review
-	reviewing    bool                // a lead review is running
-	reviewGen    int
-	cancelReview context.CancelFunc
+	sess          *wsSess
+	nSaved        int                    // saved sessions of this project, for the empty state
+	sugDismissed  string                 // suggestionKey of the suggestion hidden by Esc or accepting
+	spec          *workspace.SpecFeature // newest specs/*/tasks.md with an open task; nil = none
+	custom        []workspace.CustomCommand
+	plug          plugins.Set
+	input         textarea.Model
+	scroll        int // chat lines scrolled up from the newest
+	cmdIdx        int
+	cmdPicked     bool // the highlight was moved with the arrows
+	splitting     bool
+	startIssue    string  // /issue arguments to run at start
+	startCmd      tea.Cmd // command of the session opened at start
+	auto          *wsAuto // automation run; nil in a normal Workspace
+	splitGen      int
+	splitTask     string
+	cancelSplit   context.CancelFunc
+	stream        *wsStream
+	leadKind      string              // what the lead is busy with: "" a message, "compact" or "auto" a compaction
+	afterCompact  *wsAfterCompact     // the message an automatic compaction goes before
+	compactAt     time.Time           // when the running compaction began
+	compactBefore int                 // tokens the running compaction starts from
+	iso           *workspace.Isolator // worktree isolation of this session; nil = shared checkout
+	isoAnnounced  bool                // the isolation line was shown
+	pr            wsPRState           // pull request loop (/pr)
+	autoPaused    bool                // S paused the automation of /autonomy
+	autoWarned    bool                // the lowered level 3 was announced
+	reviewDirty   bool                // a node ended since the last lead review
+	reviewing     bool                // a lead review is running
+	reviewGen     int
+	cancelReview  context.CancelFunc
 
 	// plugin install started from the dialog
 	installing    string               // plugin being installed; "" for none
@@ -668,6 +716,14 @@ type workspaceModel struct {
 	marketBusy    string               // marketplace being fetched; "" for none
 	installGen    int
 	cancelInstall context.CancelFunc
+
+	// installs the lead proposed (install cards)
+	installQ     []wsInstallItem // waiting for y or n, oldest first
+	instRun      *wsInstallRun   // a claude install in flight
+	instGen      int
+	instLeadName string       // decsr plugin a card started, for the session record
+	installNotes []string     // installs the next message to the lead reports
+	secretAsk    *wsSecretAsk // hidden input for the values marked <ask>
 
 	// layout: sidebar and activity feed
 	showGraph    bool                    // the main pane shows the graph; false = the activity feed
@@ -990,6 +1046,8 @@ func (m workspaceModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case wsSplitDoneMsg:
 		return m.onSplitDone(msg)
+	case wsCompactDoneMsg:
+		return m.onCompactDone(msg)
 	case wsRankMsg:
 		return m.onRank(msg)
 	case wsHistMsg:
@@ -1012,6 +1070,8 @@ func (m workspaceModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onOutDiff(msg)
 	case wsInstallMsg:
 		return m.onInstalled(msg)
+	case wsClaudeInstallMsg:
+		return m.onClaudeInstall(msg)
 	case wsPluginDataMsg:
 		return m.onPluginData(msg)
 	case wsMarketMsg:
@@ -1040,7 +1100,7 @@ func (m workspaceModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.checkStalls()
 		m.checkLimitRetries()
 		m, diffCmd := m.outDiffTick()
-		if m.splitting || m.reviewing || m.running() > 0 || m.installing != "" || m.hasLimitedAuto() {
+		if m.splitting || m.reviewing || m.running() > 0 || m.installing != "" || m.instRun != nil || m.hasLimitedAuto() {
 			return m, tea.Batch(wsTick(), diffCmd)
 		}
 		if diffCmd != nil {
@@ -1085,6 +1145,11 @@ func (m workspaceModel) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.screen == wsScreenDiff {
 		return m.diffKey(msg)
+	}
+	if k == "esc" && !m.paletteOpen() {
+		if nm, ok := m.cancelInstallRun(); ok {
+			return nm, nil
+		}
 	}
 	if m.splitting {
 		if k == "esc" {
@@ -1345,10 +1410,14 @@ func (m workspaceModel) earlierContext() string {
 	if s := strings.TrimSpace(m.sess.snapshot().Summary); s != "" {
 		parts = append(parts, "Finished and folded into this summary:\n"+s)
 	}
+	if s := installsContext(m.sess.snapshot().Installs); s != "" {
+		parts = append(parts, "Installs from this chat:\n"+s)
+	}
 	return strings.Join(parts, "\n\n")
 }
 
-// sendTask sends task to the lead; shown is what the chat displays.
+// sendTask sends task to the lead; shown is what the chat displays. When the
+// lead's conversation is near its context limit, it is compacted first.
 func (m workspaceModel) sendTask(task, shown string) (tea.Model, tea.Cmd) {
 	if m.reviewing || m.splitting {
 		m.say("system", "wait for the lead: it is still working on the last request (Esc cancels)")
@@ -1358,36 +1427,56 @@ func (m workspaceModel) sendTask(task, shown string) (tea.Model, tea.Cmd) {
 		m.say("system", "answer the plan card first: y applies the changes, n drops them")
 		return m, nil
 	}
+	auto := m.autoCompactDue()
+	compactIn := ""
+	if auto {
+		compactIn = m.compactInput("") // before the new message joins the chat
+	}
+	at := m.now()
+	m.say("you", shown)
+	m.input.Reset()
+	if auto {
+		return m.startCompact(compactIn, "auto", at, &wsAfterCompact{task, shown})
+	}
+	return m.startLead(task, shown)
+}
+
+// beginLead marks the lead as busy: the spinner, the stream and the cancel.
+func (m *workspaceModel) beginLead(shown string) (context.Context, int) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.splitGen++
-	gen := m.splitGen
 	m.splitting = true
 	m.splitTask = shown
 	m.cancelSplit = cancel
 	m.stream = &wsStream{}
-	m.say("you", shown)
-	m.input.Reset()
+	m.stream.act.Root = m.root
 	m.input.Placeholder = wsSplittingHint
-	earlier := m.earlierContext()
-	var existing []string
-	var live []workspace.LiveNode
-	next := 0
+	return ctx, m.splitGen
+}
+
+// startLead sends the message to the lead as one turn of its conversation.
+func (m workspaceModel) startLead(task, shown string) (tea.Model, tea.Cmd) {
+	ctx, gen := m.beginLead(shown)
+	m.leadKind = ""
+	sess := m.sess.snapshot()
+	task = m.takeInstallNotes() + task
+	req := wsLeadReq{task: task, summary: m.earlierContext(), conv: workspace.LeadConv{SessionID: sess.LeadSessionID, Runner: sess.LeadRunner, Model: sess.LeadModel}}
 	if m.hasNodes() {
 		for _, n := range m.g.Nodes {
-			existing = append(existing, n.ID)
+			req.existing = append(req.existing, n.ID)
 		}
 		if m.eng != nil {
-			live = workspace.LiveNodes(m.eng.Snapshot())
+			req.live = workspace.LiveNodes(m.eng.Snapshot())
 		} else {
-			live = workspace.LiveNodes(m.g)
+			req.live = workspace.LiveNodes(m.g)
 		}
-		next = max(m.sess.snapshot().NextID, nextWorkNumber(m.g))
+		req.next = max(sess.NextID, nextWorkNumber(m.g))
 	}
 	split, stream := m.deps.split, m.stream
-	routing := m.freezeRoutingMode() != config.RoutingManual
+	req.routing = m.freezeRoutingMode() != config.RoutingManual
 	cmd := func() tea.Msg {
-		g, u, err := split(ctx, task, earlier, existing, live, next, routing, stream.add)
-		return wsSplitDoneMsg{gen: gen, g: g, usage: u, err: err}
+		res, err := split(ctx, req, stream)
+		return wsSplitDoneMsg{gen: gen, g: res.Graph, usage: res.Usage, err: err, lead: res}
 	}
 	return m, tea.Batch(cmd, m.startTick())
 }
@@ -1399,6 +1488,13 @@ func (m workspaceModel) cancelSplitting() workspaceModel {
 	m.cancelSplit = nil
 	m.splitting = false
 	m.splitGen++
+	kind := m.leadKind
+	m.leadKind, m.afterCompact = "", nil
+	if kind == "compact" {
+		m.input.Placeholder = wsInputHint
+		m.say("error", "compact cancelled")
+		return m
+	}
 	m.restoreTask()
 	m.say("error", "split cancelled. Your text is still in the box")
 	return m
@@ -1411,18 +1507,22 @@ func (m workspaceModel) onSplitDone(msg wsSplitDoneMsg) (tea.Model, tea.Cmd) {
 	m.splitting = false
 	m.cancelSplit = nil
 	m.input.Placeholder = wsInputHint
+	if msg.err == nil || msg.lead.Conv.SessionID != "" {
+		m.keepLead(msg.lead)
+	}
 	if msg.err != nil {
 		m.restoreTask()
 		m.say("error", oneLine(msg.err.Error()))
 		return m, nil
 	}
-	if msg.g != nil && msg.g.Answer != "" {
-		m.sess.update(func(s *workspace.Session) {
-			s.In += msg.usage.InputTokens
-			s.Out += msg.usage.OutputTokens
-		})
+	m.sayLeadNotes(msg.lead)
+	if msg.g != nil && (msg.g.Answer != "" || (len(msg.g.Nodes) == 0 && len(msg.g.Changes) == 0 && (len(msg.g.Installs) > 0 || len(msg.g.InstallWarnings) > 0))) {
 		m.input.Reset()
-		m.say("lead", msg.g.Answer)
+		if msg.g.Answer != "" {
+			m.say("lead", msg.g.Answer)
+		}
+		m.sayTools()
+		m = m.queueInstalls(msg.g)
 		m.saveSession()
 		return m, nil
 	}
@@ -1431,10 +1531,10 @@ func (m workspaceModel) onSplitDone(msg wsSplitDoneMsg) (tea.Model, tea.Cmd) {
 		m.say("error", "the lead returned no sub-tasks. Try describing the task differently")
 		return m, nil
 	}
-	m.sess.update(func(s *workspace.Session) {
-		s.In += msg.usage.InputTokens
-		s.Out += msg.usage.OutputTokens
-	})
+	if msg.g.Chat != "" {
+		m.say("lead", msg.g.Chat)
+	}
+	m.sayTools()
 	m.input.Reset()
 	var next tea.Model
 	var cmd tea.Cmd
@@ -1456,6 +1556,7 @@ func (m workspaceModel) onSplitDone(msg wsSplitDoneMsg) (tea.Model, tea.Cmd) {
 	for _, w := range msg.g.SplitWarnings {
 		m.say("system", workspace.Sanitize(w))
 	}
+	m = m.queueInstalls(msg.g)
 	if m.autoActive() == autoManual {
 		m.notifySplitDone()
 	}
@@ -1630,6 +1731,9 @@ func (m workspaceModel) resetSession(s *workspace.Session) workspaceModel {
 	m.followups = nil
 	m.pendingChanges = nil
 	m.prStop()
+	m.stream, m.splitTask, m.leadKind, m.afterCompact = nil, "", "", nil
+	m.runEnded, m.autoCompactFired = nil, false
+	m.stallNoted, m.limitBackoff, m.askHidden = nil, nil, nil
 	m.outputs = map[string][]string{}
 	m.partial = map[string]string{}
 	m.outSize = map[string]int{}
@@ -2254,6 +2358,9 @@ func (m workspaceModel) overlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case wsOverlayConnect:
 		return m.connectKey(msg)
 
+	case wsOverlayInstallSecret:
+		return m.secretKey(msg)
+
 	case wsOverlayInbox:
 		return m.inboxKey(k)
 
@@ -2555,6 +2662,8 @@ func (m workspaceModel) overlayBox() string {
 		return m.conn.box(w)
 	case wsOverlaySessions, wsOverlayProjects, wsOverlayProfiles, wsOverlayText, wsOverlayInfo:
 		return m.listBox()
+	case wsOverlayInstallSecret:
+		return m.secretBox()
 	case wsOverlayInbox:
 		return m.inboxBox()
 	case wsOverlayPalette:
@@ -2624,6 +2733,9 @@ func (m workspaceModel) statusLine() string {
 	long := ""
 	if text == "" && m.installing != "" {
 		text = m.installLine()
+	}
+	if text == "" && m.instRun != nil {
+		text = m.installRunLine()
 	}
 	if text == "" {
 		text, long, isErr = m.guidanceParts()
@@ -2709,6 +2821,9 @@ func (m workspaceModel) guidanceParts() (short, long string, isErr bool) {
 	if running > 0 {
 		return fmt.Sprintf("%d running", running), fmt.Sprintf("%so shows output, s stops the selected node", via), false
 	}
+	if len(g.PendingApproval()) > 0 || len(m.pendingChanges) > 0 {
+		return "Waiting for your approval on the plan card (y / e / n)", "", false
+	}
 	unassigned := 0
 	for _, n := range g.Nodes {
 		if n.Kind == workspace.KindWork && n.Role == "" && n.Status == workspace.StatusTodo {
@@ -2782,10 +2897,13 @@ func (m workspaceModel) transcriptLines(w int, withStream bool) []string {
 	if m.splitting {
 		spin := pixelSpinner.Frames[m.spin%len(pixelSpinner.Frames)]
 		out = append(out, "  "+lipgloss.NewStyle().Foreground(ui.Accent).Bold(true).Render("lead ›")+" "+
-			lipgloss.NewStyle().Foreground(ui.Text).Render(spin+" splitting the task…  (Esc cancels)"))
+			lipgloss.NewStyle().Foreground(ui.Text).Render(spin+" "+m.leadLabel()+"  (Esc cancels)"))
 		if withStream && m.stream != nil {
 			if last := m.stream.lastLine(); last != "" {
 				out = append(out, "    "+lipgloss.NewStyle().Foreground(ui.Muted).Render(truncateOneLine(last, w-4)))
+			}
+			if step := m.stream.act.Line(); step != "" {
+				out = append(out, "    "+lipgloss.NewStyle().Foreground(ui.Muted).Render(truncateOneLine(step, w-4)))
 			}
 		}
 	}
@@ -2980,7 +3098,7 @@ func (m workspaceModel) titleLine() string {
 func (m workspaceModel) emptyPane(iw, ih int) []string {
 	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	var body []string
-	for _, l := range wrapText("No nodes yet. Describe a task below — the lead splits it into nodes and you assign the agents.", max(iw-4, 8)) {
+	for _, l := range wrapText("No nodes yet. Describe a task below — the lead splits it into nodes and you assign the agents. Questions get an answer in the chat.", max(iw-4, 8)) {
 		body = append(body, centerLine(dim.Render(l), iw))
 	}
 	if m.nSaved > 0 {

@@ -192,3 +192,33 @@ func TestStreamClaudeOutput_PermissionDenials(t *testing.T) {
 		t.Errorf("denials = %+v, want %+v", done.Denials, want)
 	}
 }
+
+func TestClaudeLeadArgsAreReadOnly(t *testing.T) {
+	args := claudeBaseArgs(true, false, LeadTools(), true)
+	got := strings.Join(args, " ")
+	want := `--output-format stream-json --verbose --strict-mcp-config --mcp-config {"mcpServers":{}} --setting-sources project,local ` +
+		`--tools Read,Grep,Glob,Bash ` +
+		`--allowedTools Read,Grep,Glob,Bash(git log:*),Bash(git diff:*),Bash(git status:*),Bash(git show:*),Bash(claude plugin list:*),Bash(claude plugin marketplace list:*),Bash(claude mcp list:*) --permission-mode dontAsk`
+	if got != want {
+		t.Errorf("args = %s", got)
+	}
+	for _, bad := range []string{"Write", "Edit", "--no-session-persistence"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("a lead turn must not have %s", bad)
+		}
+	}
+}
+
+func TestContextWindow(t *testing.T) {
+	for _, c := range []struct {
+		runner, model string
+		want          int
+	}{
+		{"claude", "claude-opus-5-5", 200000}, {"claude", "", 200000}, {"claude", "opus[1m]", 1000000},
+		{"codex", "gpt-5", 128000}, {"deepseek", "x", 128000},
+	} {
+		if got := ContextWindow(c.runner, c.model); got != c.want {
+			t.Errorf("ContextWindow(%q, %q) = %d, want %d", c.runner, c.model, got, c.want)
+		}
+	}
+}

@@ -64,7 +64,13 @@ func claudeBaseArgs(agent, mcp bool, allowed []string, keep bool) []string {
 	if !mcp {
 		args = append(args, "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`)
 	}
-	args = append(args, "--setting-sources", "project,local")
+	// User-scope MCP servers and claude.ai connectors are only read with the
+	// user source, so a run that loads MCP needs it; every other run does not.
+	sources := "project,local"
+	if mcp {
+		sources = "user,project,local"
+	}
+	args = append(args, "--setting-sources", sources)
 	if !agent {
 		return append(args, "--tools", "")
 	}
@@ -74,19 +80,70 @@ func claudeBaseArgs(agent, mcp bool, allowed []string, keep bool) []string {
 		"--permission-mode", "dontAsk")
 }
 
-// claudeToolNames is the distinct tool names of an allow list, so "Bash(git
-// status:*)" makes the Bash tool available.
+// MCPServerRule is the allow rule for every tool of one MCP server. Claude
+// names a server's tools mcp__<server>__<tool>, with each character of the
+// server name outside [A-Za-z0-9_-] replaced by "_" ("claude.ai Google Drive"
+// is claude_ai_Google_Drive). The bare form mcp__<server> allows all of them.
+func MCPServerRule(server string) string {
+	var sb strings.Builder
+	sb.WriteString("mcp__")
+	for _, r := range server {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+			sb.WriteRune(r)
+		default:
+			sb.WriteByte('_')
+		}
+	}
+	return sb.String()
+}
+
+// MCPServerRules is MCPServerRule for each name, once each.
+func MCPServerRules(servers []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, s := range servers {
+		if r := MCPServerRule(s); !seen[r] {
+			seen[r] = true
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// claudeToolNames is the distinct built-in tool names of an allow list, so
+// "Bash(git status:*)" makes the Bash tool available. MCP rules are left out:
+// --tools lists built-in tools only.
 func claudeToolNames(allowed []string) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, a := range allowed {
 		name, _, _ := strings.Cut(a, "(")
+		if strings.HasPrefix(name, "mcp__") {
+			continue
+		}
 		if name != "" && !seen[name] {
 			seen[name] = true
 			out = append(out, name)
 		}
 	}
 	return out
+}
+
+// LeadTools is the allow list of the lead's turns: files can be read and
+// searched and git can show history and changes. No file tool that writes, no
+// build or test command, and Claude runs the lead without MCP servers. The
+// claude plugin and MCP lookups only list: installing is done by decsr after
+// the user's key press.
+func LeadTools() []string {
+	tools := []string{"Read", "Grep", "Glob"}
+	for _, g := range []string{"log", "diff", "status", "show"} {
+		tools = append(tools, "Bash(git "+g+":*)")
+	}
+	for _, c := range []string{"plugin list", "plugin marketplace list", "mcp list"} {
+		tools = append(tools, "Bash(claude "+c+":*)")
+	}
+	return tools
 }
 
 // readOnlyBash are the shell commands that cannot write, allowed for every
@@ -295,9 +352,10 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 			denials = claudeDenials(evt.PermissionDenials)
 			if in := evt.Usage.promptTokens(); in > 0 || evt.Usage.OutputTokens > 0 {
 				finalUsage = TokenUsage{
-					InputTokens:  in,
-					CachedTokens: evt.Usage.cachedTokens(),
-					OutputTokens: evt.Usage.OutputTokens,
+					InputTokens:   in,
+					CachedTokens:  evt.Usage.cachedTokens(),
+					OutputTokens:  evt.Usage.OutputTokens,
+					ContextTokens: liveUsage.lastPrompt,
 				}
 				gotUsage = true
 			}
@@ -436,6 +494,8 @@ type claudeLiveUsage struct {
 	byID  map[string]claudeStreamUsageFields
 	extra []claudeStreamUsageFields // messages without an ID
 	last  TokenUsage
+	// lastPrompt is the prompt size of the newest assistant message.
+	lastPrompt int
 }
 
 // add records one assistant message and returns the cumulative usage when it
@@ -444,6 +504,9 @@ func (l *claudeLiveUsage) add(m claudeStreamMessage) *TokenUsage {
 	u := m.Usage
 	if u.promptTokens() == 0 && u.OutputTokens == 0 {
 		return nil
+	}
+	if p := u.promptTokens(); p > 0 {
+		l.lastPrompt = p
 	}
 	if m.ID != "" {
 		if l.byID == nil {

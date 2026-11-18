@@ -84,9 +84,15 @@ type wsHarness struct {
 	live      [][]workspace.LiveNode // the live graph handed to every split call
 	existing  [][]string             // node IDs passed to every split call
 	nexts     []int                  // first new number passed to every split call
-	summary   func() string          // session summary hook given to the engine
-	recent    []RecentProject
-	splitCmd  tea.Cmd // command of the split that started last
+	convs     []workspace.LeadConv   // the conversation handed to every split call
+	// leadHook changes what the fake lead returns (its conversation, context).
+	leadHook   func(*workspace.LeadResult)
+	stream     *wsStream // the stream of the last split call
+	compactIns []string  // input of every compaction call
+	compactErr error
+	summary    func() string // session summary hook given to the engine
+	recent     []RecentProject
+	splitCmd   tea.Cmd // command of the split that started last
 	// keepPending leaves the proposed agents of a split unapproved.
 	keepPending bool
 }
@@ -127,16 +133,29 @@ func newWSHarnessAt(t *testing.T, root string) *wsHarness {
 	t.Helper()
 	h := &wsHarness{t: t, root: root, exec: &wsFakeExec{}, graph: wsFixtureGraph, checks: []string{"go build ./...", "go test ./..."}}
 	deps := wsDeps{
-		split: func(_ context.Context, task, earlier string, existing []string, live []workspace.LiveNode, next int, _ bool, _ func(string)) (*workspace.Graph, runner.TokenUsage, error) {
-			h.tasks = append(h.tasks, task)
-			h.existing = append(h.existing, existing)
-			h.nexts = append(h.nexts, next)
-			h.earlier = append(h.earlier, earlier)
-			h.live = append(h.live, live)
+		split: func(_ context.Context, req wsLeadReq, stream *wsStream) (workspace.LeadResult, error) {
+			h.stream = stream
+			h.tasks = append(h.tasks, req.task)
+			h.existing = append(h.existing, req.existing)
+			h.nexts = append(h.nexts, req.next)
+			h.earlier = append(h.earlier, req.summary)
+			h.live = append(h.live, req.live)
+			h.convs = append(h.convs, req.conv)
 			if h.splitErr != nil {
-				return nil, runner.TokenUsage{}, h.splitErr
+				return workspace.LeadResult{}, h.splitErr
 			}
-			return h.graph(), runner.TokenUsage{InputTokens: 100, OutputTokens: 50}, nil
+			res := workspace.LeadResult{Graph: h.graph(), Usage: runner.TokenUsage{InputTokens: 100, OutputTokens: 50}}
+			if h.leadHook != nil {
+				h.leadHook(&res)
+			}
+			return res, nil
+		},
+		compact: func(_ context.Context, input string, _ func(string)) (string, runner.TokenUsage, error) {
+			h.compactIns = append(h.compactIns, input)
+			if h.compactErr != nil {
+				return "", runner.TokenUsage{}, h.compactErr
+			}
+			return "SUMMARY of the chat", runner.TokenUsage{InputTokens: 40, OutputTokens: 10}, nil
 		},
 		newEngine: func(g *workspace.Graph, save func(*workspace.Graph) error, summary func() string, _ *workspace.Isolator) *workspace.Engine {
 			h.summary = summary
@@ -215,11 +234,12 @@ func (h *wsHarness) send(msg tea.Msg) tea.Cmd {
 	was := h.m.splitting
 	next, cmd := h.m.Update(msg)
 	h.m = next.(workspaceModel)
+	_, compactDone := msg.(wsCompactDoneMsg)
 	if _, ok := msg.(wsSplitDoneMsg); ok && !h.keepPending && h.m.eng != nil && len(h.m.eng.PendingApproval()) > 0 {
 		h.m.eng.ApproveAssignments() // the tests that are not about the approval start from approved agents
 		h.m.g = h.m.eng.Snapshot()
 	}
-	if h.m.splitting && !was {
+	if h.m.splitting && (!was || compactDone) {
 		h.splitCmd = cmd
 	}
 	return cmd
@@ -270,14 +290,25 @@ func (h *wsHarness) finishSplit() {
 	if h.splitCmd == nil {
 		h.t.Fatal("no split is pending")
 	}
-	h.send(splitResult(h.t, h.splitCmd))
+	h.send(leadResult(h.t, h.splitCmd))
 }
 
 // splitResult runs cmd (a split command, possibly in a batch with a tick) and
 // returns the wsSplitDoneMsg it produces.
 func splitResult(t *testing.T, cmd tea.Cmd) wsSplitDoneMsg {
 	t.Helper()
-	out := make(chan wsSplitDoneMsg, 1)
+	msg, ok := leadResult(t, cmd).(wsSplitDoneMsg)
+	if !ok {
+		t.Fatal("the command did not end a split")
+	}
+	return msg
+}
+
+// leadResult runs cmd (a lead command, possibly in a batch with a tick) and
+// returns the wsSplitDoneMsg or wsCompactDoneMsg it produces.
+func leadResult(t *testing.T, cmd tea.Cmd) tea.Msg {
+	t.Helper()
+	out := make(chan tea.Msg, 1)
 	var run func(c tea.Cmd)
 	run = func(c tea.Cmd) {
 		if c == nil {
@@ -285,7 +316,7 @@ func splitResult(t *testing.T, cmd tea.Cmd) wsSplitDoneMsg {
 		}
 		go func() {
 			switch msg := c().(type) {
-			case wsSplitDoneMsg:
+			case wsSplitDoneMsg, wsCompactDoneMsg:
 				select {
 				case out <- msg:
 				default:
@@ -302,9 +333,9 @@ func splitResult(t *testing.T, cmd tea.Cmd) wsSplitDoneMsg {
 	case msg := <-out:
 		return msg
 	case <-time.After(3 * time.Second):
-		t.Fatal("the split command produced no result")
+		t.Fatal("the lead command produced no result")
 	}
-	return wsSplitDoneMsg{}
+	return nil
 }
 
 // sendTask types text, sends it and delivers the split result.
@@ -316,6 +347,18 @@ func (h *wsHarness) sendTask(text string) {
 		h.t.Fatalf("Enter did not start a split:\n%s", h.view())
 	}
 	h.finishSplit()
+	for h.m.splitting { // a compaction ahead of the message
+		h.finishSplit()
+	}
+}
+
+// compact runs /compact and delivers the lead's summary.
+func (h *wsHarness) compact(args string) {
+	h.t.Helper()
+	h.typeCmd("/compact" + args)
+	if h.m.splitting {
+		h.finishSplit()
+	}
 }
 
 // typeCmd types a command line (one key per rune) and presses Enter.
@@ -364,7 +407,7 @@ func TestWorkspaceSendSplitsAndShowsGraph(t *testing.T) {
 	h := newWSHarness(t)
 	h.m.input.SetValue("Build a todo CLI")
 	h.key("enter")
-	h.want("splitting the task")
+	h.want("thinking…")
 	h.want("you › Build a todo CLI")
 	h.finishSplit()
 	h.want("Data model")

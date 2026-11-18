@@ -189,6 +189,7 @@ var settings = []Setting{
 	intSetting("workspace.budget_warn_pct", "Workspace", "share of the budget that raises a warning (0 = 80)", 0, 100, func(c *Config) *int { return &c.Workspace.BudgetWarnPct }),
 	boolSetting("workspace.coordinator", "Workspace", "the lead reviews each finished batch", func(c *Config) *bool { return &c.Workspace.Coordinator }),
 	ptrBoolSetting("workspace.limit_auto_retry", "Workspace", "retry a node by itself after a usage limit", true, func(c *Config) **bool { return &c.Workspace.LimitAutoRetry }),
+	ptrBoolSetting("workspace.auto_compact", "Workspace", "compact the lead's chat before a message near the context limit", true, func(c *Config) **bool { return &c.Workspace.AutoCompact }),
 	textSetting("workspace.pr_base", "Workspace", "base branch of /pr (empty = the checked-out branch)", func(c *Config) *string { return &c.Workspace.PRBase }, nil),
 	textSetting("workspace.pr_remote", "Workspace", "remote of /pr (empty = origin)", func(c *Config) *string { return &c.Workspace.PRRemote }, nil),
 	intSetting("workspace.max_ci_fixes", "Workspace", "fix rounds of /pr watch (0 = 3)", 0, 20, func(c *Config) *int { return &c.Workspace.MaxCIFixes }),

@@ -28,14 +28,16 @@ const (
 // fix nodes.
 var reservedKeyRe = regexp.MustCompile(`^(CHECK|F[0-9]+)$`)
 
-// BuildSplitPrompt assembles the lead's system prompt.
-func BuildSplitPrompt(task string, roles []Role, projectContext string) string {
-	return buildSplitPrompt(task, roles, projectContext, nil, 0, SplitOptions{})
+// BuildSplitPrompt assembles the lead's system prompt. It is the same text on
+// every turn for the same roles, so the conversation keeps it cached.
+func BuildSplitPrompt(roles []Role) string {
+	return buildSplitPrompt(roles, SplitOptions{})
 }
 
-// followUpRules is added to the prompt when the graph already has nodes. live
-// is the graph as it is now; without it only the IDs are listed.
-func followUpRules(existing []string, next int, live []LiveNode) string {
+// followUpMessage is the part of a lead message that describes the graph when
+// it already has nodes: the nodes with their live state and the next free id.
+// live is the graph as it is now; without it only the IDs are listed.
+func followUpMessage(existing []string, next int, live []LiveNode) string {
 	if len(existing) == 0 {
 		return ""
 	}
@@ -43,23 +45,10 @@ func followUpRules(existing []string, next int, live []LiveNode) string {
 		next = nextAfter(existing)
 	}
 	if len(live) == 0 {
-		return fmt.Sprintf("\n## Follow-up task\n\n"+
-			"The graph already has these nodes: %s.\n"+
-			"- Number the new sub-tasks from `T%d` upward. Never reuse an existing ID.\n"+
-			"- You MAY list an existing ID in `depends_on` when the new work needs that node's result.\n",
-			strings.Join(existing, ", "), next)
+		return fmt.Sprintf("## Nodes in the graph\n\n%s\n\nNext free id: T%d.", strings.Join(existing, ", "), next)
 	}
-	return fmt.Sprintf("\n## Follow-up task\n\n"+
-		"The graph already has these nodes (status, role, description, files touched so far; nodes marked running may still change more files):\n\n%s\n\n"+
-		"- Number the new sub-tasks from `T%d` upward. Never reuse an existing ID.\n"+
-		"- Add new sub-tasks only for what the user's new task asks. Keep every other node as it is.\n"+
-		"- A new sub-task that touches a file a running or waiting node touches, or needs that node's result, MUST list it in `depends_on`: it then waits in the queue.\n"+
-		"- Change an existing node only when the new task requires it, in an optional CHANGES section before ===END===:\n\n"+
-		"===CHANGES===\n"+
-		"[{\"node\":\"T3\",\"action\":\"update\",\"description\":\"...\",\"depends_on\":[\"T1\"],\"reason\":\"...\"},\n"+
-		" {\"node\":\"T4\",\"action\":\"cancel\",\"reason\":\"...\"},\n"+
-		" {\"node\":\"T2\",\"action\":\"note\",\"message\":\"...\",\"reason\":\"...\"}]\n\n"+
-		"`update` (new description, optionally a new `depends_on`) and `cancel` are only for nodes that have not started (todo). `note` is for a running node (it continues with it after its current attempt) or a finished one (it starts a new attempt that continues its conversation). `reason` is one short line the user sees. Running nodes are never stopped. When the new task needs no new sub-task, use `[]` under TASKS.\n",
+	return fmt.Sprintf("## Nodes in the graph\n\n"+
+		"Status, role, description and files touched so far; nodes marked running may still change more files.\n\n%s\n\nNext free id: T%d.",
 		liveSection(live), next)
 }
 
@@ -76,7 +65,7 @@ func nextAfter(ids []string) int {
 	return top + 1
 }
 
-func buildSplitPrompt(task string, roles []Role, projectContext string, existing []string, next int, opts SplitOptions) string {
+func buildSplitPrompt(roles []Role, opts SplitOptions) string {
 	var sb strings.Builder
 	for _, r := range roles {
 		if r.ReadOnly {
@@ -91,10 +80,8 @@ func buildSplitPrompt(task string, roles []Role, projectContext string, existing
 		"{{ROLES}}", strings.TrimRight(sb.String(), "\n"),
 		"{{SKILLS}}", skillsSection(opts.Plugins),
 		"{{CATALOG}}", catalogSection(opts.Plugins, opts.Catalog),
+		"{{MARKETS}}", marketsSection(opts.Markets),
 		"{{ROUTING}}", routingSection(opts.Routing),
-		"{{FOLLOWUP}}", followUpRules(existing, next, opts.Live),
-		"{{TASK}}", task,
-		"{{PROJECT_CONTEXT}}", projectContext,
 	).Replace(p)
 }
 
@@ -105,6 +92,7 @@ type splitTask struct {
 	Role        string   `json:"role"`
 	DependsOn   []string `json:"depends_on"`
 	Skills      []string `json:"skills"`
+	MCP         []string `json:"mcp"`
 	Difficulty  string   `json:"difficulty"`
 	Reason      string   `json:"reason"`
 	// Writes is false for a read-only sub-task; a missing field means true.
@@ -130,6 +118,7 @@ func (t *splitTask) UnmarshalJSON(data []byte) error {
 		DependsOnC   []string `json:"dependsOn"`
 		Deps         []string `json:"deps"`
 		Skills       idList   `json:"skills"`
+		MCP          mcpNames `json:"mcp"`
 		Difficulty   string   `json:"difficulty"`
 		Grade        string   `json:"grade"`
 		Size         string   `json:"size"`
@@ -154,6 +143,7 @@ func (t *splitTask) UnmarshalJSON(data []byte) error {
 	t.Role = first(raw.Role, raw.Agent, raw.Assignee, raw.Owner)
 	t.DependsOn = raw.DependsOn
 	t.Skills = raw.Skills
+	t.MCP = raw.MCP
 	t.Difficulty = first(raw.Difficulty, raw.Grade, raw.Size)
 	t.Reason = first(raw.Reason, raw.DiffReason)
 	t.Writes = raw.Writes == nil || *raw.Writes
@@ -186,15 +176,26 @@ func ParseSplitWith(task, output string, roles []Role, existing []string) (*Grap
 // dropped too.
 func ParseSplitOpts(task, output string, roles []Role, existing []string, opts SplitOptions) (*Graph, error) {
 	changes, changeWarns := parseChanges(output, opts.Live, newTaskKeys(output))
+	installs, installWarns := parseInstalls(output)
+	chat := chatText(output)
+	// withInstalls attaches the install actions to a graph that is returned.
+	withInstalls := func(g *Graph) *Graph {
+		g.Installs = installs
+		g.InstallWarnings = installWarns
+		return g
+	}
 	tasksRaw, ok := section(output, markerTasks)
 	if !ok {
 		if answer, found := section(output, markerAnswer); found {
 			if answer == "" {
 				return nil, fmt.Errorf("split: the lead's answer is empty")
 			}
-			return &Graph{Task: task, Answer: answer}, nil
+			return withInstalls(&Graph{Task: task, Answer: answer}), nil
 		}
 		if len(changes) == 0 {
+			if chat != "" || len(installs) > 0 || len(installWarns) > 0 {
+				return withInstalls(&Graph{Task: task, Answer: chat}), nil
+			}
 			return nil, fmt.Errorf("split: no %s section in the lead's answer", markerTasks)
 		}
 		tasksRaw = "[]"
@@ -204,13 +205,16 @@ func ParseSplitOpts(task, output string, roles []Role, existing []string, opts S
 		return nil, fmt.Errorf("split: the lead's answer was not valid JSON (%s)", shortReason(err))
 	}
 	if len(tasks) == 0 && len(changes) == 0 {
+		if chat != "" || len(installs) > 0 || len(installWarns) > 0 {
+			return withInstalls(&Graph{Task: task, Answer: chat}), nil
+		}
 		return nil, fmt.Errorf("split: the lead returned no tasks")
 	}
 	if len(tasks) > maxSplitTasks {
 		return nil, fmt.Errorf("split: too many sub-tasks (%d, max %d)", len(tasks), maxSplitTasks)
 	}
 
-	g := &Graph{Task: task}
+	g := &Graph{Task: task, Chat: chat}
 	if title, ok := section(output, markerTitle); ok {
 		g.Title = Sanitize(strings.SplitN(strings.TrimSpace(title), "\n", 2)[0])
 	}
@@ -281,6 +285,11 @@ func ParseSplitOpts(task, output string, roles []Role, existing []string, opts S
 		if len(dropped) > 0 {
 			warns = append(warns, fmt.Sprintf("%s: skill %s is not installed or suggested, dropped", nd.ID, strings.Join(dropped, ", ")))
 		}
+		var badMCP []string
+		nd.MCP, badMCP = CleanMCPNames(t.MCP)
+		if len(badMCP) > 0 {
+			warns = append(warns, fmt.Sprintf("%s: MCP server name %q is not valid, dropped", nd.ID, strings.Join(badMCP, ", ")))
+		}
 		nd.ReadOnlyTask = !t.Writes
 		if role := splitRole(t.Role, known); role != "" {
 			nd.SuggestedRole = role
@@ -312,6 +321,7 @@ func ParseSplitOpts(task, output string, roles []Role, existing []string, opts S
 
 	g.PluginRequests = reqs
 	g.SplitWarnings = append(warns, changeWarns...)
+	withInstalls(g)
 	g.Changes = changes
 
 	// External dependencies are checked apart: Validate only knows g's nodes.
@@ -351,62 +361,6 @@ func ParseSplitOpts(task, output string, roles []Role, existing []string, opts S
 }
 
 const splitRetryMsg = `Your answer is missing the "role" (and possibly "depends_on") fields. Output the complete answer again in the exact format, with a role for every sub-task and depends_on wherever one sub-task needs another's files.`
-
-// Split asks the lead to split task and parses the answer. When the graph has
-// several nodes and the lead suggested no role at all, it asks once more.
-func Split(ctx context.Context, r runner.LLMRunner, model string, task string, roles []Role, projectContext string, onToken func(string)) (*Graph, runner.TokenUsage, error) {
-	return SplitWith(ctx, r, model, task, roles, projectContext, nil, onToken)
-}
-
-// SplitWith is Split for a follow-up task: existing lists the IDs already in
-// the graph, which the lead may depend on and must not reuse. New sub-tasks
-// are numbered after the highest existing T number.
-func SplitWith(ctx context.Context, r runner.LLMRunner, model string, task string, roles []Role, projectContext string, existing []string, onToken func(string)) (*Graph, runner.TokenUsage, error) {
-	return SplitNext(ctx, r, model, task, roles, projectContext, existing, 0, onToken)
-}
-
-// SplitNext is SplitWith with an explicit first number for the new sub-tasks
-// (0 = after the highest existing T number).
-func SplitNext(ctx context.Context, r runner.LLMRunner, model string, task string, roles []Role, projectContext string, existing []string, next int, onToken func(string)) (*Graph, runner.TokenUsage, error) {
-	return SplitOpts(ctx, r, model, task, roles, projectContext, existing, next, SplitOptions{}, onToken)
-}
-
-// SplitOpts is SplitNext with the plugins the lead may use or suggest.
-func SplitOpts(ctx context.Context, r runner.LLMRunner, model string, task string, roles []Role, projectContext string, existing []string, next int, opts SplitOptions, onToken func(string)) (*Graph, runner.TokenUsage, error) {
-	req := runner.CompletionRequest{
-		SystemPrompt: buildSplitPrompt(task, roles, projectContext, existing, next, opts),
-		Model:        model,
-		Messages:     []runner.ConvMessage{{Role: "user", Content: task}},
-	}
-	raw, usage, err := splitComplete(ctx, r, req, onToken)
-	if err != nil {
-		return nil, usage, err
-	}
-	g, err := ParseSplitOpts(task, raw, roles, existing, opts)
-	if err != nil {
-		return nil, usage, err
-	}
-	if g.Answer != "" || len(g.Nodes) < 2 || anySuggestedRole(g) {
-		return g, usage, nil
-	}
-	req.Messages = append(append([]runner.ConvMessage(nil), req.Messages...),
-		runner.ConvMessage{Role: "assistant", Content: raw},
-		runner.ConvMessage{Role: "user", Content: splitRetryMsg})
-	raw2, usage2, err := splitComplete(ctx, r, req, onToken)
-	usage.InputTokens += usage2.InputTokens
-	usage.OutputTokens += usage2.OutputTokens
-	usage.Estimated = usage.Estimated || usage2.Estimated
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, usage, err
-		}
-		return g, usage, nil
-	}
-	if g2, err := ParseSplitOpts(task, raw2, roles, existing, opts); err == nil && anySuggestedRole(g2) {
-		return g2, usage, nil
-	}
-	return g, usage, nil
-}
 
 func anySuggestedRole(g *Graph) bool {
 	for _, n := range g.Nodes {
@@ -456,12 +410,23 @@ func section(s, marker string) (string, bool) {
 	}
 	rest := s[i+len(marker):]
 	end := len(rest)
-	for _, m := range []string{markerTitle, markerTasks, markerNewRoles, markerPlugins, markerChanges, markerAnswer, markerEnd} {
+	for _, m := range []string{markerTitle, markerTasks, markerNewRoles, markerPlugins, markerChanges, markerInstall, markerAnswer, markerEnd} {
 		if j := strings.Index(rest, m); j >= 0 && j < end {
 			end = j
 		}
 	}
 	return strings.TrimSpace(rest[:end]), true
+}
+
+// chatText is the reply the lead wrote before its first section marker.
+func chatText(s string) string {
+	end := len(s)
+	for _, m := range []string{markerTitle, markerTasks, markerNewRoles, markerPlugins, markerChanges, markerInstall, markerAnswer, markerEnd} {
+		if j := strings.Index(s, m); j >= 0 && j < end {
+			end = j
+		}
+	}
+	return strings.TrimSpace(s[:end])
 }
 
 func upperKey(s string) string { return strings.ToUpper(strings.TrimSpace(s)) }

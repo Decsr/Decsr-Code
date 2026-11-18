@@ -92,6 +92,10 @@ func (m workspaceModel) autoStartCmd() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// autoTaskPrefix makes the task of an automation an assignment, so the lead
+// creates nodes for it instead of only answering in the chat.
+const autoTaskPrefix = "This is an assigned task: create the nodes for it.\n\n"
+
 // Update runs the Workspace update and, for an automation, checks afterwards
 // whether the run is done.
 func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -100,7 +104,7 @@ func (m workspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.(type) {
 	case wsAutoTaskMsg:
-		return m.sendTask(m.auto.opts.Task, m.auto.opts.Task)
+		return m.sendTask(autoTaskPrefix+m.auto.opts.Task, m.auto.opts.Task)
 	case wsAutoTimeoutMsg:
 		return m.autoFinish("timed out", notify.Failed, fmt.Sprintf("automation %s timed out", m.auto.opts.Name))
 	}
@@ -123,8 +127,14 @@ func (m workspaceModel) autoObserve(msg tea.Msg) {
 	a := m.auto
 	switch msg := msg.(type) {
 	case wsSplitDoneMsg:
-		if msg.err != nil && msg.gen == m.splitGen && m.splitting {
-			a.startErr = oneLine(msg.err.Error())
+		if msg.gen == m.splitGen && m.splitting {
+			switch {
+			case msg.err != nil:
+				a.startErr = oneLine(msg.err.Error())
+			case msg.g != nil && msg.g.Answer != "":
+				// The reply is in the chat. Nothing else would end the run.
+				a.startErr = "the lead only answered in the chat and created no nodes: " + truncateOneLine(oneLine(msg.g.Answer), 120)
+			}
 		}
 	case wsIssueMsg:
 		switch {
@@ -206,6 +216,9 @@ func (m workspaceModel) autoVerdict() (result string, level notify.Level, note s
 	}
 	if len(m.g.Runnable()) > 0 {
 		return "", 0, "", false
+	}
+	if ids := mcpNodeIDs(m.g.PendingApproval()); len(ids) > 0 {
+		return "needs you: " + mcpNeedsYou(ids), notify.NeedsYou, fmt.Sprintf("automation %s needs you", name), true
 	}
 	needsYou := func() (string, notify.Level, string, bool) {
 		return "needs you", notify.NeedsYou, fmt.Sprintf("automation %s needs you", name), true

@@ -27,7 +27,7 @@ func TestSettingsAreUniqueAndComplete(t *testing.T) {
 func TestSettingApplyValidates(t *testing.T) {
 	good := map[string]string{
 		"workspace.max_parallel": "5", "workspace.isolation": "shared", "workspace.budget_usd": "$2.5",
-		"workspace.budget_warn_pct": "90", "workspace.coordinator": "on", "workspace.limit_auto_retry": "off",
+		"workspace.budget_warn_pct": "90", "workspace.coordinator": "on", "workspace.limit_auto_retry": "off", "workspace.auto_compact": "off",
 		"routing.mode": "auto-role", "routing.auto_approve": "no", "ui.theme": "light", "ui.icons": "ascii",
 		"ui.markdown": "off", "project.language": "Go", "project.test_cmd": "go test ./...", "workspace.pr_base": `""`,
 	}
@@ -61,7 +61,7 @@ func TestSettingGet(t *testing.T) {
 	c := DefaultConfig()
 	for k, want := range map[string]string{
 		"workspace.isolation": "auto", "routing.mode": "manual", "ui.theme": "auto", "ui.markdown": "on",
-		"workspace.coordinator": "off", "workspace.limit_auto_retry": "on", "workspace.max_parallel": "",
+		"workspace.coordinator": "off", "workspace.limit_auto_retry": "on", "workspace.auto_compact": "on", "workspace.max_parallel": "",
 		"project.max_fix_attempts": "3", "prompt_language": "English",
 	} {
 		s, _ := FindSetting(k)

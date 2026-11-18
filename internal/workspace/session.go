@@ -58,8 +58,22 @@ type Session struct {
 	RoutingMode string `json:"routing_mode,omitempty"`
 	// Reviews are the lead's batch reviews, oldest first, at most MaxReviews.
 	Reviews []Review `json:"reviews,omitempty"`
+	// LeadSessionID is the id of the lead's own CLI conversation, LeadRunner
+	// and LeadModel the agent that holds it. A turn resumes it while the lead
+	// agent stays the same; "" starts a new conversation.
+	LeadSessionID string `json:"lead_session_id,omitempty"`
+	LeadRunner    string `json:"lead_runner,omitempty"`
+	LeadModel     string `json:"lead_model,omitempty"`
+	// LeadContext is the prompt size of the lead's last turn, in tokens.
+	LeadContext int `json:"lead_context,omitempty"`
+	// LeadSince is when the current lead conversation began: the chat lines
+	// from then on are what /compact summarizes.
+	LeadSince time.Time `json:"lead_since,omitempty"`
 	// InboxDismissed are the IDs of the inbox info items the user cleared with x.
 	InboxDismissed []string `json:"inbox_dismissed,omitempty"`
+	// Installs are the installs proposed in the chat that ran, failed or were
+	// skipped by an automation run. They hold no secret value.
+	Installs []InstallRecord `json:"installs,omitempty"`
 }
 
 // DiffNote is a review note on one line of a node's diff. Side is "new" for an

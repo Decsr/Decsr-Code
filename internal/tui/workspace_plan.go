@@ -104,6 +104,26 @@ func newWorkNodes(g *workspace.Graph, before map[string]bool) []*workspace.Node 
 	return out
 }
 
+// mcpNodeIDs are the IDs of the pending nodes the lead marked for MCP.
+func mcpNodeIDs(pend []*workspace.Node) []string {
+	var ids []string
+	for _, n := range pend {
+		if len(n.MCP) > 0 {
+			ids = append(ids, n.ID)
+		}
+	}
+	return ids
+}
+
+// mcpNeedsYou is "T2 uses MCP" or "T2, T3 use MCP".
+func mcpNeedsYou(ids []string) string {
+	verb := "use"
+	if len(ids) == 1 {
+		verb = "uses"
+	}
+	return strings.Join(ids, ", ") + " " + verb + " MCP"
+}
+
 // startReadOnlyPlan approves and starts a split whose work nodes all have
 // writes false, without the plan card. It does nothing when a node writes or
 // has no defined role (a new role needs the card), in an automation run, when
@@ -115,8 +135,8 @@ func (m workspaceModel) startReadOnlyPlan(fresh []*workspace.Node) (workspaceMod
 	}
 	ids := make([]string, 0, len(fresh))
 	for _, n := range fresh {
-		if !n.ReadOnlyTask || n.Role == "" {
-			return m, nil
+		if !n.ReadOnlyTask || n.Role == "" || len(n.MCP) > 0 {
+			return m, nil // a node that uses MCP always needs the card
 		}
 		ids = append(ids, n.ID)
 	}
