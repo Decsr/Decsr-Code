@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Workspace: `/usage` shows the plan limits like claude's own `/usage`: a meter
+  per window (current session 5h, current week, Opus and Sonnet weeks when
+  reported) with the share used, a warning past the warning level and the reset
+  time, on the Session and Limits tabs; `/status` gets a `Plan limits` line.
+  They are read from the `rate_limit_event` lines the claude CLI prints and
+  kept in `~/.decsr/plan-limits.json`; decsr asks no account endpoint, starts
+  no run to refresh them and does not act on them.
 - Workspace: you can chat while nodes run. A task you type goes to the lead at
   once (it says "wait for the lead" only while the lead is still planning or
   reviewing, and asks you to answer an open plan card first). The lead gets the
@@ -81,6 +88,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cmake` and `ctest` are used. Projects without presets are unchanged.
 
 ### Changed
+- Workspace: the `/` command list is a box of fixed size (as wide as the prompt
+  box, always the same height), bare or filtered, with fixed name and args
+  columns where long names are cut with `…`; the `@` node list keeps a fixed
+  height too.
 - Fewer tokens per call. One-shot claude calls (the lead's split, a direct
   answer, the coordinator review) now run with `--tools ""`: before, the
   built-in tool schemas were still sent (about 15K input tokens per call, and a

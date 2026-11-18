@@ -149,9 +149,11 @@ func (m workspaceModel) completeMention(c wsCommand) workspaceModel {
 	return m
 }
 
-// mentionLines is the "@" node list drawn above the prompt, at most maxRows.
-func (m workspaceModel) mentionLines(maxRows int) []string {
-	if !m.mentionOpen() || maxRows <= 0 {
+// mentionLines is the "@" node list drawn above the prompt, at most maxRows
+// lines and boxW cells wide. Its height is fixed: rows are padded with blanks.
+func (m workspaceModel) mentionLines(maxRows, boxW int) []string {
+	rows := min(cmdPalMaxRows+1, maxRows)
+	if !m.mentionOpen() || rows <= 0 {
 		return nil
 	}
 	matches := m.mentionMatches()
@@ -159,10 +161,14 @@ func (m workspaceModel) mentionLines(maxRows int) []string {
 	if len(matches) == 0 {
 		pal = []string{lipgloss.NewStyle().Foreground(ui.Fail).Render("! no such node")}
 	} else {
-		pal = renderCmdList(matches, m.cmdIdx, m.width-2, maxRows)
+		pal = renderCmdList(matches, m.cmdIdx, boxW, rows)
+	}
+	blank := strings.Repeat(" ", boxW)
+	for len(pal) < rows {
+		pal = append(pal, blank)
 	}
 	for i := range pal {
-		pal[i] = " " + pal[i]
+		pal[i] = "  " + pal[i]
 	}
 	return pal
 }

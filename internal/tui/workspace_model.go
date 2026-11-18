@@ -3151,20 +3151,25 @@ func (m workspaceModel) promptBox() []string {
 }
 
 // paletteLines is the "/" command list drawn right above the prompt box, at
-// most maxRows lines.
-func (m workspaceModel) paletteLines(maxRows int) []string {
+// most maxRows lines and boxW cells wide (the width of the prompt box).
+func (m workspaceModel) paletteLines(maxRows, boxW int) []string {
 	if m.mentionOpen() {
-		return m.mentionLines(maxRows)
+		return m.mentionLines(maxRows, boxW)
 	}
 	if !m.paletteOpen() || maxRows <= 0 {
 		return nil
 	}
 	matches := m.cmdMatches(m.input.Value())
-	var pal []string
-	if len(matches) == 0 {
-		pal = []string{ui.ResultLine(ui.ResultError, "no such command")}
-	} else if pal = renderCmdPalette(matches, m.input.Value(), m.cmdIdx, m.width-2, maxRows); pal == nil {
-		pal = renderCmdList(matches, m.cmdIdx, m.width-2, maxRows)
+	pal := renderCmdPalette(matches, m.input.Value(), m.cmdIdx, boxW, maxRows)
+	if pal == nil { // too short for the box: a plain list, as tall as the room
+		if len(matches) == 0 {
+			pal = []string{lipgloss.NewStyle().Foreground(ui.Muted).Render("no command matches " + strings.TrimSpace(m.input.Value()))}
+		} else {
+			pal = renderCmdList(matches, m.cmdIdx, boxW, maxRows)
+		}
+		for len(pal) < maxRows {
+			pal = append(pal, strings.Repeat(" ", boxW))
+		}
 	}
 	for i := range pal {
 		pal[i] = "  " + pal[i]
@@ -3219,7 +3224,7 @@ func (m workspaceModel) mainView() string {
 	w, h := m.width, m.height
 	box := m.promptBox()
 	chatRows, fixed := m.mainLayout(box)
-	pal := m.paletteLines(h - fixed - 6)
+	pal := m.paletteLines(h-fixed-6, ansi.StringWidth(box[0])-2)
 	mainH := h - fixed - len(pal)
 	// Rows the graph does not need go to the chat, as far as it has lines.
 	if spare := mainH - m.graphRows(); spare > 0 && m.hasNodes() && !m.feedMode() {

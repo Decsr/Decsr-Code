@@ -417,8 +417,13 @@ last, Plugin commands). While you type, the list keeps the commands that match
 and ranks them: names that start with what you typed first, then names that
 contain it, then names that hold the letters in order. Each row shows the
 name (the matched letters underlined in the group colour), a short args hint,
-the description and, at the right, the group. Eight rows show at once; the
-last line says `↓ N more · ↑↓ Tab`. Move with `Up`/`Down`, complete with `Tab`,
+the description and, at the right, the group. The list is a box of fixed size,
+as wide as the prompt box and always the same height (eight rows, a hint line
+and the borders), whether the query is bare or filtered, short lists are padded
+with blank rows and no match says `no command matches /xyz` in the first row.
+The name and args columns have fixed widths and a longer text is cut with `…`,
+so the columns never move. The `@` node list has a fixed height too. The hint
+line says `↓ N more · ↑↓ Tab` when rows are hidden. Move with `Up`/`Down`, complete with `Tab`,
 run with `Enter`. `Enter` runs a command only
 when the text is an exact command name or alias, when you moved the highlight
 with `Up`/`Down` (or completed with `Tab`), or when exactly one command matches
@@ -492,7 +497,7 @@ Approving or cancelling a plan is `y` and `n` on the plan card; `/approve` and
 
 | Command | What it does |
 |---|---|
-| `/usage` | Panel with the tabs Session, Budget, History and Limits. Session: tokens in and out and the cost per role with its agent (`runner · model · effort`), a total row and the budget meter; `n` switches to one row per node. Budget: the spending per runner, the models without a price and the budget; `Enter` types an amount or `off`. History: sessions, tokens and cost of today, 7 days and 30 days, a sparkline of the daily tokens and the table by agent, read from the saved sessions of this project; a cost is only what the configured prices give, `–` when there is no price. Limits: the last limit each runner printed when it limited a node, with its reset time, read from the saved sessions. decsr asks no account or usage service for it |
+| `/usage` | Panel with the tabs Session, Budget, History and Limits. Session: the totals of the session (tokens in and out, cache, cost), the plan limits, then the tokens and cost per role with its agent (`runner · model · effort`), a total row and the budget meter; `n` switches to one row per node. Plan limits are like the claude `/usage` screen: one meter per window (`Current session (5h)`, `Current week (all models)`, and the Opus or Sonnet week when claude reports them) with the share used, a `⚠ over 75%` mark past the warning level and the reset time. They come from the `rate_limit_event` lines the claude CLI prints during every run (the lead, a claude node, the classic pipeline) and are kept in `~/.decsr/plan-limits.json`, so they show the state of the last claude run (`as of 14:02`, marked `(stale)` when a window has reset since) and update on the next one. decsr never asks the account for them, never starts a run to refresh them and nothing waits or retries because of them. Codex, opencode and dsh report none. Budget: the spending per runner, the models without a price and the budget; `Enter` types an amount or `off`. History: sessions, tokens and cost of today, 7 days and 30 days, a sparkline of the daily tokens and the table by agent, read from the saved sessions of this project; a cost is only what the configured prices give, `–` when there is no price. Limits: the same plan limits, then the last limit each runner printed when it limited a node, with its reset time, read from the saved sessions. decsr asks no account or usage service for it |
 | `/usage cost` | The Session tab with a row per node |
 | `/usage budget [amount\|off]` | The Budget tab; `/usage budget 10` sets this session's budget, `/usage budget off` removes that override (see [Cost and budget](#cost-and-budget)) |
 | `/status` | One panel: version, project and language, session title and whether it works in a worktree or the shared checkout; the runners with how they are available (claude shows `subscription (unattended runs need a key)` or `API key`); the providers with masked keys; plugins on and off; routing, autonomy, coordinator, parallel limit and the budget used; today's sessions, tokens and cost; and `⚠ N warnings · /doctor for details` from the doctor checks |

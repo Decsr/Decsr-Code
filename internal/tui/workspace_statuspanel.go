@@ -30,6 +30,7 @@ type statusIn struct {
 	parallel                                     int
 	today                                        *usageSpan // nil while the sessions are read
 	warnings                                     int
+	plan                                         string // plan limits line, "" when none reported
 	doctorDone                                   bool
 }
 
@@ -109,6 +110,9 @@ func statusLines(in statusIn) []string {
 	} else {
 		lines = append(lines, "  "+plainText(fmt.Sprintf("%d %s · %s tokens · %s", in.today.sessions, pluralize(in.today.sessions, "session", "sessions"), ui.Num(in.today.tokens), in.today.costCell())))
 	}
+	if in.plan != "" {
+		lines = append(lines, "  "+kv("Plan limits", in.plan))
+	}
 	lines = append(lines, "")
 	switch {
 	case !in.doctorDone:
@@ -167,6 +171,7 @@ func (m workspaceModel) statusInput() statusIn {
 		spent := m.use().spent
 		in.budget = fmt.Sprintf("%s of %s (%d%%)", ui.Money(spent), ui.Money(limit), int(spent/limit*100+0.5))
 	}
+	in.plan = planStatusLine(m.now())
 	if m.panel.probe != nil {
 		in.runnersLoaded = true
 		in.runners = runnerStatuses(m.panel.probe, claudeAuthMode())

@@ -51,3 +51,8 @@ Re-read these when a check is unclear or a rule may have changed:
 - Refused commands (claude runner): a command is allowed only by the user's
   key press on its card; no autonomy level and no automation run allows one.
 - `/autonomy 3` on a subscription: **open**, it needs a warning or a block.
+- Plan limits in `/usage` and `/status`: pass. They come only from the
+  `rate_limit_event` lines the claude CLI prints during runs the user started,
+  saved in `~/.decsr/plan-limits.json`. decsr calls no account endpoint, starts
+  no run to refresh them, and nothing schedules, retries or waits based on
+  these numbers.

@@ -12,9 +12,8 @@ import (
 
 const (
 	cmdPalMaxRows = 8  // command rows shown at once
-	cmdPalMinW    = 40 // narrowest box content
-	cmdPalNameW   = 16 // widest name column before the rest is pushed right
-	cmdPalArgsW   = 18 // widest args column before a hint is cut with …
+	cmdPalNameW   = 24 // name column; a longer name is cut with …
+	cmdPalArgsW   = 18 // args column; a longer hint is cut with …
 )
 
 // cmdMatchPositions says whether query (typed after the slash, lower case)
@@ -81,18 +80,29 @@ type palEntry struct {
 	cmd    int // index into the matches; -1 for a header
 }
 
-// renderCmdPalette draws the "/" palette as a rounded box: grouped under
-// headers while the query is bare, ranked with a group tag at the right while
-// typing. It shows at most cmdPalMaxRows commands, and at most maxRows lines
-// in all, keeps idx visible and ends with "↓ N more · ↑↓ Tab" when rows are
-// hidden. width is the room the box may use.
+// cmdPalCols are the widths of the name and args columns for a box content
+// width: fixed for a given width, whatever rows are shown.
+func cmdPalCols(inner int) (nameW, argsW int) {
+	return min(cmdPalNameW, max(inner/4, 8)), min(cmdPalArgsW, max(inner/4, 0))
+}
+
+// renderCmdPalette draws the "/" palette as a rounded box of a fixed size:
+// width cells wide, and always the same number of lines (up to cmdPalMaxRows
+// rows, one hint line and the borders; fewer only when maxRows is smaller).
+// The rows are grouped under headers while the query is bare, ranked with a
+// group tag at the right while typing; short lists are padded with blank
+// rows, and no match says so in the first row. The name and args columns have
+// fixed widths, longer text is cut with …. idx stays visible; the hint line
+// counts the rows that are hidden.
 func renderCmdPalette(cmds []wsCommand, typed string, idx, width, maxRows int) []string {
-	if len(cmds) == 0 || maxRows < 3 || width < cmdPalMinW/2 {
+	rows := min(cmdPalMaxRows, maxRows-3)
+	inner := width - 4
+	if rows < 1 || inner < 20 {
 		return nil
 	}
 	q := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(typed)), "/")
 	bare := q == ""
-	idx = min(max(idx, 0), len(cmds)-1)
+	idx = min(max(idx, 0), max(len(cmds)-1, 0))
 
 	var entries []palEntry
 	if bare {
@@ -110,74 +120,38 @@ func renderCmdPalette(cmds []wsCommand, typed string, idx, width, maxRows int) [
 		}
 	}
 
-	// The window: cmdPalMaxRows rows (headers count as rows when bare), cut
-	// to the lines the screen leaves, one of them kept for the "more" line.
-	vis := min(cmdPalMaxRows, maxRows-2)
+	// The window: rows lines, headers counting as rows when bare.
 	selLine := 0
 	for i, e := range entries {
 		if e.cmd == idx {
 			selLine = i
 		}
 	}
-	more := len(entries) > vis
-	if more {
-		vis = max(min(cmdPalMaxRows, maxRows-3), 1)
-	}
 	start := 0
-	if selLine >= vis {
-		start = selLine - vis + 1
+	if selLine >= rows {
+		start = selLine - rows + 1
 	}
-	if bare && start > 0 && entries[start].cmd >= 0 && start-1 >= 0 && entries[start-1].cmd < 0 {
+	if bare && start > 0 && entries[start].cmd >= 0 && entries[start-1].cmd < 0 {
 		start-- // keep the group header of the first visible row
 	}
-	end := min(start+vis, len(entries))
-	for start > 0 && end-start < vis { // nothing left below: show a full page
+	end := min(start+rows, len(entries))
+	for start > 0 && end-start < rows { // nothing left below: show a full page
 		start--
 	}
 
-	maxName := 0
-	for _, c := range cmds {
-		maxName = max(maxName, ansi.StringWidth(c.name))
-	}
-	nameW := min(maxName, cmdPalNameW)
+	nameW, argsW := cmdPalCols(inner)
 	argsOf := func(c wsCommand) string {
-		a := c.args
 		if c.hint != "" {
-			a = c.hint
+			return c.hint
 		}
-		return a
+		return c.args
 	}
-	// The args column is as wide as the longest hint among the shown rows,
-	// capped; no shown row with args means no column.
-	argsW := 0
-	for _, e := range entries[start:end] {
-		if e.cmd >= 0 {
-			argsW = max(argsW, ansi.StringWidth(argsOf(cmds[e.cmd])))
-		}
-	}
-	argsW = min(argsW, cmdPalArgsW)
-	// Natural width of the content: marker, name, args, description, tag.
-	natural := cmdPalMinW
-	for _, e := range entries[start:end] {
-		if e.cmd < 0 {
-			continue
-		}
-		c := cmds[e.cmd]
-		w := 2 + max(nameW, ansi.StringWidth(c.name)) + 2 + ansi.StringWidth(c.desc)
-		if argsW > 0 {
-			w += argsW + 2
-		}
-		if !bare {
-			w += 2 + ansi.StringWidth(groupTag(c.group))
-		}
-		natural = max(natural, w)
-	}
-	inner := min(natural, width-4)
-	if inner < 20 {
-		return nil
-	}
-
+	blank := strings.Repeat(" ", inner)
 	var lines []string
+	if len(cmds) == 0 {
+		msg := ansi.Truncate("no command matches /"+q, inner, "…")
+		lines = append(lines, lipgloss.NewStyle().Foreground(ui.Muted).Render(msg))
+	}
 	for _, e := range entries[start:end] {
 		if e.cmd < 0 {
 			lines = append(lines, lipgloss.NewStyle().Foreground(ui.GroupColor(e.header)).Bold(true).Render(strings.ToUpper(e.header)))
@@ -185,29 +159,38 @@ func renderCmdPalette(cmds []wsCommand, typed string, idx, width, maxRows int) [
 		}
 		lines = append(lines, cmdPalRow(cmds[e.cmd], q, e.cmd == idx, bare, inner, nameW, argsW, argsOf(cmds[e.cmd])))
 	}
-	if more {
-		below, above := 0, 0
-		for i, e := range entries {
-			if e.cmd < 0 {
-				continue
-			}
-			switch {
-			case i >= end:
-				below++
-			case i < start:
-				above++
-			}
-		}
-		note := fmt.Sprintf("↓ %d more · ↑↓ Tab", below)
-		if below == 0 {
-			note = fmt.Sprintf("↑ %d above · ↑↓ Tab", above)
-		}
-		lines = append(lines, lipgloss.NewStyle().Foreground(ui.Muted).Render(note))
+	for len(lines) < rows {
+		lines = append(lines, blank)
 	}
 
+	below, above := 0, 0
+	for i, e := range entries {
+		if e.cmd < 0 {
+			continue
+		}
+		switch {
+		case i >= end:
+			below++
+		case i < start:
+			above++
+		}
+	}
+	note := ""
+	switch {
+	case above > 0 && below > 0:
+		note = fmt.Sprintf("↑ %d above · ↓ %d more · ↑↓ Tab", above, below)
+	case below > 0:
+		note = fmt.Sprintf("↓ %d more · ↑↓ Tab", below)
+	case above > 0:
+		note = fmt.Sprintf("↑ %d above · ↑↓ Tab", above)
+	}
+	lines = append(lines, lipgloss.NewStyle().Foreground(ui.Muted).Render(note))
+
 	bc := ui.Border
-	if c := cmds[idx]; c.group != "" {
-		bc = ui.GroupColor(c.group)
+	if len(cmds) > 0 {
+		if c := cmds[idx]; c.group != "" {
+			bc = ui.GroupColor(c.group)
+		}
 	}
 	bs := lipgloss.NewStyle().Foreground(bc)
 	out := []string{bs.Render("╭" + strings.Repeat("─", inner+2) + "╮")}
@@ -237,14 +220,18 @@ func cmdPalRow(c wsCommand, q string, sel, bare bool, inner, nameW, argsW int, a
 		hit[p+1] = true // the slash is rune 0
 	}
 	var name strings.Builder
-	for i, r := range []rune(c.name) {
+	nr := []rune(c.name)
+	if len(nr) > nameW {
+		nr = append(nr[:max(nameW-1, 0)], '…')
+	}
+	for i, r := range nr {
 		st := bg(lipgloss.NewStyle().Foreground(ui.Text).Bold(sel))
 		if hit[i] {
 			st = st.Foreground(gc).Underline(true).Bold(true)
 		}
 		name.WriteString(st.Render(string(r)))
 	}
-	nw := ansi.StringWidth(c.name)
+	nw := len(nr)
 	dim := bg(lipgloss.NewStyle().Foreground(ui.Muted))
 	gap := dim.Render(strings.Repeat(" ", max(nameW-nw, 0)+2))
 

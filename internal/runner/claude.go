@@ -250,6 +250,10 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 			if evt.Subtype == "init" && (evt.Model != "" || evt.SessionID != "") {
 				ch <- Token{Model: evt.Model, SessionID: evt.SessionID}
 			}
+		case "rate_limit_event":
+			if evt.RateLimitInfo != nil {
+				recordClaudeRateLimit(*evt.RateLimitInfo, time.Now())
+			}
 		case "assistant":
 			if p := liveUsage.add(evt.Message); p != nil {
 				ch <- Token{Progress: p}
@@ -376,6 +380,8 @@ type claudeStreamEvent struct {
 	// PermissionDenials is set on the result event: the tool calls the
 	// permission mode refused.
 	PermissionDenials []claudePermissionDenial `json:"permission_denials"`
+	// RateLimitInfo is set on a rate_limit_event: the plan windows.
+	RateLimitInfo *claudeRateLimitInfo `json:"rate_limit_info"`
 }
 
 type claudePermissionDenial struct {

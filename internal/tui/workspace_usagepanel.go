@@ -477,7 +477,16 @@ func (m workspaceModel) usageSessionBody(inner int) []string {
 		nodes = len(m.g.Nodes)
 	}
 	head := fmt.Sprintf("This session · %d %s · %s", nodes, pluralize(nodes, "node", "nodes"), sessionAge(m.now().Sub(s.CreatedAt)))
-	body := []string{plainText(head)}
+	cached := 0
+	if m.g != nil {
+		for _, n := range m.g.Nodes {
+			cached += n.CachedTokens
+		}
+	}
+	totals := fmt.Sprintf("in %s · out %s · cache %s · %s", formatTokensCompact(u.total.in), formatTokensCompact(u.total.out), formatTokensCompact(cached), u.total.costCell())
+	body := []string{plainText(head), dimText(totals), ""}
+	body = append(body, planLimitLines(inner, m.now())...)
+	body = append(body, "")
 	tok := func(r useRow, n int) string {
 		if r.estimated {
 			return "~" + ui.Num(n)
@@ -504,10 +513,9 @@ func (m workspaceModel) usageSessionBody(inner int) []string {
 		}
 	}
 	if len(rows) == 0 {
-		return append(body, "", dimText("no node has used tokens yet"))
+		return append(body, dimText("no node has used tokens yet"))
 	}
 	rows = append(rows, []string{"total", "", tok(u.total, u.total.in), tok(u.total, u.total.out), u.total.costCell()})
-	body = append(body, "")
 	body = append(body, ui.Table(ui.TableOpts{Cols: cols, Rows: rows, Header: ui.GroupColor(ui.GroupNameUsage), Width: inner})...)
 	if u.folded > 0 {
 		body = append(body, dimText(fmt.Sprintf("the total includes %s of folded or cancelled nodes", ui.Money(u.folded))))
@@ -596,11 +604,12 @@ func (m workspaceModel) usageHistoryBody(inner int) []string {
 }
 
 func (m workspaceModel) usageLimitsBody(inner int) []string {
+	plan := append(planLimitLines(inner, m.now()), "")
 	if !m.panel.loaded {
-		return []string{dimText("reading the saved sessions of this project…")}
+		return append(plan, dimText("reading the saved sessions of this project…"))
 	}
 	if len(m.panel.limits) == 0 {
-		return []string{dimText("No runner has reported a limit in the saved sessions of this project.")}
+		return append(plan, dimText("No runner has reported a limit in the saved sessions of this project."))
 	}
 	now := m.now()
 	var rows [][]string
@@ -610,5 +619,6 @@ func (m workspaceModel) usageLimitsBody(inner int) []string {
 	body := ui.Table(ui.TableOpts{
 		Cols: []ui.Col{{Title: "RUNNER"}, {Title: "HIT"}, {Title: "STATE"}, {Title: "MESSAGE"}},
 		Rows: rows, Header: ui.GroupColor(ui.GroupNameUsage), Width: inner})
+	body = append(plan, body...)
 	return append(body, "", dimText("What each runner last printed when it limited a node."), dimText("decsr asks no account or usage service."))
 }

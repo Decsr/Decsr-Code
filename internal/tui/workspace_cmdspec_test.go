@@ -233,10 +233,11 @@ func TestRankCommands(t *testing.T) {
 func TestCmdPaletteShowsTheMockup(t *testing.T) {
 	withColorProfile(t, termenv.Ascii)
 	lines := renderCmdPalette(rankCommands(builtinCommands(), "/pl"), "/pl", 0, 100, 12)
-	if len(lines) != 3 {
+	if len(lines) != cmdPalMaxRows+3 {
 		t.Fatalf("%d lines: %q", len(lines), lines)
 	}
-	if !strings.HasPrefix(lines[0], "╭") || !strings.HasPrefix(lines[2], "╰") {
+	last := lines[len(lines)-1]
+	if !strings.HasPrefix(lines[0], "╭") || !strings.HasPrefix(last, "╰") {
 		t.Errorf("not a rounded box: %q", lines)
 	}
 	row := lines[1]
@@ -246,8 +247,8 @@ func TestCmdPaletteShowsTheMockup(t *testing.T) {
 	if !strings.Contains(row, "[list|search|inst…") {
 		t.Errorf("args hint missing: %q", row)
 	}
-	if ansi.StringWidth(lines[0]) != ansi.StringWidth(row) || ansi.StringWidth(row) != ansi.StringWidth(lines[2]) {
-		t.Errorf("ragged box: %d %d %d", ansi.StringWidth(lines[0]), ansi.StringWidth(row), ansi.StringWidth(lines[2]))
+	if ansi.StringWidth(lines[0]) != ansi.StringWidth(row) || ansi.StringWidth(row) != ansi.StringWidth(last) {
+		t.Errorf("ragged box: %d %d %d", ansi.StringWidth(lines[0]), ansi.StringWidth(row), ansi.StringWidth(last))
 	}
 }
 
@@ -296,12 +297,15 @@ func TestCmdPaletteAlignsNameArgsAndDescription(t *testing.T) {
 	}
 }
 
-func TestCmdPaletteHasNoArgsColumnWithoutArgs(t *testing.T) {
+func TestCmdPaletteKeepsTheArgsColumnWithoutArgs(t *testing.T) {
 	withColorProfile(t, termenv.Ascii)
-	cmds := []wsCommand{{name: "/export", desc: "write this session to a markdown file", group: "Session"}}
-	row := renderCmdPalette(cmds, "/", 0, 100, 12)[2]
-	if !strings.HasPrefix(row, "│ › /export  write this") {
-		t.Errorf("row = %q", row)
+	cmds := []wsCommand{
+		{name: "/export", desc: "write this session to a markdown file", group: "Session"},
+		{name: "/rename", args: "<title>", desc: "set the title of this session", group: "Session"},
+	}
+	lines := renderCmdPalette(cmds, "/", 0, 100, 12)
+	if a, b := palDescCol(lines[2]), palDescCol(lines[3]); a < 0 || a != b {
+		t.Errorf("description columns %d and %d:\n%s", a, b, ansi.Strip(strings.Join(lines, "\n")))
 	}
 }
 
@@ -364,8 +368,8 @@ func TestCmdPaletteFitsEveryWidth(t *testing.T) {
 			}
 		}
 	}
-	if renderCmdPalette(nil, "/zz", 0, 80, 12) != nil || renderCmdPalette(builtinCommands(), "/", 0, 80, 2) != nil {
-		t.Error("no matches or no room draws nothing")
+	if renderCmdPalette(builtinCommands(), "/", 0, 80, 3) != nil {
+		t.Error("no room draws nothing")
 	}
 }
 
@@ -886,5 +890,60 @@ func TestConfigListIsHermetic(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(h.root, ".decsr", "project.yaml")); err == nil {
 		t.Error("listing must not write the project file")
+	}
+}
+
+// palShape is the line count and the widths of a palette.
+func palShape(lines []string) (n, minW, maxW int) {
+	minW = 1 << 30
+	for _, l := range lines {
+		w := ansi.StringWidth(l)
+		minW, maxW = min(minW, w), max(maxW, w)
+	}
+	return len(lines), minW, maxW
+}
+
+func TestCmdPaletteKeepsItsSize(t *testing.T) {
+	for _, mode := range []termenv.Profile{termenv.TrueColor, termenv.Ascii} {
+		withColorProfile(t, mode)
+		cmds := builtinCommands()
+		cmds = append(cmds, wsCommand{name: "/insecure-defaults:audit", args: "[path]", desc: "audit the defaults of this project", group: "Plugin commands", tag: "(plugin:insecure-defaults)"})
+		for _, w := range []int{60, 100, 128} {
+			var shapes [][3]int
+			for _, q := range []string{"/", "/us", "/zzz", "/insecure"} {
+				ranked := rankCommands(cmds, q)
+				lines := renderCmdPalette(ranked, q, 0, w, 14)
+				n, lo, hi := palShape(lines)
+				if lo != w || hi != w {
+					t.Errorf("w=%d q=%s: widths %d..%d", w, q, lo, hi)
+				}
+				shapes = append(shapes, [3]int{n, lo, hi})
+			}
+			for _, s := range shapes {
+				if s != shapes[0] {
+					t.Errorf("w=%d: shapes differ: %v", w, shapes)
+				}
+			}
+		}
+	}
+}
+
+func TestCmdPaletteNoMatchAndLongNames(t *testing.T) {
+	withColorProfile(t, termenv.Ascii)
+	lines := renderCmdPalette(nil, "/xyz", 0, 100, 14)
+	if !strings.Contains(lines[1], "no command matches /xyz") {
+		t.Errorf("first row: %q", lines[1])
+	}
+	cmds := []wsCommand{
+		{name: "/insecure-defaults:audit-all", args: "[path]", desc: "audit", group: "Plugin commands"},
+		{name: "/plan", args: "[x]", desc: "audit", group: "Run"},
+	}
+	l := renderCmdPalette(cmds, "/", 0, 100, 14)
+	a, b := ansi.StringWidth(strings.SplitN(ansi.Strip(l[2]), "[path]", 2)[0]), ansi.StringWidth(strings.SplitN(ansi.Strip(l[4]), "[x]", 2)[0])
+	if a < 0 || a != b {
+		t.Errorf("args columns %d and %d:\n%s", a, b, ansi.Strip(strings.Join(l, "\n")))
+	}
+	if !strings.Contains(ansi.Strip(l[2]), "…") {
+		t.Errorf("long name not cut: %q", ansi.Strip(l[2]))
 	}
 }
