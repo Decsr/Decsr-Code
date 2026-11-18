@@ -27,7 +27,7 @@
 
 ## What is decsr?
 
-`decsr` is a terminal app that runs a team of coding agents on your repository. You describe a task, a lead agent splits it into a graph of sub-tasks, and you pick a role and model for each node. Nodes run in parallel, each in its own git worktree. A final **Build & test** check runs, then you review the diff and merge it or open a pull request.
+`decsr` is a terminal app that runs a team of coding agents on your repository. You describe a task, a lead agent splits it into a graph of sub-tasks and assigns a role to each node, and you approve one plan card. Nodes run in parallel, each in its own git worktree. A final **Build & test** check runs when code changed, then you review the diff and merge it or open a pull request.
 
 Nothing runs until you say so. You can mix Claude, Codex, OpenCode, Copilot, dsh, API models and local models in one task.
 
@@ -39,7 +39,7 @@ Nothing runs until you say so. You can mix Claude, Codex, OpenCode, Copilot, dsh
 |---|---|
 | **Parallel agents** — every node works in its own git worktree and branch, so agents never overwrite each other. | **Any backend per role** — CLI agents, API providers and local models, each with its own model and effort. |
 | **You stay in control** — nothing runs until you press `r`. Autonomy levels 1-3 and a USD budget let you give more freedom step by step. | **Real code review** — read diffs with syntax highlighting, put notes on lines and send them back to an agent. |
-| **Coordinator lead** — the lead can review each finished batch and propose new, changed or cancelled nodes. | **Pull requests and CI** — `/pr` opens the PR, `/pr watch` turns failing CI and review comments into fix nodes. |
+| **Lean runs** — read-only nodes for questions and reviews, direct answers from the lead, Build & test only when code changed. | **Pull requests and CI** — `/pr` opens the PR, `/pr watch` turns failing CI and review comments into fix nodes. |
 | **Automations** — scheduled, unattended runs with a budget. | **Limits and inbox** — a rate-limited node waits instead of failing, and the inbox lists everything that needs you. |
 
 <p align="center"><img src="doc/assets/divider.svg" width="100%" alt=""></p>
@@ -74,8 +74,8 @@ You need a git repository to work in and at least one backend (see [Backends](#b
 3. **First run:** if no runner is usable, `decsr` opens a short setup (pick a runner, connect a key, see the doctor result). `Esc` skips it. Open it again any time with `decsr setup`.
 4. **Start:** `cd your-repo && decsr`
 5. **Describe a task** in the prompt and press `Enter`. The lead splits it into nodes.
-6. **Assign roles:** `A` accepts the lead's suggestions, `a` picks a role for the selected node.
-7. **Run:** press `r` for one node or `R` for all assigned nodes. Press `d` on a node to see its diff.
+6. **Approve the plan:** the lead assigns the roles. One plan card shows the nodes and agents: `y` starts, `e` edits an agent, `a` picks another role, `n` cancels. A plan that only reads starts at once.
+7. **Watch and steer:** nodes run on their own. Press `d` on a node to see its diff, `r` to run one again. You can keep chatting while they run.
 8. **Finish:** type `/merge` to bring the result into your branch, or `/pr` to open a pull request.
 
 ```text
@@ -101,11 +101,15 @@ The sidebar (from 100 columns) lists nodes and saved sessions. The feed shows on
 
 ### Workspace and graph
 
-The lead splits your task into nodes with titles, dependencies and a suggested role. Up to 3 nodes run at once (`R` runs each node as soon as its dependencies are done). A last **Build & test** node runs your language's build and test commands. In a git repository every node gets its own worktree. Set `workspace.isolation: shared` to work in your checkout instead. See [Workspace](doc/workspace.md#flow).
+The lead splits your task into nodes with titles, dependencies, a role and a `writes` flag. Up to 3 nodes run at once. A last **Build & test** node runs your language's build and test commands (C and C++ projects use `CMakePresets.json`; set `project.build_cmd` and `project.test_cmd` to replace them). It runs only when code changed, otherwise it ends as `skipped · nothing changed`; `/check` runs it anyway. In a git repository every node gets its own worktree. Set `workspace.isolation: shared` to work in your checkout instead. See [Workspace](doc/workspace.md#flow) and [Build & test](doc/workspace.md#build--test-and-fix-nodes).
+
+### Lean runs and plan card
+
+A question or review is one read-only node, and the lead answers simple questions itself in the chat. Read-only plans start at once; a plan that writes waits on one plan card (`y` start, `e` edit agent, `a` pick role, `n` cancel). One-shot calls run without tools and with trimmed prompts, so they use fewer tokens. See [Lean runs](doc/workspace.md#lean-runs) and [Approval](doc/workspace.md#approval).
 
 ### Roles and backends
 
-A role is a name, a description, a runner, a model and an effort. Seven built-in roles exist (`pm`, `coder`, `coder_fixer`, `qa`, `ux_reviewer`, `security`, `reviewer`) and you can add your own under `agents:`. Use `mode: agent` to let a CLI agent edit files with its own tools, or `mode: text` to let decsr write the files. `read_only: true` makes a role report only. See [Roles](doc/workspace.md#roles) and [Agent mode](doc/workspace.md#agent-mode).
+A role is a name, a description, a runner, a model and an effort. Seven built-in roles exist (`pm`, `coder`, `coder_fixer`, `qa`, `ux_reviewer`, `security`, `reviewer`) and you can add your own under `agents:`. Use `mode: agent` to let a CLI agent edit files with its own tools, or `mode: text` to let decsr write the files. `read_only: true` makes a role report only (`reviewer` is read-only). See [Roles](doc/workspace.md#roles) and [Agent mode](doc/workspace.md#agent-mode).
 
 ### Review and merge
 
@@ -113,11 +117,15 @@ A role is a name, a description, a runner, a model and an effort. Seven built-in
 
 ### Autonomy, coordinator and budgets
 
-Level 1 (default) runs nothing by itself. Level 2 accepts roles, runs everything and adds fix nodes after a failed Build & test. Level 3 also opens and watches the pull request, and needs a budget. Automation never merges. Turn on the coordinator and the lead reviews each finished batch. Set a budget and decsr warns at 80% and stops starting nodes at the limit. See [Autonomy levels](doc/workspace.md#autonomy-levels), [Coordinator mode](doc/workspace.md#coordinator-mode) and [Cost and budget](doc/workspace.md#cost-and-budget).
+Level 1 (default) runs nothing by itself. Level 2 approves the plan, runs everything and adds fix nodes after a failed Build & test. Level 3 also opens and watches the pull request, and needs a budget. Automation never merges. Turn on the coordinator and the lead reviews each finished batch. Set a budget and decsr warns at 80% and stops starting nodes at the limit. See [Autonomy levels](doc/workspace.md#autonomy-levels), [Coordinator mode](doc/workspace.md#coordinator-mode) and [Cost and budget](doc/workspace.md#cost-and-budget).
 
 ### Reply to nodes and node reports
 
-Type `@T3 your message` (or press `m` on a node) to start a new attempt of that node. Earlier attempts are kept. Every node ends with a report. A node that asks a question or is blocked shows `◇ waiting` until you answer. See [Reply to a node](doc/workspace.md#reply-to-a-node) and [Node reports](doc/workspace.md#node-reports-and-waiting-nodes).
+Type `@T3 your message` (or press `m` on a node) to start a new attempt of that node. It resumes the node's own CLI conversation (claude, codex, opencode, dsh), or starts fresh with an excerpt when that is not possible. Every node ends with a report and the run ends with a summary. A node that asks a question shows a card with options and a recommendation; a refused command shows a card with allow for this node, always, or no. A node can suggest follow-ups (`y` plans them). See [Reply to a node](doc/workspace.md#reply-to-a-node), [Question cards](doc/workspace.md#question-cards), [Refused commands](doc/workspace.md#refused-commands), [Run summary](doc/workspace.md#run-summary) and [Suggested follow-ups](doc/workspace.md#suggested-follow-ups).
+
+### Chatting while nodes run
+
+You can type a new task while nodes run. The lead sees the live graph, may change or cancel nodes that have not started, and may send a note to a running node (queued until its attempt ends). The plan card shows one line per change with its reason; running nodes are never stopped. See [Chatting while nodes run](doc/workspace.md#chatting-while-nodes-run).
 
 ### Automations and notifications
 
@@ -125,7 +133,7 @@ Type `@T3 your message` (or press `m` on a node) to start a new attempt of that 
 
 ### Sessions, profiles and extensions
 
-Each project keeps its sessions in `.decsr/sessions/`. `decsr resume` or `/resume` continues one, `/clear` starts a new one and `/compact` folds finished nodes into a summary. `/model profile` saves your role settings for any project. Markdown files in `.decsr/commands/` and `.decsr/skills/` add your own commands and skills. Claude-format plugins add commands, skills and roles; `/plugin` is a manager to install, enable, import (from Claude Code), discover (curated catalog and marketplaces) and see the use of plugins. See [Sessions](doc/workspace.md#sessions), [Profiles](doc/workspace.md#profiles), [Custom commands and skills](doc/workspace.md#custom-commands-and-skills) and [Plugins](doc/workspace.md#plugins).
+Each project keeps its sessions in `.decsr/sessions/`. `decsr resume` or `/resume` continues one, `/clear` starts a new one and `/compact` folds finished nodes into a summary. `/model profile` saves your role settings for any project. Markdown files in `.decsr/commands/` and `.decsr/skills/` add your own commands and skills. Claude-format plugins add commands, skills and roles; `/plugin` is a manager with the tabs Installed, Discover, Marketplaces (asks for trust on first install) and Stats; it can also import plugins from Claude Code. See [Sessions](doc/workspace.md#sessions), [Profiles](doc/workspace.md#profiles), [Custom commands and skills](doc/workspace.md#custom-commands-and-skills) and [Plugins](doc/workspace.md#plugins).
 
 ### Issues and Spec Kit import
 
@@ -143,8 +151,8 @@ With the prompt focused, every printable key is text. `Tab` moves focus between 
 
 | Key | Action |
 |---|---|
-| `a` / `A` | Pick a role for the node / accept all suggested roles |
-| `r` / `R` | Run the node / run all assigned nodes |
+| `a` | Pick a role for the node |
+| `r` / `R` | Run the node / run all startable nodes |
 | `s` / `S` | Stop the node / stop all |
 | `d` / `D` | Diff of the node / of the whole session |
 | `m` | Reply to the node |
@@ -160,19 +168,19 @@ With the prompt focused, every printable key is text. `Tab` moves focus between 
 
 In the diff view: `c` adds a note, `x` deletes it, `S` sends the notes, `n`/`p` jump between hunks.
 
-| Command | What it does |
-|---|---|
-| `/merge` | Merge the session branch into your current branch |
-| `/pr`, `/pr watch`, `/pr stop` | Open a pull request, watch CI and review comments, stop watching |
-| `/issue`, `/import speckit` | Start from an issue / import Spec Kit tasks |
-| `/autonomy 1\|2\|3`, `/coordinator on\|off\|now`, `/usage budget` | Autonomy, coordinator and spending |
-| `/routing`, `/stop`, `/retry` | Show or set the routing mode, stop and retry nodes (`y` / `n` on the plan card approve or cancel a split) |
-| `/check` | Run Build & test now, even when nothing changed |
-| `/resume`, `/clear`, `/compact`, `/rename`, `/copy`, `/project`, `/model profile` | Sessions, projects and profiles |
-| `/provider`, `/roles`, `/model`, `/plugin`, `/status`, `/usage`, `/export` | Providers, roles, models, plugins, status and reports; `/help` lists them by group |
-| `/config`, `/menu` | Show and change settings; open the Home launcher (settings and classic pipeline) |
+Slash commands come in five groups, in colour. `/` lists them, `/help <command>` shows the forms of one. Most open a panel.
 
-`/help` lists every command. Full key reference: [Workspace keys](doc/workspace.md#keys) and [Commands](doc/workspace.md#commands).
+| Group | Commands |
+|---|---|
+| **Session** | `/help`, `/clear`, `/compact`, `/resume`, `/rename`, `/export`, `/copy`, `/quit` |
+| **Run** | `/answer` (show the open question or refused command), `/check` (run Build & test now), `/stop [node]`, `/retry <node>`, `/merge`, `/diff`, `/pr [watch\|stop]` |
+| **Agents** | `/roles`, `/model` (`rank`, `profile save\|apply`), `/routing`, `/autonomy 1\|2\|3`, `/coordinator on\|off\|now` |
+| **Usage** | `/usage` (`cost`, `budget [amount\|off]`), `/status`, `/context` |
+| **Project** | `/project`, `/config`, `/provider` (`add`, `remove`, `test`), `/memory`, `/doctor`, `/plugin`, `/issue`, `/import speckit`, `/menu` |
+
+Plans, questions and refused commands are answered with `y` / `n` on their card. Commands from plugins and `.decsr/commands/` are listed in their own group.
+
+Full key reference: [Workspace keys](doc/workspace.md#keys) and [Commands](doc/workspace.md#commands).
 
 <p align="center"><img src="doc/assets/divider.svg" width="100%" alt=""></p>
 
@@ -207,7 +215,7 @@ decsr disconnect deepseek           # delete a saved key
 
 ### Using the claude runner
 
-The `claude` runner starts your own, unmodified `claude` CLI headlessly. It uses whatever login that CLI already has; decsr never reads or stores Claude credentials. Use it the way you use `claude` yourself: in a session you started and are present for. Unattended runs (cron automations) should use an API key (`ANTHROPIC_API_KEY`, or Bedrock, Vertex or Foundry), because Anthropic's [Consumer Terms](https://www.anthropic.com/legal/consumer-terms) (section 3) do not allow automated access through a subscription login, and the advertised Pro, Max and Ultra [usage limits](https://code.claude.com/docs/en/legal-and-compliance) assume ordinary, individual usage. So on a subscription login decsr refuses to run automations that use `claude` unless the automation sets `allow_subscription: true`, asks you to confirm `decsr automation install` (`--yes` skips the question), and does not retry a node by itself after a usage limit (press `r`; `workspace.limit_auto_retry` overrides this). `decsr doctor` shows the login mode in its `claude auth` line.
+The `claude` runner starts your own, unmodified `claude` CLI headlessly. It uses whatever login that CLI already has; decsr never reads or stores Claude credentials. The full checklist is in [`doc/provider-policy.md`](doc/provider-policy.md). Use it the way you use `claude` yourself: in a session you started and are present for. Unattended runs (cron automations) should use an API key (`ANTHROPIC_API_KEY`, or Bedrock, Vertex or Foundry), because Anthropic's [Consumer Terms](https://www.anthropic.com/legal/consumer-terms) (section 3) do not allow automated access through a subscription login, and the advertised Pro, Max and Ultra [usage limits](https://code.claude.com/docs/en/legal-and-compliance) assume ordinary, individual usage. So on a subscription login decsr refuses to run automations that use `claude` unless the automation sets `allow_subscription: true`, asks you to confirm `decsr automation install` (`--yes` skips the question), and does not retry a node by itself after a usage limit (press `r`; `workspace.limit_auto_retry` overrides this). `decsr doctor` shows the login mode in its `claude auth` line.
 
 ### Model rankings
 
@@ -339,6 +347,7 @@ decsr memory add "Use sqlc for typed queries"
 ## Docs
 
 - [`doc/workspace.md`](doc/workspace.md) — Workspace: graph, sessions, profiles, commands, roles, keys, review, PRs
+- [`doc/provider-policy.md`](doc/provider-policy.md) — rules for agent CLIs and provider APIs
 - [`doc/automations.md`](doc/automations.md) — scheduled, unattended runs
 - [`doc/tui.md`](doc/tui.md) — classic pipeline cockpit, keys and themes
 - [`doc/memory.md`](doc/memory.md) — project memory
