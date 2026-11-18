@@ -724,18 +724,19 @@ type workspaceModel struct {
 	formNode      string
 	formCanChange bool // "Can change files"; false saves a read-only role
 
-	listIdx  int // cursor of the sessions, projects and profiles lists
-	sessions []workspace.SessionInfo
-	projects []wsProject
-	profiles []string
-	textIn   textinput.Model
-	textKind string // "path" | "profile"
-	textErr  string
-	infoName string
-	rankBusy bool         // a /rank fetch is running
-	agentEd  *agentEditor // the agent editor of the approval card
-	infoText []string
-	infoTop  int
+	listIdx   int // cursor of the sessions, projects and profiles lists
+	sessions  []workspace.SessionInfo
+	projects  []wsProject
+	profiles  []string
+	textIn    textinput.Model
+	textKind  string // "path" | "profile"
+	textErr   string
+	infoName  string
+	infoColor lipgloss.TerminalColor
+	rankBusy  bool         // a /rank fetch is running
+	agentEd   *agentEditor // the agent editor of the approval card
+	infoText  []string
+	infoTop   int
 
 	// question and refused-command cards
 	askHidden map[string]bool // cards hidden with Esc, by card key
@@ -2522,7 +2523,7 @@ func (m workspaceModel) overlayBox() string {
 			"↑↓ move · Enter choose · Esc close", w, h)
 	case wsOverlayRoles:
 		return renderPicker("Roles", m.rolesItems(), m.pickIdx,
-			"Read-only list. Enter on ＋ new role creates one · Esc close", w, h)
+			"Enter new role · Esc close", w, h)
 	case wsOverlayForm:
 		pm := m.cfg.Agents["pm"]
 		inherits := fmt.Sprintf("Runner / model: inherits %s / %s — change it in /config → Project Setup", orDash(pm.Runner), orDash(pm.Model))
@@ -2540,7 +2541,7 @@ func (m workspaceModel) overlayBox() string {
 		case !strings.HasSuffix(m.confirm.text, "y/n"): // otherwise the text already asks
 			body = append(body, "", wsKey("y")+" yes   "+wsKey("n")+" no")
 		}
-		return ui.Overlay("Confirm", body, nil, boxW)
+		return ui.Overlay("Confirm", body, nil, boxW, ui.Warn)
 	case wsOverlaySkills:
 		n := m.g.Node(m.skillNode)
 		if n == nil {
@@ -2955,7 +2956,7 @@ func (m workspaceModel) headerLine() string {
 		}
 	}
 	right += "  "
-	left := "  " + lipgloss.NewStyle().Foreground(ui.Accent).Bold(true).Render("◆ decsr")
+	left := "  " + lipgloss.NewStyle().Foreground(ui.BrandColor).Bold(true).Render("◆") + " " + lipgloss.NewStyle().Foreground(ui.Text).Bold(true).Render("decsr")
 	if p := m.project(); p != "" {
 		left += dim.Render(" · ") + lipgloss.NewStyle().Foreground(ui.Text).Render(truncateOneLine(p, max(w/4, 8)))
 	}
@@ -2998,13 +2999,13 @@ func (m workspaceModel) emptyPane(iw, ih int) []string {
 			body = append(body, "", centerLine(line, iw))
 		}
 	}
-	// The logo is one accent colour, without the stars; a narrow pane gets none.
+	// The logo is the one of Home, without the stars; a narrow pane gets none.
 	var logo []string
 	if iw >= 62 {
-		accent := []lipgloss.TerminalColor{ui.Accent, ui.Accent, ui.Accent, ui.Accent, ui.Accent}
-		for _, l := range renderBlockTextColored("DECSR", accent) {
+		for _, l := range ui.Logo(false) {
 			logo = append(logo, centerLine(l, iw))
 		}
+		logo = append(logo, centerLine(dim.Render(ui.Tagline), iw))
 	}
 	lines := body
 	if len(logo) > 0 && len(logo)+1+len(body) <= ih {
@@ -3113,7 +3114,7 @@ func (m workspaceModel) mainPanes(mainH int) []string {
 		if n != nil {
 			title = n.ID
 		}
-		box := ui.Overlay(title, body[:bh-2], nil, bw)
+		box := ui.Overlay(title, body[:bh-2], nil, bw, ui.GroupRun)
 		main = strings.Split(ui.PlaceOverlay(strings.Join(graphPane(w), "\n"), box, w, mainH), "\n")
 	default:
 		main = graphPane(w)
@@ -3125,9 +3126,9 @@ func (m workspaceModel) mainPanes(mainH int) []string {
 }
 
 func (m workspaceModel) promptBox() []string {
-	bc := ui.Border
+	var bc lipgloss.TerminalColor = ui.Border
 	if m.focus == wsFocusPrompt && !m.splitting {
-		bc = ui.Accent
+		bc = runnerColor(m.liveCfg().Agents["pm"].Runner)
 	}
 	boxStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(bc).MarginLeft(2)
 	in := m.input

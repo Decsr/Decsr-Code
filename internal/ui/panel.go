@@ -25,27 +25,45 @@ type PanelOpts struct {
 	Filter           string   // the filter line shows when this is not empty
 	Body             []string // content rows, already styled
 	Scroll           int      // first visible body row
+	Foot             []string // rows pinned under the body, always visible
 	Keys             []Hint   // footer, drawn in the bottom border
-	Width            int      // preferred width including the border; 0 = 100
 	ScreenW, ScreenH int
 }
 
-// Panel draws a centred overlay: a rounded border in the group colour, the
-// title in the top border, a tab bar whose active tab is a filled pill, a
-// filter line when Filter is set, the body window and the keys in the bottom
-// border. It keeps Margin cells from the screen edges, is never wider than
-// the screen and shows only the rows that fit; Scroll picks the first one
-// (PanelWindow clamps it). Place the result with PlaceOverlay.
+// Frame limits: a Panel is never larger than this, border included.
+const (
+	FrameMaxW = 112
+	FrameMaxH = 32
+)
+
+// FrameSize is the outer size of every Panel on a screenW x screenH screen:
+// the screen minus Margin on each side, capped at FrameMaxW x FrameMaxH. It
+// does not depend on what the panel shows.
+func FrameSize(screenW, screenH int) (w, h int) {
+	return min(max(screenW-2*Margin, 0), FrameMaxW), min(max(screenH-2*Margin, 0), FrameMaxH)
+}
+
+// PanelInner is the width of the body rows of a Panel on the screen.
+func PanelInner(screenW int) int {
+	w, _ := FrameSize(screenW, 0)
+	return max(w, 12) - 4
+}
+
+// Panel draws a centred overlay of a fixed size (see FrameSize): a rounded
+// border in the group colour, the title in the top border, a tab bar whose
+// active tab is a filled pill, a filter line when Filter is set, the body
+// window and the keys in the bottom border. The frame has the same size
+// whatever the body holds: short bodies are padded with blank rows and long
+// ones scroll (Foot rows stay under them); Scroll picks the first visible row (PanelWindow clamps it).
+// Without a screen size (zero) the width is FrameMaxW and the height fits the
+// body. Place the result with PlaceOverlay.
 func Panel(o PanelOpts) string {
 	if o.Color == nil {
 		o.Color = Accent
 	}
-	pw := o.Width
-	if pw <= 0 {
-		pw = 100
-	}
+	pw := FrameMaxW
 	if o.ScreenW > 0 {
-		pw = min(pw, o.ScreenW-2*Margin)
+		pw, _ = FrameSize(o.ScreenW, o.ScreenH)
 	}
 	if pw < 12 {
 		return ""
@@ -72,13 +90,25 @@ func Panel(o PanelOpts) string {
 	for _, l := range body {
 		out = append(out, row(l))
 	}
+	if o.ScreenH > 0 {
+		for i := len(body); i < rows; i++ {
+			out = append(out, row(""))
+		}
+	}
+	for _, l := range o.Foot {
+		out = append(out, row(l))
+	}
 	out = append(out, panelBottom(o, pw))
 	return strings.Join(out, "\n")
 }
 
-// PanelRows is the number of body rows a Panel shows: all of them, or as many
-// as the screen leaves under the border, the tab bar and the filter line.
+// PanelRows is the number of body rows a Panel shows: the frame height minus
+// the border, the tab bar and the filter line (at least one). Without a
+// screen height it is the body length.
 func PanelRows(o PanelOpts) int {
+	if o.ScreenH <= 0 {
+		return len(o.Body)
+	}
 	head := 0
 	if len(o.Tabs) > 0 {
 		head++
@@ -86,11 +116,8 @@ func PanelRows(o PanelOpts) int {
 	if o.Filter != "" {
 		head++
 	}
-	rows := len(o.Body)
-	if o.ScreenH > 0 {
-		rows = min(rows, max(o.ScreenH-2*Margin-2-head, 1))
-	}
-	return rows
+	_, h := FrameSize(o.ScreenW, o.ScreenH)
+	return max(h-2-head-len(o.Foot), 1)
 }
 
 // PanelWindow clamps scroll so that rows body rows starting there stay inside

@@ -342,7 +342,7 @@ func TestInputBox(t *testing.T) {
 
 func TestOverlayAndPlacement(t *testing.T) {
 	for _, w := range []int{20, 40, 80} {
-		o := Overlay("A rather long title for the box", []string{strings.Repeat("x", 300), "two"}, []Hint{{"y", "yes"}, {"n", "no"}}, w)
+		o := Overlay("A rather long title for the box", []string{strings.Repeat("x", 300), "two"}, []Hint{{"y", "yes"}, {"n", "no"}}, w, nil)
 		if maxWidth(o) != w {
 			t.Errorf("w=%d: overlay %d wide", w, maxWidth(o))
 		}
@@ -352,7 +352,7 @@ func TestOverlayAndPlacement(t *testing.T) {
 	}
 	const sw, sh = 40, 12
 	base := strings.TrimSuffix(strings.Repeat(strings.Repeat(".", sw)+"\n", sh), "\n")
-	ov := Overlay("T", []string{"one", "two"}, nil, 20)
+	ov := Overlay("T", []string{"one", "two"}, nil, 20, nil)
 	out := PlaceOverlay(base, ov, sw, sh)
 	ls := strings.Split(plain(out), "\n")
 	if len(ls) != sh {

@@ -26,8 +26,6 @@ func (m *workspaceModel) sayUsage(usage string) { m.say("error", "usage: "+usage
 
 // ── /help ────────────────────────────────────────────────────────────────────
 
-const helpWidth = 100
-
 func (m workspaceModel) cmdHelp(args string) (tea.Model, tea.Cmd) {
 	arg := strings.ToLower(strings.TrimSpace(args))
 	if arg == "" {
@@ -52,9 +50,9 @@ func (m workspaceModel) cmdHelp(args string) (tea.Model, tea.Cmd) {
 
 // helpOpts is the panel of /help: the groups, or the forms of one command.
 func (m workspaceModel) helpOpts() ui.PanelOpts {
-	o := ui.PanelOpts{Title: "Help", Color: ui.Accent, Scroll: m.helpPS.Scroll, Width: helpWidth, ScreenW: m.width, ScreenH: m.height,
+	o := ui.PanelOpts{Title: "Help", Color: ui.Accent, Scroll: m.helpPS.Scroll, ScreenW: m.width, ScreenH: m.height,
 		Keys: []ui.Hint{{Key: "↑↓", Label: "scroll"}, {Key: "Esc", Label: "close"}}}
-	inner := min(helpWidth, m.width-2*ui.Margin) - 4
+	inner := ui.PanelInner(m.width)
 	cmds := m.commandList()
 	if m.helpName != "" {
 		if c, ok := m.lookup(m.helpName); ok {

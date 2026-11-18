@@ -181,7 +181,7 @@ func budgetShort(v float64) string {
 func (m workspaceModel) cmdBudget(args string) (tea.Model, tea.Cmd) {
 	args = strings.TrimSpace(args)
 	if args == "" {
-		return m.openInfo("Budget", m.budgetLines()), nil
+		return m.openInfo("Budget", ui.GroupUsage, m.budgetLines()), nil
 	}
 	v, err := parseBudget(args)
 	if err != nil {

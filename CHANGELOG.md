@@ -116,6 +116,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `workspace.limit_auto_retry` overrides this. `decsr doctor` has a `claude
   auth` line. An API key, Bedrock, Vertex, Foundry or `apiKeyHelper` counts as
   API use and keeps the old behaviour.
+- Panels and list overlays (/status, /usage, /help, Go to, Needs you, role and
+  session lists) now share one fixed frame, 112 x 32 at most and never larger
+  than the screen minus the margins, so the box no longer grows or shrinks with
+  its text or when you switch tabs.
+- Home and the Workspace share one DECSR logo (cyan, violet, pink, amber
+  gradient across the letters), one brand glyph and one set of role and runner
+  colours. Home menu items, cards, the prompt box, /status and /config use a
+  different colour per group instead of blue.
 
 ### Added
 - Workspace: a direct answer. When the project context already answers the

@@ -333,7 +333,7 @@ func (m workspaceModel) profilesBody(o *ui.PanelOpts) {
 
 func (m workspaceModel) modelOpts(o *ui.PanelOpts) {
 	o.Title = "Model"
-	inner := m.panelInner(o.Width)
+	inner := ui.PanelInner(m.width)
 	switch m.panel.ps.Tab {
 	case modelTabRoles:
 		keys := []ui.Hint{{Key: "↑↓", Label: "move"}, {Key: "Enter", Label: "edit"}, {Key: "s", Label: "save"}}

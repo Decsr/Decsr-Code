@@ -306,23 +306,16 @@ func (m workspaceModel) skillKey(k string) (tea.Model, tea.Cmd) {
 
 // renderSkillPicker draws the skill checklist box.
 func renderSkillPicker(title string, items []wsSkillItem, sel map[string]bool, idx int, width, height int) string {
-	boxW := min(70, width-2)
-	inner := boxW - 4
-	rows := max(height-2-2-2, 1)
-	rows = min(rows, max(len(items), 1))
-	start := 0
-	if idx >= rows {
-		start = idx - rows + 1
-	}
+	inner := ui.PanelInner(width)
 	var body []string
 	if len(items) == 0 {
 		body = append(body, styleWsSkillNote.Render("No skills installed. /plugin search lists plugins you can install."))
 	}
-	for i := start; i < start+rows && i < len(items); i++ {
+	first := len(body)
+	for i := range items {
 		body = append(body, renderSkillRow(items[i], sel[items[i].id] || items[i].role, i == idx, inner))
 	}
-	body = append(body, "", styleWsSkillNote.Render("↑↓ move · Space toggle · Enter save · Esc cancel"))
-	return ui.Overlay(ansi.Truncate(title, boxW-6, "…"), body, nil, boxW)
+	return framed(title, ui.GroupProject, body, first+idx, 0, "↑↓ move · Space toggle · Enter save · Esc cancel", width, height)
 }
 
 // renderSkillRow draws one row of exactly inner cells. The check box and the

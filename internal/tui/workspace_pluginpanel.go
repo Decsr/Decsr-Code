@@ -240,7 +240,7 @@ func (m workspaceModel) applyPluginInput(val string) (tea.Model, tea.Cmd) {
 func (m workspaceModel) pluginOpts(o *ui.PanelOpts) {
 	o.Title = "Plugins"
 	o.Filter = ""
-	inner := m.panelInner(o.Width)
+	inner := ui.PanelInner(m.width)
 	var keys []ui.Hint
 	sel := m.panel.sel
 	switch m.panel.ps.Tab {

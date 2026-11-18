@@ -248,8 +248,6 @@ func (m workspaceModel) inboxSidebarLine() string {
 
 // ── Overlay ──────────────────────────────────────────────────────────────────
 
-const wsInboxW = 72
-
 // openInbox shows the inbox; the automation logs are read now.
 func (m workspaceModel) openInbox() workspaceModel {
 	m.inboxAutos = readAutoRuns(m.root)
@@ -302,7 +300,7 @@ func (m workspaceModel) inboxJump(it inboxItem) (tea.Model, tea.Cmd) {
 		for _, l := range readLogTail(automation.LogPath(m.root, it.ref), 20) {
 			lines = append(lines, wrapText(l, 70)...)
 		}
-		return m.openInfo("Automation "+it.ref, lines), nil
+		return m.openInfo("Automation "+it.ref, ui.GroupRun, lines), nil
 	}
 	if it.kind == inboxQuestion {
 		m = m.unhideNodeAsk(it.ref)
@@ -360,8 +358,7 @@ func listWindow(lines []string, sel, vis int) []string {
 }
 
 func (m workspaceModel) inboxBox() string {
-	boxW := min(wsInboxW, m.width-2)
-	inner := boxW - 4
+	inner := ui.PanelInner(m.width)
 	items := m.inboxAll()
 	idx := min(m.inboxIdx, max(len(items)-1, 0))
 	need := 0
@@ -374,9 +371,9 @@ func (m workspaceModel) inboxBox() string {
 	if len(items) == 0 {
 		body = []string{lipgloss.NewStyle().Foreground(ui.Muted).Render("Nothing needs you.")}
 	} else {
-		lines, sel := inboxRows(items, idx, inner)
-		body = listWindow(lines, sel, max(m.height-8, 3))
+		var sel int
+		body, sel = inboxRows(items, idx, inner)
+		return framed(fmt.Sprintf("Needs you · %d", need), ui.Warn, body, sel, 0, "Enter go to · x clear info · Esc close", m.width, m.height)
 	}
-	hints := []ui.Hint{{Key: "Enter", Label: "go to"}, {Key: "x", Label: "clear info"}, {Key: "Esc", Label: "close"}}
-	return ui.Overlay(fmt.Sprintf("Needs you · %d", need), body, hints, boxW)
+	return framed(fmt.Sprintf("Needs you · %d", need), ui.Warn, body, -1, 0, "Enter go to · x clear info · Esc close", m.width, m.height)
 }

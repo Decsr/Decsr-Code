@@ -307,8 +307,7 @@ func (m workspaceModel) paletteChoose(r palRow) (tea.Model, tea.Cmd) {
 // paletteBox draws the palette: the query, the groups that have rows and a
 // hint line; "No matches" when every group is empty.
 func (m workspaceModel) paletteBox() string {
-	boxW := min(palBoxW, m.width-2)
-	inner := boxW - 4
+	inner := ui.PanelInner(m.width)
 	dim := lipgloss.NewStyle().Foreground(ui.Muted)
 	groups := m.palRows()
 	idx := min(m.palIdx, max(len(flattenPalette(groups))-1, 0))
@@ -332,7 +331,7 @@ func (m workspaceModel) paletteBox() string {
 	if n == 0 {
 		lines = []string{dim.Render("No matches")}
 	}
-	body = append(body, listWindow(lines, sel, max(m.height-10, 3))...)
-	hints := []ui.Hint{{Key: "↑↓", Label: "move"}, {Key: "Enter", Label: "go"}, {Key: "Esc", Label: "close"}}
-	return ui.Overlay("Go to", body, hints, boxW)
+	vis := ui.PanelRows(ui.PanelOpts{ScreenW: m.width, ScreenH: m.height}) - 1
+	body = append(body, listWindow(lines, sel, max(vis, 1))...)
+	return framed("Go to", ui.GroupSession, body, -1, 0, "↑↓ move · Enter go · Esc close", m.width, m.height)
 }

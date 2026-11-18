@@ -9,6 +9,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/lang"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // ── Viewport ──────────────────────────────────────────────────────────────────
@@ -364,7 +365,7 @@ func (m SetupModel) renderAgentCard(contentWidth int, label, focusLabel, active,
 
 		display := dim.Render("(default)")
 		if ov, ok := m.agentOverrides[role]; ok {
-			runnerPart := cyanStyle.Render(ov.runner)
+			runnerPart := lipgloss.NewStyle().Foreground(ui.Dark(ui.RunnerColor(ov.runner))).Render(ov.runner)
 			if ov.runner == "" {
 				runnerPart = dim.Render("(global)")
 			}

@@ -150,7 +150,7 @@ func (m workspaceModel) applyConfigInput(val string) (tea.Model, tea.Cmd) {
 func (m workspaceModel) configOpts(o *ui.PanelOpts) {
 	o.Title = "Settings"
 	o.Keys = hintsFor(false, ui.Hint{Key: "↑↓", Label: "move"}, ui.Hint{Key: "Enter", Label: "edit"})
-	inner := m.panelInner(o.Width)
+	inner := ui.PanelInner(m.width)
 	all := config.Settings()
 	keyW, valW := 0, 8
 	for _, s := range all {
@@ -159,13 +159,15 @@ func (m workspaceModel) configOpts(o *ui.PanelOpts) {
 	}
 	valW = min(valW, 18)
 	keyW = min(keyW, 30)
-	last, selLine := "", 0
+	last, selLine, nsec := "", 0, 0
+	sectionGroups := []string{ui.GroupNameSession, ui.GroupNameRun, ui.GroupNameAgents, ui.GroupNameProject, ui.GroupNameUsage}
 	for i, s := range all {
 		if s.Section != last {
 			if last != "" {
 				o.Body = append(o.Body, "")
 			}
-			o.Body = append(o.Body, sectionHead(ui.GroupNameProject, s.Section))
+			o.Body = append(o.Body, sectionHead(sectionGroups[nsec%len(sectionGroups)], s.Section))
+			nsec++
 			last = s.Section
 		}
 		sel := i == m.panel.sel
@@ -174,7 +176,7 @@ func (m workspaceModel) configOpts(o *ui.PanelOpts) {
 		}
 		val := showSetting(s.Get(m.cfg))
 		keySt := lipgloss.NewStyle().Foreground(ui.Text).Bold(sel)
-		row := selMark(sel, o.Color) + keySt.Render(padRight(s.Key, keyW)) + "  " + plainText(padRight(truncateOneLine(val, valW), valW)) + "  " + dimText(s.Help)
+		row := selMark(sel, o.Color) + keySt.Render(padRight(s.Key, keyW)) + "  " + settingValue(val, valW) + "  " + dimText(s.Help)
 		o.Body = append(o.Body, clipRow(row, inner))
 	}
 	if m.panel.inputing {
@@ -187,4 +189,17 @@ func (m workspaceModel) configOpts(o *ui.PanelOpts) {
 	if m.panel.inputing {
 		followSel(o, len(o.Body)-1)
 	}
+}
+
+// settingValue is a setting value cut to w cells: on in green, off and
+// (not set) dim, anything else in the text colour.
+func settingValue(val string, w int) string {
+	cell := padRight(truncateOneLine(val, w), w)
+	switch val {
+	case "on":
+		return lipgloss.NewStyle().Foreground(ui.OK).Render(cell)
+	case "off", "(not set)":
+		return dimText(cell)
+	}
+	return plainText(cell)
 }

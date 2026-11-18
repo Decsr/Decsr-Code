@@ -15,7 +15,7 @@ func samplePanel(w, sw, sh int) PanelOpts {
 		body = append(body, "row "+strings.Repeat("x", i))
 	}
 	return PanelOpts{Title: "Usage", Color: GroupUsage, Tabs: []string{"Session", "Budget", "History"}, Active: 1,
-		Body: body, Keys: []Hint{{"Tab", "tab"}, {"↑↓", "scroll"}, {"Esc", "close"}}, Width: w, ScreenW: sw, ScreenH: sh}
+		Body: body, Keys: []Hint{{"Tab", "tab"}, {"↑↓", "scroll"}, {"Esc", "close"}}, ScreenW: sw, ScreenH: sh}
 }
 
 func TestPanelFitsTheScreen(t *testing.T) {
@@ -31,6 +31,39 @@ func TestPanelFitsTheScreen(t *testing.T) {
 		for _, l := range lines {
 			if ansi.StringWidth(l) != ansi.StringWidth(lines[0]) {
 				t.Fatalf("%v: ragged panel: %q", sz, plain(l))
+			}
+		}
+	}
+}
+
+func TestPanelFrameIsFixed(t *testing.T) {
+	for _, sz := range [][2]int{{80, 24}, {120, 40}, {200, 60}} {
+		w, h := FrameSize(sz[0], sz[1])
+		for _, name := range []string{"empty", "short", "long"} {
+			for _, tabs := range [][]string{nil, {"A", "B"}} {
+				o := samplePanel(0, sz[0], sz[1])
+				o.Tabs = tabs
+				switch name {
+				case "empty":
+					o.Body = nil
+				case "short":
+					o.Body = o.Body[:3]
+				}
+				for _, nc := range []bool{false, true} {
+					if nc {
+						lipgloss.SetColorProfile(termenv.Ascii)
+					}
+					lines := strings.Split(Panel(o), "\n")
+					lipgloss.SetColorProfile(termenv.TrueColor)
+					if len(lines) != h {
+						t.Errorf("%v %s tabs=%d nocolor=%v: %d rows, want %d", sz, name, len(tabs), nc, len(lines), h)
+					}
+					for _, l := range lines {
+						if got := ansi.StringWidth(l); got != w {
+							t.Fatalf("%v %s: width %d, want %d: %q", sz, name, got, w, plain(l))
+						}
+					}
+				}
 			}
 		}
 	}
@@ -300,5 +333,27 @@ func TestGroupColor(t *testing.T) {
 	}
 	if GroupColor("nope") != Accent {
 		t.Error("an unknown group is accent")
+	}
+}
+
+func TestLogoGradientRunsAcrossColumns(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	rows := Logo(true)
+	if len(rows) != 3 {
+		t.Fatalf("%d rows", len(rows))
+	}
+	for _, r := range rows {
+		if ansi.StringWidth(r) != LogoWidth {
+			t.Errorf("row width %d, want %d", ansi.StringWidth(r), LogoWidth)
+		}
+		if strings.ContainsAny(plain(r), "\x1b") || strings.Contains(r, "48;") {
+			t.Errorf("logo uses a background colour: %q", r)
+		}
+	}
+	if !strings.Contains(rows[0], "38;2;94;224;255") {
+		t.Error("the logo does not start in the first brand colour")
+	}
+	if !strings.Contains(rows[1], "38;2;255;184;107") && !strings.Contains(rows[0], "38;2;255;184;107") {
+		t.Error("the logo does not end in the last brand colour")
 	}
 }

@@ -408,7 +408,7 @@ func (m SetupModel) urlEditBox() string {
 	if ue.err != "" {
 		body = append(body, "", lipgloss.NewStyle().Foreground(ui.Fail).Render("! "+ue.err))
 	}
-	return ui.Overlay("Base URL · "+ue.entry.label, body, nil, min(64, m.width-2))
+	return ui.Overlay("Base URL · "+ue.entry.label, body, nil, min(64, m.width-2), ui.GroupAgents)
 }
 
 // ── global provider detection ────────────────────────────────────────────────

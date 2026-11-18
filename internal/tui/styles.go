@@ -96,28 +96,19 @@ var (
 // pixelBorder is the shared square-cornered panel border (┌┐└┘─│).
 var pixelBorder = lipgloss.NormalBorder()
 
-// Role colors — each agent gets a distinct accent against the dark base.
-var roleColors = map[string]lipgloss.Color{
-	"pm":          galaxyAzure, // azure — project manager
-	"coder":       galaxyCyan,  // comet cyan
-	"coder_fixer": galaxyTeal,  // teal — fixer variant
-	"qa":          galaxySky,   // sky — QA (tests + review)
-	"ux_reviewer": galaxyFrost, // frost
-	"security":    galaxyGold,  // star gold
-	"pr":          galaxyIce,   // ice
-	"system":      crt.dim,
-	// Deprecated roles — kept for legacy Pipeline.
-	"architect": galaxyCyan,
-	"planner":   galaxyAzure,
-	"tester":    galaxySky,
-	"reviewer":  galaxyRed,
-}
-
-func roleColor(role string) lipgloss.Color {
-	if c, ok := roleColors[role]; ok {
-		return c
+// roleColor is the colour of a role on the dark screens (Home, setup): the one
+// of ui.RoleColor, in its dark variant. The deprecated role names map to their
+// modern equivalents; "system" is dim.
+func roleColor(role string) lipgloss.TerminalColor {
+	switch role {
+	case "system":
+		return crt.dim
+	case "architect", "planner":
+		role = "pm"
+	case "tester":
+		role = "qa"
 	}
-	return crt.dim
+	return ui.Dark(ui.RoleColor(role))
 }
 
 // paintBackground fills the whole width x height screen with crt.bg. Inner
@@ -176,7 +167,7 @@ func lerpColor(a, b lipgloss.Color, t float64) lipgloss.Color {
 // pixel mark + DECSR + screen name on the left, project name on the right.
 func screenHeader(width int, screen, project string) string {
 	bar := lipgloss.NewStyle().Background(crt.panelBg)
-	left := bar.Foreground(galaxyAzure).Bold(true).Render(" ◆ ") +
+	left := bar.Foreground(ui.Dark(ui.BrandColor)).Bold(true).Render(" ◆ ") +
 		bar.Foreground(crt.bright).Bold(true).Render("DECSR") +
 		bar.Foreground(crt.border).Render("  ▌ ") +
 		bar.Foreground(galaxyAzure).Bold(true).Render(strings.ToUpper(screen))
@@ -226,13 +217,13 @@ func hintBar(width int, hints []keyHint, right string) string {
 }
 
 // chip renders a small coloured pixel chip: dark text on an accent block.
-func chip(label string, color lipgloss.Color) string {
+func chip(label string, color lipgloss.TerminalColor) string {
 	return lipgloss.NewStyle().Background(color).Foreground(crt.bg).Bold(true).Render(" " + label + " ")
 }
 
 // panelTop builds the top border line of a pixel panel with the title embedded:
 // ┌─ ◆ TITLE ────────┐ (w is the full panel width including corners).
-func panelTop(w int, title string, titleColor, borderColor lipgloss.Color) string {
+func panelTop(w int, title string, titleColor, borderColor lipgloss.TerminalColor) string {
 	bs := lipgloss.NewStyle().Foreground(borderColor)
 	if w < 2 {
 		return ""
@@ -252,12 +243,12 @@ func panelTop(w int, title string, titleColor, borderColor lipgloss.Color) strin
 }
 
 // pixelPanel renders body inside a square-cornered border (padding/width taken
-// from st) with the title embedded in the top edge. A focused panel uses the
-// azure focus border; otherwise crt.border.
-func pixelPanel(title string, titleColor lipgloss.Color, focused bool, st lipgloss.Style, body string) string {
-	bc := crt.border
+// from st) with the title embedded in the top edge. A focused panel's border
+// takes the colour of its title; otherwise it is crt.border.
+func pixelPanel(title string, titleColor lipgloss.TerminalColor, focused bool, st lipgloss.Style, body string) string {
+	var bc lipgloss.TerminalColor = crt.border
 	if focused {
-		bc = focusBorder
+		bc = titleColor
 	}
 	out := st.Border(pixelBorder, false, true, true, true).BorderForeground(bc).Render(body)
 	return panelTop(lipgloss.Width(out), title, titleColor, bc) + "\n" + out

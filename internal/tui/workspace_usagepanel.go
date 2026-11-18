@@ -444,7 +444,7 @@ func (m workspaceModel) applyBudgetInput(val string) (tea.Model, tea.Cmd) {
 
 func (m workspaceModel) usageOpts(o *ui.PanelOpts) {
 	o.Title = "Usage"
-	inner := m.panelInner(o.Width)
+	inner := ui.PanelInner(m.width)
 	keys := []ui.Hint{{Key: "n", Label: "per node"}}
 	switch m.panel.ps.Tab {
 	case usageTabBudget:

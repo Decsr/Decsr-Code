@@ -26,8 +26,6 @@ const (
 	panelPlugin   = "plugin"
 )
 
-const panelWidth = 96
-
 // wsPanel is the state of the open panel. Only the fields of its kind are used.
 type wsPanel struct {
 	kind string
@@ -109,16 +107,14 @@ func (m workspaceModel) closePanel() workspaceModel {
 	return m
 }
 
-// panelInner is the width of the body rows of a panel of the given width.
-func (m workspaceModel) panelInner(width int) int {
-	return min(width, max(m.width-2*ui.Margin, 12)) - 4
-}
-
 // panelOpts builds the Panel of the open kind.
 func (m workspaceModel) panelOpts() ui.PanelOpts {
 	p := m.panel
 	o := ui.PanelOpts{Color: ui.GroupColor(groupOfPanel(p.kind)), Tabs: tabsOf(p.kind), Active: p.ps.Tab,
-		Scroll: p.ps.Scroll, Width: panelWidth, ScreenW: m.width, ScreenH: m.height}
+		Scroll: p.ps.Scroll, ScreenW: m.width, ScreenH: m.height}
+	if p.note != "" {
+		o.Foot = []string{"", ui.ResultLine(p.noteKind, p.note)}
+	}
 	switch p.kind {
 	case panelUsage:
 		m.usageOpts(&o)
@@ -138,9 +134,6 @@ func (m workspaceModel) panelOpts() ui.PanelOpts {
 		m.memoryOpts(&o)
 	case panelPlugin:
 		m.pluginOpts(&o)
-	}
-	if p.note != "" {
-		o.Body = append(o.Body, "", ui.ResultLine(p.noteKind, p.note))
 	}
 	return o
 }
@@ -266,3 +259,26 @@ func hintsFor(tabs bool, rest ...ui.Hint) []ui.Hint {
 
 // clipRow cuts a styled row to w cells.
 func clipRow(s string, w int) string { return ansi.Truncate(s, max(w, 1), "…") }
+
+// framed draws a list or info overlay in the fixed Panel frame. A sel of 0 or
+// more keeps that body row in view; otherwise scroll is the first row. foot is
+// "key label · key label": it becomes the key bar in the bottom border.
+func framed(title string, color lipgloss.TerminalColor, body []string, sel, scroll int, foot string, w, h int) string {
+	o := ui.PanelOpts{Title: title, Color: color, Body: body, Scroll: scroll, ScreenW: w, ScreenH: h, Keys: footHints(foot)}
+	if sel >= 0 {
+		followSel(&o, sel)
+	}
+	return ui.Panel(o)
+}
+
+// footHints splits "↑↓ move · Esc close" into key hints.
+func footHints(foot string) []ui.Hint {
+	var out []ui.Hint
+	for _, p := range strings.Split(foot, " · ") {
+		k, l, _ := strings.Cut(strings.TrimSpace(p), " ")
+		if k != "" {
+			out = append(out, ui.Hint{Key: k, Label: l})
+		}
+	}
+	return out
+}

@@ -464,7 +464,7 @@ func (m connectModel) box(w int) string {
 	if m.err != "" && m.stage != connSaveAnyway {
 		body = append(body, "", fail.Render("! "+m.err))
 	}
-	return ui.Overlay(title, body, nil, boxW)
+	return ui.Overlay(title, body, nil, boxW, ui.GroupAgents)
 }
 
 func wrapStyled(s string, w int, st lipgloss.Style) []string {

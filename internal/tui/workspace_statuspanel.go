@@ -65,7 +65,6 @@ func runnerStatuses(entries []frEntry, claudeAuth string) []statusRunner {
 
 // statusLines are the body of /status, styled.
 func statusLines(in statusIn) []string {
-	g := ui.GroupNameUsage
 	kv := func(k, v string) string { return dimText(padRight(k, 12)) + plainText(v) }
 	proj := in.project
 	if in.language != "" {
@@ -76,7 +75,7 @@ func statusLines(in statusIn) []string {
 		kv("Project", proj),
 		kv("Session", in.title+" · "+in.isolation),
 		"",
-		sectionHead(g, "RUNNERS"),
+		sectionHead(ui.GroupNameSession, "RUNNERS"),
 	}
 	if !in.runnersLoaded {
 		lines = append(lines, "  "+dimText("checking…"))
@@ -89,22 +88,22 @@ func statusLines(in statusIn) []string {
 			lines = append(lines, "  "+name+dimText("· "+r.state))
 		}
 	}
-	lines = append(lines, "", sectionHead(g, "PROVIDERS"))
+	lines = append(lines, "", sectionHead(ui.GroupNameAgents, "PROVIDERS"))
 	if len(in.providers) == 0 {
 		lines = append(lines, "  "+dimText("none connected · /provider add deepseek"))
 	}
 	for _, p := range in.providers {
 		lines = append(lines, "  "+plainText(padRight(p.name, 12))+dimText(padRight(p.masked, 12)+p.source))
 	}
-	lines = append(lines, "", sectionHead(g, "PLUGINS"),
+	lines = append(lines, "", sectionHead(ui.GroupNameProject, "PLUGINS"),
 		"  "+plainText(fmt.Sprintf("%d on · %d off", in.pluginsOn, in.pluginsOff)),
-		"", sectionHead(g, "RUN"),
+		"", sectionHead(ui.GroupNameRun, "RUN"),
 		"  "+kv("Routing", in.routing),
 		"  "+kv("Autonomy", in.autonomy),
 		"  "+kv("Coordinator", in.coordinator),
 		"  "+kv("Parallel", fmt.Sprintf("%d nodes at once", in.parallel)),
 		"  "+kv("Budget", in.budget),
-		"", sectionHead(g, "TODAY"))
+		"", sectionHead(ui.GroupNameUsage, "TODAY"))
 	if in.today == nil {
 		lines = append(lines, "  "+dimText("reading the saved sessions…"))
 	} else {
@@ -243,7 +242,7 @@ func (m workspaceModel) doctorOpts(o *ui.PanelOpts) {
 		o.Body = []string{dimText("running the checks…")}
 		return
 	}
-	o.Body = doctorLines(m.panel.docs, m.panelInner(o.Width))
+	o.Body = doctorLines(m.panel.docs, ui.PanelInner(m.width))
 }
 
 // doctorLines draws the checks: ✓ ok, ⚠ warning, ✗ failure, with the detail

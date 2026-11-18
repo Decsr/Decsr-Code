@@ -744,7 +744,7 @@ func (m workspaceModel) agentEditorBox() string {
 		body = append(body, "", lipgloss.NewStyle().Foreground(ui.Fail).Render("! "+truncateOneLine(ed.errText, inner-2)))
 	}
 	body = append(body, "", dim.Render("Tab next · ←/→ change · type a model · Enter save · Esc cancel"))
-	return ui.Overlay("Agent of "+n.ID+" · "+truncateOneLine(n.Title, boxW-20), body, nil, boxW)
+	return ui.Overlay("Agent of "+n.ID+" · "+truncateOneLine(n.Title, boxW-20), body, nil, boxW, ui.GroupAgents)
 }
 
 // ── The agent a node shows ───────────────────────────────────────────────────

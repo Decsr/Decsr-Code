@@ -558,7 +558,7 @@ func (m workspaceModel) listBox() string {
 			}
 			rows = append(rows, wsListItem{text: t})
 		}
-		return renderListBox("Resume a session", rows, m.listIdx, "no saved sessions in this project",
+		return renderListBox("Resume a session", ui.GroupSession, rows, m.listIdx, "no saved sessions in this project",
 			"↑↓ move · Enter load · d delete · Esc close", w, h)
 	case wsOverlayProjects:
 		var rows []wsListItem
@@ -574,7 +574,7 @@ func (m workspaceModel) listBox() string {
 			rows = append(rows, wsListItem{text: t, dim: p.missing})
 		}
 		rows = append(rows, wsListItem{text: "open path…"})
-		return renderListBox("Open a project", rows, m.listIdx, "",
+		return renderListBox("Open a project", ui.GroupProject, rows, m.listIdx, "",
 			"↑↓ move · Enter open · Esc close", w, h)
 	case wsOverlayProfiles:
 		var rows []wsListItem
@@ -586,7 +586,7 @@ func (m workspaceModel) listBox() string {
 			rows = append(rows, wsListItem{text: t})
 		}
 		rows = append(rows, wsListItem{text: "save current roles as…"})
-		return renderListBox("Profiles", rows, m.listIdx, "",
+		return renderListBox("Profiles", ui.GroupAgents, rows, m.listIdx, "",
 			"↑↓ move · Enter apply · d delete · Esc close", w, h)
 	case wsOverlayText:
 		boxW := min(70, w-2)
@@ -603,40 +603,23 @@ func (m workspaceModel) listBox() string {
 			}
 		}
 		body = append(body, "", dim.Render("Enter confirm · Esc cancel"))
-		return ui.Overlay(title, body, nil, boxW)
+		return ui.Overlay(title, body, nil, boxW, ui.GroupSession)
 	case wsOverlayInfo:
-		boxW := min(80, w-2)
-		rows := max(min(len(m.infoText), h-6), 1)
-		top := min(m.infoTop, max(len(m.infoText)-rows, 0))
-		var body []string
-		for i := top; i < top+rows && i < len(m.infoText); i++ {
-			body = append(body, m.infoText[i])
-		}
-		foot := "Esc close"
-		if len(m.infoText) > rows {
-			foot = "↑↓ scroll · Esc close"
-		}
-		body = append(body, "", lipgloss.NewStyle().Foreground(ui.Muted).Render(foot))
-		return ui.Overlay(m.infoName, body, nil, boxW)
+		return framed(m.infoName, m.infoColor, m.infoText, -1, m.infoTop, "↑↓ scroll · Esc close", w, h)
 	}
 	return ""
 }
 
 // renderListBox draws a selectable list. empty is shown when there are no
 // rows at all.
-func renderListBox(title string, rows []wsListItem, idx int, empty, footer string, width, height int) string {
-	boxW := min(76, width-2)
-	inner := boxW - 4
-	vis := min(max(height-2-2-2, 1), len(rows))
-	start := 0
-	if idx >= vis {
-		start = idx - vis + 1
-	}
+func renderListBox(title string, color lipgloss.TerminalColor, rows []wsListItem, idx int, empty, footer string, width, height int) string {
+	inner := ui.PanelInner(width)
 	var body []string
 	if len(rows) == 0 && empty != "" {
 		body = append(body, lipgloss.NewStyle().Foreground(ui.Muted).Render(empty))
 	}
-	for i := start; i < start+vis && i < len(rows); i++ {
+	first := len(body)
+	for i := range rows {
 		sel := i == idx
 		fg := ui.Text
 		if rows[i].dim {
@@ -658,15 +641,15 @@ func renderListBox(title string, rows []wsListItem, idx int, empty, footer strin
 		}
 		body = append(body, row)
 	}
-	body = append(body, "", lipgloss.NewStyle().Foreground(ui.Muted).Render(footer))
-	return ui.Overlay(ansi.Truncate(title, boxW-6, "…"), body, nil, boxW)
+	return framed(title, color, body, first+idx, 0, footer, width, height)
 }
 
 // ── /status and /cost ────────────────────────────────────────────────────────
 
-func (m workspaceModel) openInfo(title string, lines []string) workspaceModel {
+func (m workspaceModel) openInfo(title string, color lipgloss.TerminalColor, lines []string) workspaceModel {
 	m.overlay = wsOverlayInfo
 	m.infoName = title
+	m.infoColor = color
 	m.infoText = lines
 	m.infoTop = 0
 	return m

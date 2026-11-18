@@ -12,6 +12,7 @@ import (
 
 	"github.com/Decsr/Decsr-Code/internal/config"
 	"github.com/Decsr/Decsr-Code/internal/runner"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 )
 
 // modelMemory mode indices for the on-screen toggle.
@@ -252,7 +253,7 @@ func (m modelMemoryModel) View() string {
 	if panelW < 20 {
 		panelW = 20
 	}
-	panel := pixelPanel("◆ MODEL MEMORY", homePalette.accent, true,
+	panel := pixelPanel("◆ MODEL MEMORY", ui.Dark(ui.Local), true,
 		lipgloss.NewStyle().Width(panelW).Padding(0, 1), b.String())
 	if m.width > 100 {
 		panel = lipgloss.PlaceHorizontal(m.width, lipgloss.Center, panel)

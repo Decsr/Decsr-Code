@@ -26,7 +26,7 @@ func Header(left, right string, width int) string {
 	}
 	l := Truncate(left, room-2)
 	used := 2 + ansi.StringWidth(l)
-	out := fg(Accent).Render("◆") + " " + fg(Text).Render(l)
+	out := fg(BrandColor).Bold(true).Render("◆") + " " + fg(Text).Render(l)
 	return out + strings.Repeat(" ", max(width-used-rw, 0)) + fg(Muted).Render(right)
 }
 
@@ -275,10 +275,14 @@ func InputBox(view, placeholder string, width int, focused bool, chips string) s
 	return strings.Join(out, "\n")
 }
 
-// Overlay draws a titled box of width cells around body lines: a rounded
-// Accent border with the title in its top edge and, when hints are given, a
-// hint bar as the last row. Lines are cut to fit.
-func Overlay(title string, body []string, hints []Hint, width int) string {
+// Overlay draws a compact titled box of width cells around body lines: a
+// rounded border in color (nil = Accent) with the title in its top edge and,
+// when hints are given, a hint bar as the last row. Lines are cut to fit. Lists
+// and long text use the fixed Panel frame instead.
+func Overlay(title string, body []string, hints []Hint, width int, color lipgloss.TerminalColor) string {
+	if color == nil {
+		color = Accent
+	}
 	if width < 6 {
 		return ""
 	}
@@ -291,8 +295,8 @@ func Overlay(title string, body []string, hints []Hint, width int) string {
 		lines = append(lines, "", fit(strings.TrimPrefix(HintBar(hints, inner+2), "  "), inner))
 	}
 	st := lipgloss.NewStyle().Padding(0, 1).Width(width - 2)
-	box := st.Border(lipgloss.RoundedBorder(), false, true, true, true).BorderForeground(Accent).Render(strings.Join(lines, "\n"))
-	bs := fg(Accent)
+	box := st.Border(lipgloss.RoundedBorder(), false, true, true, true).BorderForeground(color).Render(strings.Join(lines, "\n"))
+	bs := fg(color)
 	label := " " + Truncate(title, max(width-6, 1)) + " "
 	fill := max(width-3-ansi.StringWidth(label), 0)
 	top := bs.Render("╭─") + fg(Text).Bold(true).Render(label) + bs.Render(strings.Repeat("─", fill)+"╮")

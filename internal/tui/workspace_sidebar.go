@@ -269,7 +269,7 @@ func (m workspaceModel) sidebarProgress() string {
 func (m workspaceModel) sidebarOverlayBox(mainH int) string {
 	bw := min(wsSidebarOverlayW, m.width-4)
 	bh := max(mainH, 5)
-	return ui.Overlay("Nodes", m.sidebarRows(bw-4, bh-2), nil, bw)
+	return ui.Overlay("Nodes", m.sidebarRows(bw-4, bh-2), nil, bw, ui.GroupRun)
 }
 
 // sbMove moves the sidebar cursor one row: through the nodes in order, then

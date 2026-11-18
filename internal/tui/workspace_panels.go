@@ -635,16 +635,7 @@ func fitRoleName(name string, w int) string {
 
 // renderPicker draws the role list box (assignment picker or /roles list).
 func renderPicker(title string, items []wsPickItem, idx int, footer string, width, height int) string {
-	boxW := min(70, width-2)
-	inner := boxW - 4
-	rows := max(height-2-2-2, 1) // box chrome 2, footer + blank 2, header/hint rows of the screen 2
-	if rows > len(items) {
-		rows = len(items)
-	}
-	start := 0
-	if idx >= rows {
-		start = idx - rows + 1
-	}
+	inner := ui.PanelInner(width)
 	nameW := 14
 	for _, it := range items {
 		if it.kind == "role" {
@@ -652,11 +643,10 @@ func renderPicker(title string, items []wsPickItem, idx int, footer string, widt
 		}
 	}
 	var body []string
-	for i := start; i < start+rows && i < len(items); i++ {
+	for i := range items {
 		body = append(body, renderPickRow(items[i], i == idx, inner, nameW))
 	}
-	body = append(body, "", lipgloss.NewStyle().Foreground(ui.Muted).Render(footer))
-	return ui.Overlay(ansi.Truncate(title, boxW-6, "…"), body, nil, boxW)
+	return framed(title, ui.GroupAgents, body, idx, 0, footer, width, height)
 }
 
 // ── Role form ────────────────────────────────────────────────────────────────
@@ -694,7 +684,7 @@ func renderRoleForm(nameView, descView string, focus int, canChange bool, inheri
 		}
 	}
 	body = append(body, "", dim.Render("Tab next · ←/→ toggle · Enter save · Esc cancel"))
-	return ui.Overlay("New role", body, nil, boxW)
+	return ui.Overlay("New role", body, nil, boxW, ui.GroupAgents)
 }
 
 // ── Command list ─────────────────────────────────────────────────────────────

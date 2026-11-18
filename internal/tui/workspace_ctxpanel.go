@@ -121,7 +121,7 @@ func (m workspaceModel) contextOpts(o *ui.PanelOpts) {
 		o.Body = []string{dimText("measuring what the agents receive…")}
 		return
 	}
-	o.Body = contextLines(*d, m.panelInner(o.Width))
+	o.Body = contextLines(*d, ui.PanelInner(m.width))
 }
 
 func contextLines(d ctxData, width int) []string {
@@ -266,7 +266,7 @@ func (m workspaceModel) memoryOpts(o *ui.PanelOpts) {
 		o.Body = []string{dimText("reading the project memory…")}
 		return
 	}
-	inner := m.panelInner(o.Width)
+	inner := ui.PanelInner(m.width)
 	head := lipgloss.NewStyle().Foreground(o.Color).Bold(true)
 	for _, l := range m.panel.memLines {
 		l = strings.TrimRight(htmlComment.ReplaceAllString(workspace.SanitizeText(l), ""), " ")

@@ -713,31 +713,21 @@ func (m HomeModel) renderLogo(maxW int) string {
 	tagStyle := lipgloss.NewStyle().Foreground(homePalette.dim)
 
 	if maxW < 62 {
-		titleStyle := lipgloss.NewStyle().Foreground(homePalette.accent).Bold(true)
+		titleStyle := lipgloss.NewStyle().Foreground(ui.Dark(ui.BrandColor)).Bold(true)
 		return lipgloss.JoinVertical(lipgloss.Center,
-			titleStyle.Render("◈ DECSR"),
+			titleStyle.Render("◆ DECSR"),
 			tagStyle.Render("AI multi-agent coding pipeline"),
 		)
 	}
 
-	// Nebula gradient (azure → sky → ice), one colour per pixel row.
-	rowColors := make([]lipgloss.TerminalColor, 5)
-	for r := range rowColors {
-		t := float64(r) / 4
-		if t < 0.5 {
-			rowColors[r] = lerpColor(galaxyAzure, galaxySky, t*2)
-		} else {
-			rowColors[r] = lerpColor(galaxySky, galaxyIce, (t-0.5)*2)
-		}
-	}
-	blockLines := renderBlockTextColored("DECSR", rowColors)
+	blockLines := ui.Logo(true)
 
 	lines := []string{renderStars(logoStarsTop)}
 	for i, bl := range blockLines {
 		lines = append(lines, renderStars(logoStarsLeft[i])+bl+renderStars(logoStarsRight[i]))
 	}
 	lines = append(lines, renderStars(logoStarsBottom))
-	lines = append(lines, tagStyle.Render("       AI-powered multi-agent coding pipeline"))
+	lines = append(lines, tagStyle.Render("       "+ui.Tagline))
 
 	block := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	return lipgloss.PlaceHorizontal(maxW, lipgloss.Center, block)
@@ -836,7 +826,7 @@ func (m HomeModel) renderInfoCard(contentWidth int) string {
 		if m.cachedRunner == unset {
 			row("RUNNER", inherits)
 		} else {
-			row("RUNNER", valueStyle.Render(m.cachedRunner)+dimStyle.Render(" (global)"))
+			row("RUNNER", lipgloss.NewStyle().Foreground(ui.Dark(ui.RunnerColor(m.cachedRunner))).Render(m.cachedRunner)+dimStyle.Render(" (global)"))
 		}
 		if m.cachedModel == unset {
 			row("MODEL", inherits)
@@ -875,7 +865,7 @@ func (m HomeModel) renderInfoCard(contentWidth int) string {
 				case ov.runner == unset && ov.model == unset:
 					info = inherits
 				default:
-					r, mdl := valueStyle.Render(ov.runner), valueStyle.Render(ov.model)
+					r, mdl := lipgloss.NewStyle().Foreground(ui.Dark(ui.RunnerColor(ov.runner))).Render(ov.runner), valueStyle.Render(ov.model)
 					if ov.runner == unset {
 						r = inherits
 					}
@@ -897,7 +887,7 @@ func (m HomeModel) renderInfoCard(contentWidth int) string {
 		}
 	}
 
-	return pixelPanel("◆ PROJECT", p.accent, false, card, strings.Join(lines, "\n"))
+	return pixelPanel("◆ PROJECT", ui.Dark(ui.GroupProject), false, card, strings.Join(lines, "\n"))
 }
 
 // agentsUniform reports whether every agent shares one runner, model and effort.
@@ -970,7 +960,6 @@ func sessionGlyphColor(kind string) lipgloss.Color {
 // cards, and gives the line of the selected row inside the block (-1 when the
 // selected row is not there). It is empty when there is nothing to list.
 func (m HomeModel) renderLeftLists(contentWidth int) (string, int) {
-	p := homePalette
 	cardW := homeCardWidth(contentWidth)
 	rowW := max(cardW-2, 24)
 	card := lipgloss.NewStyle().Padding(0, 1).Width(cardW)
@@ -993,7 +982,7 @@ func (m HomeModel) renderLeftLists(contentWidth int) (string, int) {
 			}
 			lines = append(lines, m.leftRow(g, r.label, sessionMeta(r.info, now), rowW, i == m.leftCur))
 		}
-		block := pixelPanel("◆ SESSIONS", p.accent, focused && m.leftCur >= nProj, card, strings.Join(lines, "\n"))
+		block := pixelPanel("◆ SESSIONS", ui.Dark(ui.GroupSession), focused && m.leftCur >= nProj, card, strings.Join(lines, "\n"))
 		blocks = append(blocks, block)
 		offset += lipgloss.Height(block)
 	}
@@ -1022,7 +1011,7 @@ func (m HomeModel) renderLeftLists(contentWidth int) (string, int) {
 			}
 			lines = append(lines, m.leftRow("", name, meta, rowW, i == m.leftCur))
 		}
-		blocks = append(blocks, pixelPanel("◆ RECENT PROJECTS", p.accent, focused && m.leftCur < nProj, card, strings.Join(lines, "\n")))
+		blocks = append(blocks, pixelPanel("◆ RECENT PROJECTS", ui.Dark(ui.GroupAgents), focused && m.leftCur < nProj, card, strings.Join(lines, "\n")))
 	}
 	if len(blocks) == 0 {
 		return "", -1
@@ -1040,24 +1029,30 @@ func (m HomeModel) renderMenu(contentWidth int) (string, int) {
 	// Each menu item gets its own accent color, keyed by action so dynamic
 	// items (Resume, Done Tasks) don't shift colors onto the wrong rows or onto
 	// the dim description color.
-	itemColorFor := func(action homeAction) lipgloss.Color {
+	itemColorFor := func(action homeAction) lipgloss.TerminalColor {
 		switch action {
-		case homeActionNewTask, homeActionResume, homeActionWorkspace:
-			return p.green
+		case homeActionWorkspace:
+			return ui.Dark(ui.GroupSession)
+		case homeActionNewTask:
+			return ui.Dark(ui.GroupRun)
+		case homeActionResume:
+			return ui.Dark(ui.OK)
 		case homeActionOpenProject, homeActionResumeProject:
-			return p.accent
-		case homeActionGlobalSettings, homeActionConnect:
-			return p.cyan
+			return ui.Dark(ui.GroupProject)
+		case homeActionGlobalSettings:
+			return ui.Dark(ui.GroupUsage)
+		case homeActionConnect:
+			return ui.Dark(ui.GroupAgents)
 		case homeActionModelMemory:
-			return p.gold
+			return ui.Dark(ui.Local)
 		case homeActionSetup:
-			return p.red
+			return ui.Dark(ui.RoleColor("coder_fixer"))
 		case homeActionClean:
-			return p.gold
+			return ui.Dark(ui.Warn)
 		case homeActionDoneTasks:
-			return p.bright
+			return ui.Dark(ui.Text)
 		case homeActionQuit:
-			return p.dim
+			return ui.Dark(ui.Fail)
 		default:
 			return p.bright
 		}
@@ -1127,7 +1122,7 @@ func (m HomeModel) renderMenu(contentWidth int) (string, int) {
 	}
 
 	card := lipgloss.NewStyle().Padding(0, 1).Width(cardW)
-	return pixelPanel("◆ ACTIONS", p.accent, focused, card, strings.Join(lines, "\n")), sel
+	return pixelPanel("◆ ACTIONS", ui.Dark(ui.GroupRun), focused, card, strings.Join(lines, "\n")), sel
 }
 
 func (m HomeModel) shortenProjectPath(path string) string {
@@ -1272,100 +1267,6 @@ func (m HomeModel) workspaceStatus() string {
 		return "◇ workspace ready"
 	}
 	return "◆ artifacts: " + strings.Join(found, ", ")
-}
-
-// ── Block-art pixel font ─────────────────────────────────────────────────────
-
-// blockGlyphs defines each letter as a 4-wide × 5-tall pixel grid.
-// '#' = filled pixel, '.' = empty pixel.
-var blockGlyphs = map[rune][]string{
-	'D': {"###.", "#..#", "#..#", "#..#", "###."},
-	'O': {".##.", "#..#", "#..#", "#..#", ".##."},
-	'R': {"###.", "#..#", "###.", "#.#.", "#..#"},
-	'C': {".###", "#...", "#...", "#...", ".###"},
-	'H': {"#..#", "#..#", "####", "#..#", "#..#"},
-	'E': {"####", "#...", "###.", "#...", "####"},
-	'S': {"####", "#...", ".##.", "...#", "####"},
-	'T': {"####", ".##.", ".##.", ".##.", ".##."},
-	'A': {".##.", "#..#", "####", "#..#", "#..#"},
-	' ': {"....", "....", "....", "....", "...."},
-}
-
-// blockPixelRows lays text out as 5 rows of '#'/'.' pixels.
-func blockPixelRows(text string) []string {
-	pixelRows := make([]string, 5)
-	for i, ch := range text {
-		glyph := blockGlyphs[ch]
-		if glyph == nil {
-			glyph = blockGlyphs[' ']
-		}
-		if i > 0 {
-			for r := range pixelRows {
-				pixelRows[r] += "."
-			}
-		}
-		for r := range pixelRows {
-			pixelRows[r] += glyph[r]
-		}
-	}
-	return pixelRows
-}
-
-// blockPairs groups the 5 pixel rows into 3 display rows (top, bottom or -1).
-var blockPairs = [][2]int{{0, 1}, {2, 3}, {4, -1}}
-
-// renderBlockTextColored is renderBlockText with a per-pixel-row colour
-// (len 5). With half-blocks, a cell holding two pixels of different rows uses
-// foreground = top colour and background = bottom colour, giving a smooth
-// vertical gradient at pixel resolution. A nil rowColors renders uncoloured.
-func renderBlockTextColored(text string, rowColors []lipgloss.TerminalColor) []string {
-	pixelRows := blockPixelRows(text)
-	result := make([]string, len(blockPairs))
-	for i, pair := range blockPairs {
-		top := pixelRows[pair[0]]
-		bot := strings.Repeat(".", len(top))
-		if pair[1] >= 0 {
-			bot = pixelRows[pair[1]]
-		}
-		var sb strings.Builder
-		for j := 0; j < len(top); j++ {
-			t, b := top[j] == '#', bot[j] == '#'
-			var ch string
-			var st lipgloss.Style
-			switch {
-			case t && b:
-				ch = "█"
-				if rowColors != nil {
-					if rowColors[pair[0]] == rowColors[pair[1]] {
-						st = lipgloss.NewStyle().Foreground(rowColors[pair[0]])
-					} else {
-						ch = "▀"
-						st = lipgloss.NewStyle().Foreground(rowColors[pair[0]]).Background(rowColors[pair[1]])
-					}
-				}
-			case t:
-				ch = "▀"
-				if rowColors != nil {
-					st = lipgloss.NewStyle().Foreground(rowColors[pair[0]])
-				}
-			case b:
-				ch = "▄"
-				if rowColors != nil {
-					st = lipgloss.NewStyle().Foreground(rowColors[pair[1]])
-				}
-			default:
-				sb.WriteRune(' ')
-				continue
-			}
-			if rowColors != nil {
-				sb.WriteString(st.Render(ch))
-			} else {
-				sb.WriteString(ch)
-			}
-		}
-		result[i] = sb.String()
-	}
-	return result
 }
 
 // resolveLanguageFromRoot detects project language from config or filesystem markers.

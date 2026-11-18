@@ -49,11 +49,7 @@ func renderHelpWithHeader(width, height int, header, title string, sections []he
 	if width >= 100 {
 		cols = 2
 	}
-	ow := min(width-4, 66)
-	if cols == 2 {
-		ow = min(width-4, 96)
-	}
-	inner := ow - 4
+	inner := ui.PanelInner(width)
 	colW := inner
 	if cols == 2 {
 		colW = (inner - 2) / 2
@@ -112,14 +108,15 @@ func renderHelpWithHeader(width, height int, header, title string, sections []he
 		lines = lines[:len(lines)-1]
 	}
 
-	// The box takes a border row top and bottom, a blank row and the hint row.
-	if room := height - 2 - 4; len(lines) > room {
+	// The frame takes the rows the screen leaves, less its borders.
+	if room := ui.PanelRows(ui.PanelOpts{ScreenW: width, ScreenH: height}); len(lines) > room {
 		if room < 1 {
 			return strings.Join(base, "\n")
 		}
 		lines = append(lines[:room-1], dim("…"))
 	}
-	box := ui.Overlay(helpTitle(title), lines, []ui.Hint{{Key: "? / Esc", Label: "close"}}, ow)
+	box := ui.Panel(ui.PanelOpts{Title: helpTitle(title), Color: ui.GroupSession, Body: lines,
+		Keys: []ui.Hint{{Key: "? / Esc", Label: "close"}}, ScreenW: width, ScreenH: height})
 	return ui.PlaceOverlay(strings.Join(base, "\n"), box, width, height)
 }
 

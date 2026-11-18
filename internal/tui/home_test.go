@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Decsr/Decsr-Code/internal/config"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -705,10 +706,14 @@ func TestNewHomeModel_NoResumeProjectWithoutArtifacts(t *testing.T) {
 	}
 }
 
-func TestBlockGlyphs_IncludesLogoWord(t *testing.T) {
-	for _, ch := range "DECSR" {
-		if _, ok := blockGlyphs[ch]; !ok {
-			t.Errorf("blockGlyphs is missing %q; the TUI logo would drop a letter", ch)
+func TestLogoIsSharedAndSizedLikeItsConstant(t *testing.T) {
+	rows := ui.Logo(true)
+	if len(rows) != 3 {
+		t.Fatalf("logo has %d rows, want 3", len(rows))
+	}
+	for _, r := range rows {
+		if w := ansi.StringWidth(r); w != ui.LogoWidth {
+			t.Errorf("logo row width %d, want %d", w, ui.LogoWidth)
 		}
 	}
 }

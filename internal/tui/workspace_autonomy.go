@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/Decsr/Decsr-Code/internal/notify"
+	"github.com/Decsr/Decsr-Code/internal/ui"
 	"github.com/Decsr/Decsr-Code/internal/workspace"
 )
 
@@ -347,7 +348,7 @@ func (m *workspaceModel) autoPRNote(st workspace.PRState) {
 func (m workspaceModel) cmdAutonomy(args string) (tea.Model, tea.Cmd) {
 	args = strings.TrimSpace(args)
 	if args == "" {
-		return m.openInfo("Autonomy", m.autonomyLines()), nil
+		return m.openInfo("Autonomy", ui.GroupRun, m.autonomyLines()), nil
 	}
 	v, ok := parseAutonomy(args)
 	if !ok {
