@@ -743,6 +743,7 @@ type workspaceModel struct {
 	outputs   map[string][]string
 	partial   map[string]string
 	outSize   map[string]int // bytes stored per node, partial line excluded
+	outMarks  map[string]*outMarks
 	runCtx    context.Context
 	runCancel context.CancelFunc
 	ticking   bool
@@ -863,6 +864,7 @@ func newWorkspaceModel(root string, cfg config.Config, deps wsDeps, opts ...Work
 		outputs:   map[string][]string{},
 		partial:   map[string]string{},
 		outSize:   map[string]int{},
+		outMarks:  map[string]*outMarks{},
 		runCtx:    runCtx,
 		runCancel: runCancel,
 		formName:  newField("snake_case_name"),
@@ -1709,6 +1711,7 @@ func (m workspaceModel) attachGraph(g *workspace.Graph, fresh bool) (workspaceMo
 	m.outputs = map[string][]string{}
 	m.partial = map[string]string{}
 	m.outSize = map[string]int{}
+	m.outMarks = map[string]*outMarks{}
 	m.screen = wsScreenMain
 	m.overlay = wsOverlayNone
 	m.scroll = 0
@@ -1737,6 +1740,7 @@ func (m workspaceModel) resetSession(s *workspace.Session) workspaceModel {
 	m.outputs = map[string][]string{}
 	m.partial = map[string]string{}
 	m.outSize = map[string]int{}
+	m.outMarks = map[string]*outMarks{}
 	m.screen = wsScreenMain
 	m.overlay = wsOverlayNone
 	m.scroll = 0
@@ -1769,6 +1773,7 @@ func (m workspaceModel) onEvent(msg wsEventMsg) (tea.Model, tea.Cmd) {
 		m.outputs[ev.NodeID] = nil
 		m.partial[ev.NodeID] = ""
 		m.outSize[ev.NodeID] = 0
+		delete(m.outMarks, ev.NodeID)
 		if m.iso != nil && !m.isoAnnounced {
 			m.isoAnnounced = true
 			m.say("system", fmt.Sprintf("Nodes run in isolated worktrees on branch %s. Use /merge to bring the result into your checkout.", m.iso.Branch()))
@@ -1779,6 +1784,8 @@ func (m workspaceModel) onEvent(msg wsEventMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.appendOutput(ev.NodeID, ev.Text)
 		}
+	case workspace.EventActivity:
+		m.markActivity(ev.NodeID, ev.Activity)
 	case workspace.EventDone:
 		m.setNotice("✓ "+ev.NodeID+" done", false)
 		m.sayQueuedReplyStarted(ev.NodeID)
@@ -1879,6 +1886,65 @@ func (m *workspaceModel) appendOutput(id, text string) {
 	}
 	m.outputs[id] = lines
 	m.outSize[id] = size
+	if om := m.outMarks[id]; om != nil {
+		om.total += len(complete)
+		om.trim(len(lines))
+	}
+}
+
+// outMarks says where in a node's output each step began, so the live pane can
+// show text and steps in the order they happened. total counts every complete
+// line ever stored, so a position stays valid when old lines are dropped.
+type outMarks struct {
+	total int
+	marks []outMark
+}
+
+// outMark is one step: it shows before the line whose number is pos.
+type outMark struct {
+	id  string
+	pos int
+}
+
+// wsMaxMarks caps the steps remembered per node.
+const wsMaxMarks = 1000
+
+// trim forgets the steps that began before the oldest stored line, and the
+// oldest ones beyond wsMaxMarks.
+func (o *outMarks) trim(stored int) {
+	first := o.total - stored
+	drop := 0
+	for drop < len(o.marks) && o.marks[drop].pos < first {
+		drop++
+	}
+	drop = max(drop, len(o.marks)-wsMaxMarks)
+	if drop > 0 {
+		o.marks = append([]outMark(nil), o.marks[drop:]...)
+	}
+}
+
+// markActivity notes the output position of the first event of an activity.
+// Message items are skipped: their text is already in the output.
+func (m *workspaceModel) markActivity(id string, a *runner.Activity) {
+	if a == nil || a.Kind == runner.ActMessage || id == "" {
+		return
+	}
+	om := m.outMarks[id]
+	if om == nil {
+		om = &outMarks{total: len(m.outputs[id])}
+		m.outMarks[id] = om
+	}
+	for i := len(om.marks) - 1; i >= 0; i-- {
+		if om.marks[i].id == a.ID {
+			return
+		}
+	}
+	pos := om.total
+	if cleanOutputLine(m.partial[id]) != "" {
+		pos++ // after the unfinished line
+	}
+	om.marks = append(om.marks, outMark{id: a.ID, pos: pos})
+	om.trim(len(m.outputs[id]))
 }
 
 // outputLines returns every stored line of a node plus its unfinished line.

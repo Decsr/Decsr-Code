@@ -298,3 +298,117 @@ func TestOutputScreenReloadsOnEdit(t *testing.T) {
 		t.Errorf("the fallback reloads a stale diff")
 	}
 }
+
+// liveTimelineHarness is a running node with no steps yet.
+func liveTimelineHarness(t *testing.T, w, h int) (*wsHarness, *workspace.Node) {
+	t.Helper()
+	hh := liveHarness(t, workspace.StatusRunning, 160, 45)
+	n := hh.m.g.Node("T1")
+	n.Activity = nil
+	return hh, n
+}
+
+// livePane is the live pane lines without styling.
+// livePane is the live pane lines without styling.
+func livePane(hh *wsHarness, n *workspace.Node, w, h int) []string {
+	var out []string
+	for _, l := range hh.m.liveLines(n, w, h) {
+		l, _, _ = strings.Cut(ansi.Strip(l), "│") // the files column
+		out = append(out, strings.TrimRight(l, " "))
+	}
+	return out
+}
+
+func TestLiveTimelineKeepsTextAndStepsInOrder(t *testing.T) {
+	hh, n := liveTimelineHarness(t, 160, 45)
+	step := func(a runner.Activity) {
+		n.Activity = append(n.Activity, a)
+		hh.m.markActivity("T1", &a)
+	}
+	hh.m.appendOutput("T1", "Let me look.")
+	step(mkAct("r1", runner.ActRead, runner.ActDone, "a.go"))
+	hh.m.appendOutput("T1", "\n\nNow the fix")
+	hh.m.markActivity("T1", &n.Activity[0]) // a repeated event keeps its place
+	step(mkAct("c1", runner.ActCommand, runner.ActRunning, "go test"))
+
+	body := strings.Join(livePane(hh, n, 100, 10)[2:], "\n")
+	order := []string{"Let me look.", "Read a.go", "Now the fix", "go test"}
+	at := -1
+	for _, s := range order {
+		i := strings.Index(body, s)
+		if i <= at {
+			t.Fatalf("%q out of order in:\n%s", s, body)
+		}
+		at = i
+	}
+	if strings.Count(body, "Read a.go") != 1 {
+		t.Errorf("a step shows once:\n%s", body)
+	}
+}
+
+func TestLiveTimelineClipsToNewest(t *testing.T) {
+	hh, n := liveTimelineHarness(t, 160, 45)
+	for i := 0; i < 30; i++ {
+		hh.m.appendOutput("T1", fmt.Sprintf("line %d\n", i))
+	}
+	hh.m.appendOutput("T1", "tail")
+	pane := livePane(hh, n, 100, 10)
+	if len(pane) != 10 {
+		t.Fatalf("rows = %d, want 10", len(pane))
+	}
+	if pane[9] != "  tail" || pane[8] != "  line 29" || strings.Contains(strings.Join(pane, "\n"), "line 5") {
+		t.Errorf("not the newest lines:\n%s", strings.Join(pane, "\n"))
+	}
+}
+
+func TestLiveTimelineWrapsText(t *testing.T) {
+	hh, n := liveTimelineHarness(t, 160, 45)
+	hh.m.appendOutput("T1", strings.Repeat("word ", 40)+"end\n")
+	pane := livePane(hh, n, 60, 10)
+	for _, l := range pane {
+		if ansi.StringWidth(l) > 60 {
+			t.Errorf("line %q is wider than the pane", l)
+		}
+	}
+	if joined := strings.Join(pane, "\n"); !strings.Contains(joined, "end") || strings.Count(joined, "word") != 40 {
+		t.Errorf("wrapped text lost words:\n%s", joined)
+	}
+}
+
+func TestLiveTimelineThinkingIsOneLine(t *testing.T) {
+	hh, n := liveTimelineHarness(t, 160, 45)
+	a := mkAct("t1", runner.ActThinking, runner.ActRunning, "Thinking (12 chars)")
+	a.Detail = "secret plan words"
+	n.Activity = append(n.Activity, a)
+	hh.m.markActivity("T1", &a)
+	body := strings.Join(livePane(hh, n, 100, 10)[2:], "\n")
+	if strings.Count(body, "thinking…") != 1 || strings.Contains(body, "secret") || strings.Contains(body, "chars") {
+		t.Errorf("thinking:\n%s", body)
+	}
+}
+
+func TestLiveTimelineSpinnerOnLastStep(t *testing.T) {
+	hh, n := liveTimelineHarness(t, 160, 45)
+	a := mkAct("c1", runner.ActCommand, runner.ActRunning, "go test")
+	n.Activity = append(n.Activity, a)
+	hh.m.markActivity("T1", &a)
+	body := strings.Join(livePane(hh, n, 100, 10)[2:], "\n")
+	if strings.Contains(body, actGlyph(runner.ActCommand)) || !strings.Contains(body, "go test") {
+		t.Errorf("the running step shows the spinner:\n%s", body)
+	}
+}
+
+func TestLiveMarksSurviveDroppedLines(t *testing.T) {
+	hh, n := liveTimelineHarness(t, 160, 45)
+	for i := 0; i < wsMaxOutput+50; i++ {
+		hh.m.appendOutput("T1", fmt.Sprintf("l%d\n", i))
+	}
+	a := mkAct("r1", runner.ActRead, runner.ActDone, "a.go")
+	n.Activity = append(n.Activity, a)
+	hh.m.markActivity("T1", &a)
+	hh.m.appendOutput("T1", "after\n")
+	pane := livePane(hh, n, 100, 10)
+	if pane[len(pane)-1] != "  after" || !strings.Contains(pane[len(pane)-2], "Read a.go") {
+		t.Errorf("step lost its place:\n%s", strings.Join(pane, "\n"))
+	}
+}

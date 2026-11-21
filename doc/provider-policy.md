@@ -75,3 +75,6 @@ Re-read these when a check is unclear or a rule may have changed:
   saved in `~/.decsr/plan-limits.json`. decsr calls no account endpoint, starts
   no run to refresh them, and nothing schedules, retries or waits based on
   these numbers.
+- Live text in the node pane: pass. The claude runner adds the documented
+  `--include-partial-messages` flag of the unmodified binary; it changes only
+  how the output stream is cut, not what is sent or run.

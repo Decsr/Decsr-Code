@@ -299,8 +299,12 @@ node keys work with focus on the sidebar or on the main pane, in either mode.
 **Live pane.** While the selected node runs, a pane about 10 rows tall sits at
 the bottom of the graph. It starts with the running line, `⠋ claude · opus-5-5
 · effort medium · 1m 12s · ↑ 182k (164k cached) ↓ 2.1k` (`~` marks estimated
-tokens, the effort and cached parts are left out when empty), then the last
-steps with the current one on a spinner, and from 100 columns the files edited
+tokens, the effort and cached parts are left out when empty), then one
+timeline of the node's text and steps in the order they happen, as many of the
+newest lines as fit, with the current step on a spinner. Text wraps to the
+pane; thinking shows as a single `thinking…` line, never its text. On claude the
+text streams token by token; opencode and dsh show it per message, and codex
+shows it at the end. The chat still gets only the final answer. From 100 columns the files edited
 so far with `+`/`−` counts (below that, `N files changed`). `v` hides or shows
 it for the session; `i` still toggles the inspector only. Running cards show
 `· 184k tok` after the duration.

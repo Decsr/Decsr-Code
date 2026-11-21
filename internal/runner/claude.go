@@ -23,7 +23,7 @@ type ClaudeRunner struct {
 }
 
 // Complete implements LLMRunner by streaming the Claude CLI output incrementally.
-// Uses `--output-format stream-json --verbose` so the TUI shows progress live
+// Uses `--output-format stream-json --verbose --include-partial-messages` so the TUI shows progress live
 // instead of a single burst at the end of generation.
 func (r ClaudeRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan Token, error) {
 	prompt := buildClaudePrompt(req.Messages)
@@ -58,7 +58,7 @@ func (r ClaudeRunner) Complete(ctx context.Context, req CompletionRequest) (<-ch
 // A one-shot call does not keep its session (--no-session-persistence); a call
 // with keep set does, so a later one can resume it with --resume.
 func claudeBaseArgs(agent, mcp bool, allowed []string, keep bool) []string {
-	args := []string{"--output-format", "stream-json", "--verbose"}
+	args := []string{"--output-format", "stream-json", "--verbose", "--include-partial-messages"}
 	if !keep {
 		args = append(args, "--no-session-persistence")
 	}
@@ -297,6 +297,7 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 	var finalUsage TokenUsage
 	gotUsage := false
 	acts := newClaudeActivities()
+	partials := newClaudePartials()
 	var liveUsage claudeLiveUsage
 	// limited is set when the result event reports an error that reads as a
 	// usage limit ("... limit reached ∙ resets 2pm"). The same text may also
@@ -322,16 +323,32 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 			if evt.RateLimitInfo != nil {
 				recordClaudeRateLimit(*evt.RateLimitInfo, time.Now())
 			}
+		case "stream_event":
+			// Lines of a sub-agent are left to its full assistant events.
+			if evt.ParentToolUseID != "" {
+				break
+			}
+			partials.event(evt.Event, &emitted, ch)
 		case "assistant":
 			if p := liveUsage.add(evt.Message); p != nil {
 				ch <- Token{Progress: p}
 			}
 			text := assistantText(evt.Message.Content)
-			delta := computeDelta(emitted.String(), text)
-			// Text from a later turn (after tool calls) is a new paragraph.
-			newTurn := delta != "" && emitted.Len() > 0 && delta == text
-			if newTurn {
-				delta = "\n\n" + delta
+			var delta string
+			newTurn := false
+			if got, ok := partials.streamed[evt.Message.ID]; ok && evt.Message.ID != "" {
+				// The text came from deltas already: send only what they missed.
+				if len(text) > len(got) && strings.HasPrefix(text, got) {
+					delta = text[len(got):]
+					partials.streamed[evt.Message.ID] = text
+				}
+			} else {
+				delta = computeDelta(emitted.String(), text)
+				// Text from a later turn (after tool calls) is a new paragraph.
+				newTurn = delta != "" && emitted.Len() > 0 && delta == text
+				if newTurn {
+					delta = "\n\n" + delta
+				}
 			}
 			if delta != "" {
 				ch <- Token{Text: delta, NewTurn: newTurn}
@@ -343,7 +360,11 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 			for _, note := range toolUseNotices(evt.Message.Content) {
 				ch <- Token{Reasoning: note}
 			}
-			for _, a := range acts.assistant(evt.Message, text, time.Now()) {
+			msg := evt.Message
+			if partials.thinking[msg.ID] {
+				msg.Content = withoutThinking(msg.Content)
+			}
+			for _, a := range acts.assistant(msg, text, time.Now()) {
 				ch <- Token{Activity: a}
 			}
 		case "user":
@@ -405,6 +426,70 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 	ch <- Token{Done: true, Usage: &finalUsage, Denials: denials}
 }
 
+// event handles one wrapped API event. Text deltas become text tokens at once;
+// a thinking block becomes one running thinking activity that is finished at
+// the end of the block, and its text is never sent as text. A text delta that
+// is the first of a message after earlier text starts a new turn.
+func (p *claudePartials) event(ev claudeAPIEvent, emitted *strings.Builder, ch chan<- Token) {
+	switch ev.Type {
+	case "message_start":
+		p.msg = ev.Message.ID
+		p.blocks = map[int]*claudeThinkingBlock{}
+	case "content_block_start":
+		if ev.ContentBlock.Type != "thinking" {
+			return
+		}
+		b := &claudeThinkingBlock{id: newActivityID("think"), started: time.Now()}
+		p.blocks[ev.Index] = b
+		p.thinking[p.msg] = true
+		ch <- Token{Activity: &Activity{ID: b.id, Kind: ActThinking, State: ActRunning, Title: "Thinking…", At: b.started}}
+	case "content_block_delta":
+		switch ev.Delta.Type {
+		case "text_delta":
+			if ev.Delta.Text == "" {
+				return
+			}
+			_, started := p.streamed[p.msg]
+			newTurn := !started && emitted.Len() > 0
+			text := ev.Delta.Text
+			p.streamed[p.msg] += text
+			if newTurn {
+				text = "\n\n" + text
+			}
+			ch <- Token{Text: text, NewTurn: newTurn}
+			emitted.WriteString(text)
+		case "thinking_delta":
+			if b := p.blocks[ev.Index]; b != nil {
+				b.text.WriteString(ev.Delta.Thinking)
+			}
+		}
+	case "content_block_stop":
+		b := p.blocks[ev.Index]
+		if b == nil {
+			return
+		}
+		delete(p.blocks, ev.Index)
+		now := time.Now()
+		th := b.text.String()
+		ch <- Token{Activity: &Activity{
+			ID: b.id, Kind: ActThinking, State: ActDone,
+			Title: fmt.Sprintf("Thinking (%d chars)", len([]rune(th))), Detail: Clip(th, thinkingExcerpt),
+			Duration: now.Sub(b.started), At: now,
+		}}
+	}
+}
+
+// withoutThinking drops the thinking blocks of a message.
+func withoutThinking(content []claudeStreamContent) []claudeStreamContent {
+	var out []claudeStreamContent
+	for _, c := range content {
+		if c.Type != "thinking" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // claudeDenials turns the refused tool calls of a result event into Denials,
 // each tool and command once.
 func claudeDenials(in []claudePermissionDenial) []Denial {
@@ -456,6 +541,46 @@ type claudeStreamEvent struct {
 	PermissionDenials []claudePermissionDenial `json:"permission_denials"`
 	// RateLimitInfo is set on a rate_limit_event: the plan windows.
 	RateLimitInfo *claudeRateLimitInfo `json:"rate_limit_info"`
+	// Event is the wrapped API event of a stream_event line, sent with
+	// --include-partial-messages. ParentToolUseID is set when a sub-agent
+	// produced the line.
+	Event           claudeAPIEvent `json:"event"`
+	ParentToolUseID string         `json:"parent_tool_use_id"`
+}
+
+// claudeAPIEvent is the Messages API streaming event inside a stream_event
+// line: message_start, content_block_start, content_block_delta,
+// content_block_stop, message_delta and message_stop.
+type claudeAPIEvent struct {
+	Type         string                `json:"type"`
+	Index        int                   `json:"index"`
+	Message      struct{ ID string }   `json:"message"`       // message_start
+	ContentBlock struct{ Type string } `json:"content_block"` // content_block_start
+	Delta        struct {
+		Type     string `json:"type"` // text_delta, thinking_delta, input_json_delta, ...
+		Text     string `json:"text"`
+		Thinking string `json:"thinking"`
+	} `json:"delta"`
+}
+
+// claudePartials follows the stream_event lines of a run. It remembers the text
+// already streamed per message, so the full assistant event of the same message
+// adds nothing twice, and the open thinking blocks.
+type claudePartials struct {
+	msg      string                       // id of the message being streamed
+	streamed map[string]string            // message id -> text sent from deltas
+	thinking map[string]bool              // message id -> thinking was streamed
+	blocks   map[int]*claudeThinkingBlock // open thinking blocks by index
+}
+
+type claudeThinkingBlock struct {
+	id      string
+	text    strings.Builder
+	started time.Time
+}
+
+func newClaudePartials() *claudePartials {
+	return &claudePartials{streamed: map[string]string{}, thinking: map[string]bool{}, blocks: map[int]*claudeThinkingBlock{}}
 }
 
 type claudePermissionDenial struct {

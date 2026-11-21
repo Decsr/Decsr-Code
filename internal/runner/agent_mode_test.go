@@ -49,7 +49,7 @@ func claudeArgv(t *testing.T, req CompletionRequest) []string {
 
 func TestClaudeTextModeKeepsToolsOff(t *testing.T) {
 	got := claudeArgv(t, CompletionRequest{})
-	want := []string{"--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--setting-sources", "project,local", "--tools", "", "--model", "claude-opus-5-5", "--effort", "high"}
+	want := []string{"--output-format", "stream-json", "--verbose", "--include-partial-messages", "--no-session-persistence", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--setting-sources", "project,local", "--tools", "", "--model", "claude-opus-5-5", "--effort", "high"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %q, want %q", got, want)
 	}
@@ -103,7 +103,7 @@ func TestClaudeAgentModeAllowList(t *testing.T) {
 		t.Fatalf("tools = %q", tools)
 	}
 	got := claudeArgv(t, CompletionRequest{Agent: true, AllowedTools: tools})
-	want := []string{"--output-format", "stream-json", "--verbose", "--no-session-persistence",
+	want := []string{"--output-format", "stream-json", "--verbose", "--include-partial-messages", "--no-session-persistence",
 		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--setting-sources", "project,local",
 		"--tools", "Read,Edit,Write,Glob,Grep,Bash",
 		"--allowedTools", strings.Join(wantTools, ","),
@@ -125,7 +125,7 @@ func TestClaudeAgentModeReadOnlyRole(t *testing.T) {
 		t.Fatalf("read-only tools = %q", tools)
 	}
 	got := claudeArgv(t, CompletionRequest{Agent: true, ReadOnly: true, AllowedTools: tools})
-	want := []string{"--output-format", "stream-json", "--verbose", "--no-session-persistence",
+	want := []string{"--output-format", "stream-json", "--verbose", "--include-partial-messages", "--no-session-persistence",
 		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--setting-sources", "project,local",
 		"--tools", "Read,Glob,Grep,WebSearch,WebFetch,Bash",
 		"--allowedTools", strings.Join(wantTools, ","),

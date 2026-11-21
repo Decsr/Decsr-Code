@@ -184,8 +184,8 @@ func (m workspaceModel) liveHeight(mainH int) int {
 	return h
 }
 
-// liveLines is the live pane: a title row, the running line, then the last
-// steps on the left and the changed files on the right, in exactly h rows of w
+// liveLines is the live pane: a title row, the running line, then the newest
+// text and steps on the left and the changed files on the right, in exactly h rows of w
 // cells.
 func (m workspaceModel) liveLines(n *workspace.Node, w, h int) []string {
 	dim := lipgloss.NewStyle().Foreground(ui.Muted)
@@ -225,25 +225,90 @@ func (m workspaceModel) liveLines(n *workspace.Node, w, h int) []string {
 	return out
 }
 
-// liveSteps is the last steps of n, rows of them, the newest at the bottom;
-// the step in progress shows the spinner.
+// liveItem is one entry of the live timeline: a line of text or a step.
+type liveItem struct {
+	text string
+	act  *runner.Activity
+}
+
+// liveTimeline is the text lines of n and its steps in the order they
+// happened. A step shows before the output line it preceded; steps with no
+// recorded place (and the unfinished text line) come last.
+func (m workspaceModel) liveTimeline(n *workspace.Node) []liveItem {
+	lines := m.outputs[n.ID]
+	total := len(lines)
+	var marks []outMark
+	if om := m.outMarks[n.ID]; om != nil {
+		total, marks = om.total, om.marks
+	}
+	byID := make(map[string]*runner.Activity, len(n.Activity))
+	for i := range n.Activity {
+		byID[n.Activity[i].ID] = &n.Activity[i]
+	}
+	placed := make(map[string]bool, len(marks))
+	var out []liveItem
+	next := 0
+	flush := func(upTo int) {
+		for ; next < len(marks) && marks[next].pos <= upTo; next++ {
+			if a := byID[marks[next].id]; a != nil && !placed[a.ID] {
+				placed[a.ID] = true
+				out = append(out, liveItem{act: a})
+			}
+		}
+	}
+	first := total - len(lines)
+	for k, l := range lines {
+		flush(first + k)
+		if strings.TrimSpace(l) != "" {
+			out = append(out, liveItem{text: l})
+		}
+	}
+	if p := cleanOutputLine(m.partial[n.ID]); strings.TrimSpace(p) != "" {
+		flush(total)
+		out = append(out, liveItem{text: p})
+	}
+	flush(int(^uint(0) >> 1))
+	for i := range n.Activity {
+		a := &n.Activity[i]
+		if !placed[a.ID] && a.Kind != runner.ActMessage {
+			out = append(out, liveItem{act: a})
+		}
+	}
+	return out
+}
+
+// liveSteps is the newest rows of the timeline of n, the newest at the bottom:
+// text wrapped to w cells and one line per step. A thinking step shows as
+// "thinking…" only. The step in progress, when it is last, shows the spinner.
 func (m workspaceModel) liveSteps(n *workspace.Node, w, rows int) []string {
 	dim := lipgloss.NewStyle().Foreground(ui.Muted)
-	acts := n.Activity
-	if len(acts) > rows {
-		acts = acts[len(acts)-rows:]
+	text := lipgloss.NewStyle().Foreground(ui.Text)
+	items := m.liveTimeline(n)
+	if len(items) > rows {
+		items = items[len(items)-rows:]
 	}
-	out := make([]string, 0, rows)
-	if len(acts) == 0 {
-		out = append(out, dim.Render("waiting for the first step…"))
-	}
-	spin := pixelSpinner.Frames[m.spin%len(pixelSpinner.Frames)]
-	for i, a := range acts {
-		l := activityLine(a, m.now(), w)
-		if a.State == runner.ActRunning && i == len(acts)-1 {
-			l = strings.Replace(l, actGlyph(a.Kind), lipgloss.NewStyle().Foreground(ui.Accent).Render(spin), 1)
+	var out []string
+	for _, it := range items {
+		switch {
+		case it.act == nil:
+			for _, l := range strings.Split(ansi.Wrap(it.text, max(w, 1), ""), "\n") {
+				out = append(out, text.Render(l))
+			}
+		case it.act.Kind == runner.ActThinking:
+			out = append(out, dim.Render(actGlyph(it.act.Kind)+" thinking…"))
+		default:
+			out = append(out, activityLine(*it.act, m.now(), w))
 		}
-		out = append(out, l)
+	}
+	if len(out) > rows {
+		out = out[len(out)-rows:]
+	}
+	if len(items) == 0 {
+		out = append(out, dim.Render("waiting for the first output…"))
+	} else if a := items[len(items)-1].act; a != nil && a.State == runner.ActRunning {
+		spin := pixelSpinner.Frames[m.spin%len(pixelSpinner.Frames)]
+		last := len(out) - 1
+		out[last] = strings.Replace(out[last], actGlyph(a.Kind), lipgloss.NewStyle().Foreground(ui.Accent).Render(spin), 1)
 	}
 	for len(out) < rows {
 		out = append(out, "")

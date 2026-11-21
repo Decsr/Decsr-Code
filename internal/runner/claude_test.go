@@ -224,7 +224,7 @@ func TestStreamClaudeOutput_PermissionDenials(t *testing.T) {
 func TestClaudeLeadArgsAreReadOnly(t *testing.T) {
 	args := claudeBaseArgs(true, false, LeadTools(), true)
 	got := strings.Join(args, " ")
-	want := `--output-format stream-json --verbose --strict-mcp-config --mcp-config {"mcpServers":{}} --setting-sources project,local ` +
+	want := `--output-format stream-json --verbose --include-partial-messages --strict-mcp-config --mcp-config {"mcpServers":{}} --setting-sources project,local ` +
 		`--tools Read,Grep,Glob,Bash ` +
 		`--allowedTools Read,Grep,Glob,Bash(git log:*),Bash(git diff:*),Bash(git status:*),Bash(git show:*),Bash(claude plugin list:*),Bash(claude plugin marketplace list:*),Bash(claude mcp list:*) --permission-mode dontAsk`
 	if got != want {
@@ -248,5 +248,147 @@ func TestContextWindow(t *testing.T) {
 		if got := ContextWindow(c.runner, c.model); got != c.want {
 			t.Errorf("ContextWindow(%q, %q) = %d, want %d", c.runner, c.model, got, c.want)
 		}
+	}
+}
+
+// partialStream is a run with partial messages: a thinking block and a text
+// block streamed in pieces, a tool call, then a second message. Each full
+// assistant event arrives after the stream events of its message.
+const partialStream = `{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_1","role":"assistant","content":[]}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"secret plan"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Let me "}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"look."}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_stop","index":1},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"tu_1","name":"Read","input":{}}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"file_path\":\"a.go\"}"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_stop","index":2},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"tool_use"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"message_stop"},"parent_tool_use_id":null}
+{"type":"assistant","message":{"id":"msg_1","content":[{"type":"thinking","thinking":"secret plan"}]},"parent_tool_use_id":null}
+{"type":"assistant","message":{"id":"msg_1","content":[{"type":"text","text":"Let me look."}]},"parent_tool_use_id":null}
+{"type":"assistant","message":{"id":"msg_1","content":[{"type":"tool_use","id":"tu_1","name":"Read","input":{"file_path":"a.go"}}]},"parent_tool_use_id":null}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":"ok"}]},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_2","role":"assistant","content":[]}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Here is "}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"the fix."}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"message_stop"},"parent_tool_use_id":null}
+{"type":"assistant","message":{"id":"msg_2","content":[{"type":"text","text":"Here is the fix."}]},"parent_tool_use_id":null}
+{"type":"result","subtype":"success","result":"Here is the fix.","usage":{"input_tokens":10,"output_tokens":3}}
+`
+
+func TestStreamClaudeOutput_PartialTextStreamsInPieces(t *testing.T) {
+	var pieces []string
+	var turns []bool
+	for _, tok := range streamClaudeTokens(t, partialStream) {
+		if tok.Text != "" {
+			pieces = append(pieces, tok.Text)
+			turns = append(turns, tok.NewTurn)
+		}
+	}
+	wantPieces := []string{"Let me ", "look.", "\n\nHere is ", "the fix."}
+	if !reflect.DeepEqual(pieces, wantPieces) {
+		t.Errorf("pieces = %q, want %q", pieces, wantPieces)
+	}
+	// Only the first piece of the second message starts a new turn, and the
+	// full assistant events add no text a second time.
+	if !reflect.DeepEqual(turns, []bool{false, false, true, false}) {
+		t.Errorf("new-turn flags = %v", turns)
+	}
+}
+
+func TestStreamClaudeOutput_PartialThinkingIsNotText(t *testing.T) {
+	var think []Activity
+	var text strings.Builder
+	for _, tok := range streamClaudeTokens(t, partialStream) {
+		text.WriteString(tok.Text)
+		if tok.Activity != nil && tok.Activity.Kind == ActThinking {
+			think = append(think, *tok.Activity)
+		}
+	}
+	if strings.Contains(text.String(), "secret") {
+		t.Errorf("thinking leaked into the text: %q", text.String())
+	}
+	if len(think) != 2 || think[0].State != ActRunning || think[1].State != ActDone || think[0].ID != think[1].ID {
+		t.Errorf("thinking activities = %+v, want one block running then done", think)
+	}
+}
+
+func TestStreamClaudeOutput_PartialToolLineOnce(t *testing.T) {
+	var notes, tools int
+	for _, tok := range streamClaudeTokens(t, partialStream) {
+		if strings.HasPrefix(tok.Reasoning, "⚙ Read a.go") {
+			notes++
+		}
+		if tok.Activity != nil && tok.Activity.Kind == ActRead && tok.Activity.State == ActRunning {
+			tools++
+		}
+	}
+	if notes != 1 || tools != 1 {
+		t.Errorf("tool notices = %d, running tool activities = %d, want 1 each", notes, tools)
+	}
+}
+
+func TestStreamClaudeOutput_PartialSubAgentTextIgnored(t *testing.T) {
+	stream := `{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_s"}},"parent_tool_use_id":"tu_9"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"inner"}},"parent_tool_use_id":"tu_9"}
+{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_1"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"outer"}},"parent_tool_use_id":null}
+{"type":"assistant","message":{"id":"msg_1","content":[{"type":"text","text":"outer"}]},"parent_tool_use_id":null}
+{"type":"result","subtype":"success","result":"outer","usage":{"input_tokens":1,"output_tokens":1}}
+`
+	if got := runStreamClaude(t, stream); got != "outer" {
+		t.Errorf("text = %q, want only the node's own", got)
+	}
+}
+
+func TestStreamClaudeOutput_PartialMissedDeltaIsCompleted(t *testing.T) {
+	stream := `{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_1"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}},"parent_tool_use_id":null}
+{"type":"assistant","message":{"id":"msg_1","content":[{"type":"text","text":"Hello"}]},"parent_tool_use_id":null}
+{"type":"result","subtype":"success","result":"Hello","usage":{"input_tokens":1,"output_tokens":1}}
+`
+	if got := runStreamClaude(t, stream); got != "Hello" {
+		t.Errorf("text = %q", got)
+	}
+}
+
+// TestStreamClaudeOutput_RealPartialRun feeds a captured run: one message with
+// text and a Read call (one assistant event per content block, same id), then
+// a second message with text only.
+func TestStreamClaudeOutput_RealPartialRun(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "claude_partial_tool.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const (
+		first  = "I'll read a.txt and summarize what it says."
+		second = `The file a.txt contains only the word "hello" on its first line. Nothing else appears in the file.`
+	)
+	var text, answer strings.Builder
+	newTurns, reads := 0, 0
+	for _, tok := range streamClaudeTokens(t, string(raw)) {
+		if tok.NewTurn {
+			newTurns++
+			answer.Reset() // the worker takes the last turn as the answer
+		}
+		text.WriteString(tok.Text)
+		answer.WriteString(tok.Text)
+		if strings.HasPrefix(tok.Reasoning, "⚙ Read") {
+			reads++
+		}
+	}
+	if want := first + "\n\n" + second; text.String() != want {
+		t.Errorf("text = %q, want %q", text.String(), want)
+	}
+	if got := strings.TrimSpace(answer.String()); got != second {
+		t.Errorf("answer = %q", got)
+	}
+	if newTurns != 1 || reads != 1 {
+		t.Errorf("new turns = %d, read notices = %d, want 1 each", newTurns, reads)
 	}
 }
