@@ -175,18 +175,16 @@ func TestEngineCarriesTheAnswerOfAReadOnlyTask(t *testing.T) {
 		return Result{Summary: "s", Answer: "Everything is fine."}, nil
 	}
 	ex.behavior["T2"] = func(context.Context) (Result, error) {
-		return Result{Summary: "s", Answer: "ignored"}, nil
+		return Result{Summary: "s"}, nil
 	}
-	ro, rw := work("T1"), work("T2")
-	ro.ReadOnlyTask = true
-	e := NewEngine(&Graph{Nodes: []*Node{ro, rw}}, ex, 2, "")
+	e := NewEngine(&Graph{Nodes: []*Node{work("T1"), work("T2")}}, ex, 2, "")
 	_ = e.Run(context.Background(), "T1")
 	if ev := waitEvent(t, e, EventDone, "T1"); ev.Answer != "Everything is fine." {
 		t.Errorf("answer = %q", ev.Answer)
 	}
 	_ = e.Run(context.Background(), "T2")
 	if ev := waitEvent(t, e, EventDone, "T2"); ev.Answer != "" {
-		t.Errorf("a node that writes has no answer, got %q", ev.Answer)
+		t.Errorf("a node without an answer has none, got %q", ev.Answer)
 	}
 	if g := e.Snapshot(); !g.Node("T1").Answered || g.Node("T2").Answered {
 		t.Errorf("answered flags: %v %v", g.Node("T1").Answered, g.Node("T2").Answered)
@@ -202,7 +200,16 @@ func TestExecReadOnlyTaskResultCarriesTheBody(t *testing.T) {
 		t.Fatalf("res=%+v err=%v", res, err)
 	}
 	g.Nodes[0].ReadOnlyTask = false
-	if res, _ = ex.Run(context.Background(), g, g.Nodes[0], func(Event) {}); res.Answer != "" {
-		t.Errorf("answer %q for a task that is not marked read-only", res.Answer)
+	if res, _ = ex.Run(context.Background(), g, g.Nodes[0], func(Event) {}); res.Answer != "The code is fine." {
+		t.Errorf("answer %q for a read-only role", res.Answer)
+	}
+}
+
+func TestExecWritingNodeHasNoAnswer(t *testing.T) {
+	f := &execFake{text: "Done.\n\nREPORT\nstatus: done\nsummary: fine\n"}
+	ex := newTestExec(t, config.DefaultConfig(), f, nil)
+	g := &Graph{Nodes: []*Node{{ID: "T1", Title: "t", Kind: KindWork, Role: "coder"}}}
+	if res, _ := ex.Run(context.Background(), g, g.Nodes[0], func(Event) {}); res.Answer != "" {
+		t.Errorf("answer %q for a node that writes", res.Answer)
 	}
 }

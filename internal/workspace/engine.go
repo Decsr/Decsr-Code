@@ -741,7 +741,7 @@ func (e *Engine) runNode(s started) {
 		n.Commit = res.Commit
 		n.Warnings = append([]string(nil), res.Warnings...)
 		fin = Event{NodeID: id, Type: EventDone, Text: n.Summary}
-		if n.Status == StatusDone && n.Kind == KindWork && n.ReadOnlyTask && strings.TrimSpace(res.Answer) != "" {
+		if n.Status == StatusDone && n.Kind == KindWork && strings.TrimSpace(res.Answer) != "" {
 			n.Answered = true
 			fin.Answer = res.Answer
 		}

@@ -466,6 +466,24 @@ func TestParseSplitWritesFlag(t *testing.T) {
 	}
 }
 
+func TestParseSplitReadOnlyRoleIsReadOnlyTask(t *testing.T) {
+	out := `===TASKS===
+[{"key":"T1","title":"Review","description":"d","role":"reviewer","writes":true,"depends_on":[]},
+ {"key":"T2","title":"Audit","description":"d","role":"security","depends_on":[]},
+ {"key":"T3","title":"Fix","description":"d","role":"coder","depends_on":[]}]
+===END===`
+	g, err := ParseSplit("x", out, testRoles())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"T1": true, "T2": true, "T3": false}
+	for _, nd := range g.Nodes {
+		if nd.ReadOnlyTask != want[nd.ID] {
+			t.Errorf("%s ReadOnlyTask = %v, want %v", nd.ID, nd.ReadOnlyTask, want[nd.ID])
+		}
+	}
+}
+
 func TestParseSplitAnswer(t *testing.T) {
 	out := "===ANSWER===\nIt is a Go CLI.\n\nSee `internal/tui`.\n===END==="
 	g, err := ParseSplit("what is this", out, testRoles())

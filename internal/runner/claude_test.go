@@ -100,6 +100,17 @@ func TestParseClaudeStreamEvent_Result(t *testing.T) {
 // returns the concatenated emitted text.
 func runStreamClaude(t *testing.T, ndjson string) string {
 	t.Helper()
+	var sb strings.Builder
+	for _, tok := range streamClaudeTokens(t, ndjson) {
+		sb.WriteString(tok.Text)
+	}
+	return sb.String()
+}
+
+// streamClaudeTokens drives streamClaudeOutput with a fake NDJSON stream and
+// returns the tokens it sent.
+func streamClaudeTokens(t *testing.T, ndjson string) []Token {
+	t.Helper()
 	f := filepath.Join(t.TempDir(), "stream.ndjson")
 	if err := os.WriteFile(f, []byte(ndjson), 0o600); err != nil {
 		t.Fatal(err)
@@ -114,11 +125,28 @@ func runStreamClaude(t *testing.T, ndjson string) string {
 	}
 	ch := make(chan Token, 64)
 	go streamClaudeOutput(cmd, stdout, &bytes.Buffer{}, CompletionRequest{}, "p", ch)
-	var sb strings.Builder
+	var toks []Token
 	for tok := range ch {
-		sb.WriteString(tok.Text)
+		toks = append(toks, tok)
 	}
-	return sb.String()
+	return toks
+}
+
+func TestStreamClaudeOutput_MarksNewTurns(t *testing.T) {
+	stream := `{"type":"assistant","message":{"content":[{"type":"text","text":"Let me look."}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Here is the fix."}]}}
+{"type":"result","subtype":"success","result":"Here is the fix.","usage":{"input_tokens":10,"output_tokens":3}}
+`
+	var turns []bool
+	for _, tok := range streamClaudeTokens(t, stream) {
+		if tok.Text != "" {
+			turns = append(turns, tok.NewTurn)
+		}
+	}
+	if len(turns) != 2 || turns[0] || !turns[1] {
+		t.Errorf("new-turn flags = %v, want [false true]", turns)
+	}
 }
 
 func TestStreamClaudeOutput_NoDuplicateFinalResult(t *testing.T) {
@@ -127,7 +155,7 @@ func TestStreamClaudeOutput_NoDuplicateFinalResult(t *testing.T) {
 {"type":"assistant","message":{"content":[{"type":"text","text":"Here is the fix."}]}}
 {"type":"result","subtype":"success","result":"Here is the fix.","usage":{"input_tokens":10,"output_tokens":3}}
 `
-	if got, want := runStreamClaude(t, stream), "Let me look.Here is the fix."; got != want {
+	if got, want := runStreamClaude(t, stream), "Let me look.\n\nHere is the fix."; got != want {
 		t.Errorf("emitted text: want %q, got %q", want, got)
 	}
 }

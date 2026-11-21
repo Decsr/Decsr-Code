@@ -227,8 +227,10 @@ func ParseSplitOpts(task, output string, roles []Role, existing []string, opts S
 	}
 
 	known := map[string]bool{}
+	readOnlyRole := map[string]bool{}
 	for _, r := range roles {
 		known[r.Name] = true
+		readOnlyRole[r.Name] = r.ReadOnly
 	}
 	declared := map[string]string{} // lead-declared new roles: name -> description
 	var declaredOrder []string
@@ -295,6 +297,8 @@ func ParseSplitOpts(task, output string, roles []Role, existing []string, opts S
 			nd.SuggestedRole = role
 			if known[role] {
 				nd.Role = role
+				// A role that cannot write makes the node read-only, like writes:false.
+				nd.ReadOnlyTask = nd.ReadOnlyTask || readOnlyRole[role]
 			}
 			if !known[role] && !proposed[role] {
 				proposed[role] = true

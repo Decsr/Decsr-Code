@@ -78,8 +78,8 @@ type Node struct {
 	// marked for this node. Only a claude run with the user's approval loads
 	// them, and its tools are limited to these servers.
 	MCP []string `json:"mcp,omitempty"`
-	// ReadOnlyTask is set when the lead marked the sub-task "writes": false: the
-	// node runs read-only whatever its role.
+	// ReadOnlyTask is set when the lead marked the sub-task "writes": false or
+	// gave it a role that cannot write: the node runs read-only whatever its role.
 	ReadOnlyTask bool `json:"read_only_task,omitempty"`
 	// Answered is set when the node's full reply was shown to the user as the
 	// answer (a read-only task that ended with one).

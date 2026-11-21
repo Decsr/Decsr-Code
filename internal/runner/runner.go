@@ -36,6 +36,10 @@ type ConvMessage struct {
 // Token is a single streaming chunk from an LLM.
 type Token struct {
 	Text string
+	// NewTurn is set on a Text token that starts a later turn of the model
+	// (after tool calls), so the final reply can be told from the narration
+	// before it. The first Text token of a run does not set it.
+	NewTurn bool
 	// Reasoning is display-only chain-of-thought from reasoning models. It is
 	// shown live in the UI but NOT included in the returned/parsed result.
 	Reasoning string

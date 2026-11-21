@@ -134,13 +134,14 @@ func (p *dshParser) feed(line []byte) []Token {
 			return nil
 		}
 		text := ev.Text
+		newTurn := p.sawText
 		// Each text event is one committed message: keep two of them apart.
 		if p.sawText && !strings.HasSuffix(p.text.String(), "\n") {
 			text = "\n\n" + text
 		}
 		p.text.WriteString(text)
 		p.sawText = true
-		return []Token{{Text: text}}
+		return []Token{{Text: text, NewTurn: newTurn}}
 	case "thinking":
 		if ev.Text == "" {
 			return nil

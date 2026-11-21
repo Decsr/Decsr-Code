@@ -313,8 +313,8 @@ func (x *executor) runWork(ctx context.Context, g *Graph, n *Node, emit func(Eve
 		return Result{}, err
 	}
 	out := Result{Summary: res.Summary, Files: res.Files, Warnings: skillWarnings, Report: res.Report, Denied: res.Denials}
-	if n.ReadOnlyTask {
-		out.Answer = answerBody(res.Body)
+	if readOnly {
+		out.Answer = answerBody(res.Answer)
 	}
 	if snapOK {
 		if after, ok := snapshotTree(wx.root, maxSnapshotFiles); ok {

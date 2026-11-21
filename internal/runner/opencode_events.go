@@ -28,6 +28,8 @@ import (
 type openCodeParser struct {
 	text    strings.Builder
 	sawText bool
+	// toolSinceText is set by a tool call after text: the next text is a new turn.
+	toolSinceText bool
 
 	usage      TokenUsage
 	foundUsage bool
@@ -68,9 +70,16 @@ func (p *openCodeParser) feed(line []byte) []Token {
 		if event.Part.Text == "" {
 			return nil
 		}
-		p.text.WriteString(event.Part.Text)
+		text := event.Part.Text
+		newTurn := p.sawText && p.toolSinceText
+		// Text after a tool call is a new paragraph.
+		if newTurn && !strings.HasSuffix(p.text.String(), "\n") {
+			text = "\n\n" + text
+		}
+		p.text.WriteString(text)
 		p.sawText = true
-		return []Token{{Text: event.Part.Text}}
+		p.toolSinceText = false
+		return []Token{{Text: text, NewTurn: newTurn}}
 	case "usage":
 		if event.Usage != nil {
 			p.usage = TokenUsage{
@@ -119,6 +128,7 @@ func (p *openCodeParser) feed(line []byte) []Token {
 			return []Token{{Progress: &TokenUsage{InputTokens: p.stepIn, CachedTokens: p.stepCached, OutputTokens: p.stepOut}}}
 		}
 	case "tool_use":
+		p.toolSinceText = true
 		return activityTokens(openCodeToolActivity(line, now))
 	case "error":
 		return activityTokens(&Activity{

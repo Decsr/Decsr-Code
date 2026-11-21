@@ -1021,10 +1021,14 @@ A task runs only what it needs.
   answered by the lead in the chat after it read the files it needs: no nodes
   and no Build & test. A job that is too big to read in one turn (a whole-project
   audit) becomes one read-only node.
-- **Answers.** When a `writes: false` node ends, its whole reply (without the
-  closing `REPORT` block) is printed in the chat under `T1 · reviewer:`,
-  rendered as Markdown like the lead's messages. The run summary line for the
-  node says `answer above`. The output screen keeps the full output as before.
+- **Answers.** When a read-only node ends (a `writes: false` task, or a role
+  that cannot write, such as `reviewer`), its whole reply (without the closing
+  `REPORT` block) is printed in the chat under `T1 · reviewer:`, rendered as
+  Markdown like the lead's messages. Only the final reply is printed, not the
+  notes the agent wrote before its tool calls (those stay in the output screen).
+  No file is written for it. The run summary
+  line for the node says `answer above`. The output screen keeps the full
+  output as before.
 
 ## Chatting while nodes run
 
@@ -1632,7 +1636,7 @@ It lists each work or fix node that ended since the previous summary, with the
 summary of its report (else of the node) cut to the chat width, the number of
 files it changed, the short error of a failed node, and the Build & test line
 (`passed`, `failed`, `not run` or `– Build & test skipped · nothing changed`).
-A read-only node whose reply was printed in the chat reads `answer above`. The `Next:` line names only what applies:
+A read-only node (a `writes: false` task or a role that cannot write) whose reply was printed in the chat reads `answer above`. The `Next:` line names only what applies:
 waiting nodes, `/merge` when the session is isolated and Build & test passed,
 and `@T1 ...` to retry a failed node. It appears at every autonomy level.
 

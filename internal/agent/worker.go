@@ -74,6 +74,9 @@ type WorkerResult struct {
 	Denials []runner.Denial
 	// Body is the reply without the closing REPORT block.
 	Body string
+	// Answer is the final turn of the reply without the REPORT block: the
+	// text after the last tool call. It is Body when the runner sends no turns.
+	Answer string
 }
 
 // IsBinaryContent reports whether data looks like binary (non-text) content.
@@ -166,6 +169,7 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 		watch.onStart = writes.begin
 	}
 	var live *runner.TokenUsage // latest Progress
+	turnStart := 0              // where the last turn of the reply begins in sb
 	for tok := range ch {
 		if tok.Error != nil {
 			writes.finish()
@@ -200,6 +204,9 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 			res.Denials = tok.Denials
 		}
 		if tok.Text != "" {
+			if tok.NewTurn {
+				turnStart = sb.Len()
+			}
 			sb.WriteString(tok.Text)
 			if req.OnActivity != nil && !req.ReadOnly && !agentMode {
 				watch.feed(tok.Text)
@@ -229,6 +236,13 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 	rep, body, found := ParseReport(res.Output)
 	res.Body = strings.TrimSpace(body)
 	res.Summary = workerSummary(body)
+	res.Answer = res.Body
+	if turnStart > 0 {
+		_, last, _ := ParseReport(res.Output[turnStart:])
+		if last = strings.TrimSpace(last); last != "" {
+			res.Answer = last
+		}
+	}
 	if found {
 		res.Report = rep
 		if res.Summary == "" {

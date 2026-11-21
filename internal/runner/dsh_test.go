@@ -329,3 +329,12 @@ func execGit(dir string, args ...string) *exec.Cmd {
 	cmd.Dir = dir
 	return cmd
 }
+
+func TestDshParserMarksNewTurns(t *testing.T) {
+	p := newDshParser("")
+	a := p.feed([]byte(`{"type":"text","text":"Let me look."}`))
+	b := p.feed([]byte(`{"type":"text","text":"All fine."}`))
+	if len(a) != 1 || a[0].NewTurn || len(b) != 1 || !b[0].NewTurn {
+		t.Errorf("tokens = %+v / %+v", a, b)
+	}
+}

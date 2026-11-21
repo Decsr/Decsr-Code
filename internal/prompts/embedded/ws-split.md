@@ -73,7 +73,9 @@ or leave it out when you suggest no plugin.
   only when the user asked for them or the change is large.
 - `writes` is `true` when the sub-task creates or changes files and `false` when it only reads and
   reports. A sub-task with `"writes": false` runs read-only whatever its role. Leave it out only for a
-  sub-task that writes.
+  sub-task that writes. A sub-task that analyses, compares, explains, reviews or answers a question
+  sets `"writes": false`: its full answer is shown in the chat and no file is written. Set `true`
+  only when files must change or the user asked for a file.
 - `mcp` (optional) lists the MCP servers a sub-task needs, by the names `claude mcp list` shows (they
   can contain spaces and colons), for example `"mcp":["github"]`. Use it only when the task needs a
   server's tools, such as "read GitHub issue 12 through the GitHub MCP". Look the names up with

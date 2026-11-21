@@ -328,8 +328,13 @@ func streamClaudeOutput(cmd *exec.Cmd, stdout io.ReadCloser, stderr *bytes.Buffe
 			}
 			text := assistantText(evt.Message.Content)
 			delta := computeDelta(emitted.String(), text)
+			// Text from a later turn (after tool calls) is a new paragraph.
+			newTurn := delta != "" && emitted.Len() > 0 && delta == text
+			if newTurn {
+				delta = "\n\n" + delta
+			}
 			if delta != "" {
-				ch <- Token{Text: delta}
+				ch <- Token{Text: delta, NewTurn: newTurn}
 				emitted.WriteString(delta)
 			}
 			// Surface tool invocations (read/edit/bash/…) as display-only

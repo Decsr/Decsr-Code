@@ -234,3 +234,13 @@ func wildMatch(pat, s string) bool {
 	}
 	return false
 }
+
+func TestOpenCodeParserMarksNewTurns(t *testing.T) {
+	p := newOpenCodeParser()
+	a := p.feed([]byte(`{"type":"text","part":{"text":"Let me look."}}`))
+	p.feed([]byte(`{"type":"tool_use","part":{"tool":"read","state":{"status":"completed"}}}`))
+	b := p.feed([]byte(`{"type":"text","part":{"text":"All fine."}}`))
+	if len(a) != 1 || a[0].NewTurn || len(b) != 1 || !b[0].NewTurn || b[0].Text != "\n\nAll fine." {
+		t.Errorf("tokens = %+v / %+v", a, b)
+	}
+}

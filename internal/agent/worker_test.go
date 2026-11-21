@@ -329,6 +329,64 @@ func TestRunWorkerAgentModeReadOnlyPromptAndTools(t *testing.T) {
 	}
 }
 
+func TestRunWorkerAgentModeBodyIsTheReplyWithoutTheReport(t *testing.T) {
+	f := &workerFake{chunks: []string{"Let me look.", "\n\nThe code is fine.\n\nREPORT\nstatus: done\nsummary: fine\n"}}
+	res, err := RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(),
+		WorkerRequest{Title: "T", Mode: config.ModeAgent, ReadOnly: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "Let me look.\n\nThe code is fine."; res.Body != want {
+		t.Errorf("body = %q, want %q", res.Body, want)
+	}
+}
+
+// turnFake sends its tokens as they are, so a test can mark a new turn.
+type turnFake struct{ toks []runner.Token }
+
+func (f *turnFake) Complete(context.Context, runner.CompletionRequest) (<-chan runner.Token, error) {
+	ch := make(chan runner.Token, len(f.toks)+1)
+	for _, t := range f.toks {
+		ch <- t
+	}
+	ch <- runner.Token{Done: true}
+	close(ch)
+	return ch, nil
+}
+
+func TestRunWorkerAnswerIsTheLastTurn(t *testing.T) {
+	f := &turnFake{toks: []runner.Token{
+		{Text: "Let me look."},
+		{Text: "\n\nThe code is fine.\n\nREPORT\nstatus: done\nsummary: fine\n", NewTurn: true},
+	}}
+	res, err := RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(),
+		WorkerRequest{Title: "T", Mode: config.ModeAgent, ReadOnly: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Answer != "The code is fine." {
+		t.Errorf("answer = %q", res.Answer)
+	}
+	if !strings.Contains(res.Output, "Let me look.") || !strings.Contains(res.Body, "Let me look.") {
+		t.Errorf("the narration must stay in the output: %q / %q", res.Output, res.Body)
+	}
+}
+
+func TestRunWorkerAnswerFallsBackToTheBody(t *testing.T) {
+	f := &turnFake{toks: []runner.Token{
+		{Text: "The code is fine."},
+		{Text: "\n\nREPORT\nstatus: done\nsummary: fine\n", NewTurn: true},
+	}}
+	res, err := RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(),
+		WorkerRequest{Title: "T", Mode: config.ModeAgent, ReadOnly: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Answer != "The code is fine." {
+		t.Errorf("answer = %q", res.Answer)
+	}
+}
+
 func TestRunWorkerTextModeRequestIsNotAgent(t *testing.T) {
 	f := &workerFake{chunks: []string{"x\n===SUMMARY===\nok"}}
 	if _, err := RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(), WorkerRequest{Title: "T"}, nil); err != nil {
