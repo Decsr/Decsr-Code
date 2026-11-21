@@ -158,3 +158,11 @@ func TestStreamCopilotOutput_NonZeroExitRateLimitWithPartialOutput(t *testing.T)
 	}
 	t.Fatal("expected rate-limit error token")
 }
+
+func TestCopilotRefusesReadOnlyRuns(t *testing.T) {
+	// A binary that does not exist: the error must come before any start.
+	_, err := CopilotRunner{Binary: "/nonexistent/copilot"}.Complete(context.Background(), CompletionRequest{ReadOnly: true})
+	if err == nil || err.Error() != "copilot can't run read-only nodes yet; pick another runner for this role" {
+		t.Fatalf("err = %v", err)
+	}
+}

@@ -125,7 +125,7 @@ func (r CodexRunner) Complete(ctx context.Context, req CompletionRequest) (<-cha
 		// codex stored the system prompt in the first message of the thread.
 		sys = ""
 	}
-	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, userContent.String(), sys, model, NormalizeEffort(req.Effort), req.Dir, req.Agent, req.ResumeID)
+	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, userContent.String(), sys, model, NormalizeEffort(req.Effort), req.Dir, req.Agent && !req.ReadOnly, req.ResumeID)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +152,8 @@ func (r CodexRunner) startStreamingProcess(ctx context.Context, prompt, systemPr
 	}
 
 	// Text mode must not let codex edit files (decsr writes them), so its
-	// sandbox is read-only. Agent mode may write inside the working directory.
+	// sandbox is read-only, and so is a read-only node's. Agent mode may write
+	// inside the working directory.
 	sandbox := "read-only"
 	if agent {
 		sandbox = "workspace-write"

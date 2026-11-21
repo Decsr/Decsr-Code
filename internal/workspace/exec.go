@@ -413,14 +413,25 @@ type sessionState struct {
 // the user came with it (a retry of an attempt that stopped early).
 const continueMessage = "Your previous run stopped before it finished. Continue where you left off."
 
+// nodeMode is the mode a node runs in: the role's, except that a read-only
+// node on claude with no explicit mode runs as an agent, since claude has no
+// tools in text mode and a read-only agent can still read and search.
+func nodeMode(role Role, cur config.AgentConfig, readOnly bool) string {
+	if readOnly && role.Agent.Mode == "" && cur.Runner == "claude" {
+		return config.ModeAgent
+	}
+	return role.Agent.EffectiveMode()
+}
+
 // runWorker is one worker run with the agent cur. A non-empty resume is the id
 // of the node's own CLI conversation to continue: the run sends only the user's
 // new message (or continueMessage for a retry) and no excerpt of the earlier
 // attempt.
 func (x *executor) runWorker(ctx context.Context, r runner.LLMRunner, wx executor, cur config.AgentConfig, readOnly bool, role Role, n *Node, g *Graph,
 	rolePrompt string, buildCommands []string, emit func(Event), throttle *usageThrottle, sess *sessionState, resume string) (agent.WorkerResult, error) {
+	mode := nodeMode(role, cur, readOnly)
 	if wx.contextFor != nil {
-		wx.projectContext = wx.contextFor(cur.Runner, role.Agent.EffectiveMode() == config.ModeAgent)
+		wx.projectContext = wx.contextFor(cur.Runner, mode == config.ModeAgent)
 	}
 	wn, message := n, ""
 	if resume != "" {
@@ -455,7 +466,7 @@ func (x *executor) runWorker(ctx context.Context, r runner.LLMRunner, wx executo
 		Description:     n.Description,
 		Context:         wx.workContext(g, wn),
 		ReadOnly:        readOnly,
-		Mode:            role.Agent.EffectiveMode(),
+		Mode:            mode,
 		MCP:             role.Agent.MCP,
 		MCPServers:      mcpServers,
 		BuildCommands:   buildCommands,

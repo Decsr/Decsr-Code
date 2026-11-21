@@ -91,7 +91,7 @@ const (
 	workerModeReadOnly = "You are in read-only mode: you MUST NOT change any files. Anything you output as a file block\nis discarded. Only report: write your findings as plain text (you may quote code in\nfenced blocks, but do not put a file path in bold before them)." + workerTail
 
 	workerModeAgent         = "You are running as a coding agent in the project working directory. Change files directly\nwith your tools. Do NOT print file contents as fenced file blocks: they are not saved.\nFiles shown under \"Current files\" are on disk and you can read them. Keep everything\nunrelated to your sub-task intact. When build or test commands are available to you, run\nthem to check your work." + workerAgentTail
-	workerModeAgentReadOnly = "You are running as a read-only agent in the project working directory. Use your tools only\nto read and search: you MUST NOT create, change, move or delete any file, and must not run\ncommands that do. Report your findings as plain text." + workerAgentTail
+	workerModeAgentReadOnly = "You are running as a read-only agent in the project working directory. Use your tools only\nto read and search: you MUST NOT create, change, move or delete any file. You may run\nread-only shell commands (list, print, search, git history) and look things up on the web;\nbuild and test commands are not available. Report your findings as plain text." + workerAgentTail
 )
 
 // RunWorker runs one LLM call for a sub-task, writes the file blocks of the

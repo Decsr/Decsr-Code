@@ -28,7 +28,7 @@ type ClaudeRunner struct {
 func (r ClaudeRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan Token, error) {
 	prompt := buildClaudePrompt(req.Messages)
 
-	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, prompt, req.SystemPrompt, NormalizeEffort(req.Effort), req.Dir, req.Agent, req.MCP, req.AllowedTools, req.KeepSession || req.ResumeID != "", req.ResumeID)
+	cmd, stdout, stderr, err := r.startStreamingProcess(ctx, prompt, req.SystemPrompt, NormalizeEffort(req.Effort), req.Dir, req.Agent, req.MCP, req.AllowedTools, req.KeepSession || req.ResumeID != "", req.ResumeID, req.ReadOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -157,33 +157,34 @@ func LeadTools() []string {
 // writing agent run so chained inspection commands are not refused.
 var readOnlyBash = []string{"ls", "cat", "head", "tail", "wc", "pwd", "which", "file", "stat", "du", "tree"}
 
-// AgentTools is the allow list of a Claude agent run: file tools (read-only
-// for a read-only role), Bash limited to the programs of the given build and
-// test commands, a few read-only shell commands and the extra command
-// prefixes (never for a read-only role) and read-only git.
+// AgentTools is the allow list of a Claude agent run: file tools, Bash limited
+// to the programs of the given build and test commands, a few read-only shell
+// commands, the extra command prefixes and read-only git. A read-only role gets
+// the fixed read-only set instead (see claudeReadOnlyTools): no file writes, no
+// build commands, no extra prefixes.
 func AgentTools(commands, extra []string, readOnly bool) []string {
-	tools := []string{"Read", "Glob", "Grep"}
-	if !readOnly {
-		tools = []string{"Read", "Edit", "Write", "Glob", "Grep"}
-		seen := map[string]bool{}
-		add := func(prefix string) {
-			if prefix == "" || seen[prefix] || strings.ContainsAny(prefix, "()\n,") {
-				return
-			}
-			seen[prefix] = true
-			tools = append(tools, "Bash("+prefix+":*)")
+	if readOnly {
+		return claudeReadOnlyTools()
+	}
+	tools := []string{"Read", "Edit", "Write", "Glob", "Grep"}
+	seen := map[string]bool{}
+	add := func(prefix string) {
+		if prefix == "" || seen[prefix] || strings.ContainsAny(prefix, "()\n,") {
+			return
 		}
-		for _, c := range commands {
-			for _, p := range commandPrograms(c) {
-				add(p)
-			}
-		}
-		for _, p := range readOnlyBash {
+		seen[prefix] = true
+		tools = append(tools, "Bash("+prefix+":*)")
+	}
+	for _, c := range commands {
+		for _, p := range commandPrograms(c) {
 			add(p)
 		}
-		for _, e := range extra {
-			add(strings.TrimSpace(e))
-		}
+	}
+	for _, p := range readOnlyBash {
+		add(p)
+	}
+	for _, e := range extra {
+		add(strings.TrimSpace(e))
 	}
 	for _, g := range []string{"status", "diff", "log", "show"} {
 		tools = append(tools, "Bash(git "+g+":*)")
@@ -238,13 +239,16 @@ func buildClaudePrompt(messages []ConvMessage) string {
 	return sb.String()
 }
 
-func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, effort, dir string, agent, mcp bool, allowed []string, keep bool, resumeID string) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
+func (r ClaudeRunner) startStreamingProcess(ctx context.Context, prompt, systemPrompt, effort, dir string, agent, mcp bool, allowed []string, keep bool, resumeID string, readOnly bool) (*exec.Cmd, io.ReadCloser, *bytes.Buffer, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "claude"
 	}
 
 	args := claudeBaseArgs(agent, mcp, allowed, keep)
+	if agent && readOnly {
+		args = append(args, "--disallowedTools", strings.Join(claudeReadOnlyDeny(), ","))
+	}
 	if resumeID != "" {
 		args = append(args, "--resume", resumeID)
 	}

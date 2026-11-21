@@ -903,3 +903,31 @@ func TestExecContextDependsOnRunnerAndMode(t *testing.T) {
 		t.Fatalf("modes %v, prompt lacks the node's context", gotMode)
 	}
 }
+
+func TestExecReadOnlyClaudeNodeRunsInAgentMode(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents["reviewer"] = config.AgentConfig{Runner: "claude"}
+	cfg.Agents["coder"] = config.AgentConfig{Runner: "claude"}
+	cfg.Agents["tester"] = config.AgentConfig{Runner: "claude", Mode: config.ModeText}
+	cfg.Agents["security"] = config.AgentConfig{Runner: "claude", Mode: config.ModeText}
+	for _, tc := range []struct {
+		role  string
+		task  bool
+		agent bool
+	}{
+		{"reviewer", false, true},  // a read-only role
+		{"coder", true, true},      // a read-only task
+		{"coder", false, false},    // a writing node keeps the runner's default
+		{"security", false, false}, // an explicit text mode wins
+	} {
+		f := &execFake{text: "report\n===SUMMARY===\nok"}
+		ex := newTestExec(t, cfg, f, nil)
+		g := &Graph{Nodes: []*Node{{ID: "T1", Title: "t", Kind: KindWork, Role: tc.role, ReadOnlyTask: tc.task}}}
+		if _, err := ex.Run(context.Background(), g, g.Nodes[0], func(Event) {}); err != nil {
+			t.Fatalf("%s: %v", tc.role, err)
+		}
+		if len(f.reqs) != 1 || f.reqs[0].Agent != tc.agent {
+			t.Errorf("role %s task %v: agent = %v, want %v", tc.role, tc.task, f.reqs[0].Agent, tc.agent)
+		}
+	}
+}

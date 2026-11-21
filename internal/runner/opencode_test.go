@@ -2,10 +2,12 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -146,4 +148,89 @@ func TestOpenCodeParser_StepFinishIncludesCache(t *testing.T) {
 	if usage.InputTokens != 160 || usage.OutputTokens != 4 {
 		t.Errorf("usage = %+v, want in 160 out 4", usage)
 	}
+}
+
+func fakeOpenCodeEnv(t *testing.T, readOnly bool) (env, args string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "opencode")
+	envFile := filepath.Join(dir, "env.txt")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s' \"$OPENCODE_CONFIG_CONTENT\" > %q\nprintf '%%s\\n' \"$@\" > %q\n", envFile, envFile+".args")
+	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENCODE_CONFIG_CONTENT", `{"theirs":true}`)
+	ch, err := OpenCodeRunner{Binary: bin}.Complete(context.Background(), CompletionRequest{Model: "p/m", ReadOnly: readOnly, Messages: []ConvMessage{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain(t, ch)
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := os.ReadFile(envFile + ".args")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data), string(a)
+}
+
+func TestOpenCodeReadOnlyRunGetsPermissions(t *testing.T) {
+	got, args := fakeOpenCodeEnv(t, true)
+	if !strings.Contains(args, "--standalone\n") || strings.Contains(args, "--auto") || strings.Contains(args, "--agent") {
+		t.Errorf("args = %q", args)
+	}
+	if got != OpenCodeReadOnlyConfig() {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT = %s", got)
+	}
+	var cfg struct {
+		Permissions []struct{ Action, Resource, Effect string } `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(got), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	last := func(action, res string) string {
+		eff := ""
+		for _, p := range cfg.Permissions {
+			if p.Action == action && wildMatch(p.Resource, res) {
+				eff = p.Effect
+			}
+		}
+		return eff
+	}
+	for res, want := range map[string]string{
+		"*": "deny", "rm a": "deny", "cat a": "allow", "cat a > b": "deny", "git status": "allow",
+		"git diff --output=x": "deny", "git log --output=x": "deny", "rg --pre sh x": "deny", "find .": "deny", "go test ./...": "deny",
+	} {
+		if g := last("shell", res); g != want {
+			t.Errorf("shell %q = %q, want %q", res, g, want)
+		}
+	}
+	if g := last("edit", "a.go"); g != "deny" {
+		t.Errorf("edit = %q", g)
+	}
+}
+
+func TestOpenCodeWritingRunKeepsTheEnvironment(t *testing.T) {
+	got, args := fakeOpenCodeEnv(t, false)
+	if got != `{"theirs":true}` || strings.Contains(args, "--standalone") {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT = %s, args = %q", got, args)
+	}
+}
+
+// wildMatch is opencode's whole-value wildcard: * is any run of characters.
+// A pattern ending in " *" also matches the command without arguments.
+func wildMatch(pat, s string) bool {
+	re := "^" + strings.ReplaceAll(regexp.QuoteMeta(pat), `\*`, ".*") + "$"
+	if ok, _ := regexp.MatchString(re, s); ok {
+		return true
+	}
+	if strings.HasSuffix(pat, " *") {
+		return wildMatch(strings.TrimSuffix(pat, " *"), s)
+	}
+	return false
 }

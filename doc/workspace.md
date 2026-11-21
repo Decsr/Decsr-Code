@@ -969,8 +969,8 @@ in the chat (Markdown) and creates nodes only when the message assigns work.
   claude that is `Read`, `Grep`, `Glob` and `Bash` limited to `git log`,
   `git diff`, `git status` and `git show` (`--permission-mode dontAsk`, no
   `Write` or `Edit`, no MCP servers, no web, no build or test commands). codex
-  runs in its read-only sandbox, dsh in its read-only preset; opencode has no
-  read-only switch, so the lead prompt is what keeps it from writing. The lead
+  runs in its read-only sandbox, dsh in its read-only preset; opencode gets the same
+  read-only permission config as a read-only node. The lead
   never edits a file: every change is made by a worker node, with the role and
   agent the lead picks.
 - **When it creates nodes.** When you assign work: a change, a fix, a feature,
@@ -1268,7 +1268,9 @@ description and `read_only` flag of all roles, when it saves.
 ### Read-only roles
 
 A role with `read_only: true` reports and never changes files: whatever file
-blocks its reply contains are discarded, and the prompt tells it so. `ux_reviewer`,
+blocks its reply contains are discarded, and the prompt tells it so. A
+read-only node can read the project and run read-only shell commands on every
+runner (see [Agent mode](#agent-mode)). `ux_reviewer`,
 `security` and `reviewer` are always read-only. The role form has a third field, **Can
 change files** (`yes` by default; toggle with `←`/`→` or `Space`), and a role
 saved with `no` gets `read_only: true`. The picker and the inspector show
@@ -1294,13 +1296,15 @@ agents:
 | `agent` | The runner works as a coding agent in the node's working directory (its worktree when isolation is on) and edits the files itself with its own tools. DECSR does not read file blocks; fenced blocks in the reply are just text. The node's files are what changed in the worktree (the commit that is merged) or the observed tree changes. |
 
 Without `mode`, `opencode` and `codex` (and an empty runner, which is opencode)
-use `agent`; every other runner uses `text`. Agent mode needs `claude`,
+use `agent`; every other runner uses `text`, except that a read-only node on
+`claude` also uses `agent` (it gets tools to read; `mode: text` keeps it in text). Agent mode needs `claude`,
 `opencode` or `codex`; with an API or local runner the node fails with
 `agent mode needs claude, opencode or codex`, and `decsr doctor` prints one
 `mode <role>` line for each such role. `mode: text` is not accepted for
 `opencode`, because it has no read-only switch to keep it from editing files
 itself; use `agent`, or another runner. For `codex`, text mode runs with
-`--sandbox read-only` and agent mode with `--sandbox workspace-write`. The
+`--sandbox read-only` and agent mode with `--sandbox workspace-write` (a read-only
+node uses `read-only` in both). The
 inspector shows `Mode  agent` or `Mode  text` on the Role header, and the role
 list and the picker show it after the model. Project Setup does not edit the
 mode yet: set it in the YAML file.
@@ -1308,7 +1312,7 @@ mode yet: set it in the YAML file.
 In agent mode the prompt tells the agent to change files directly, not to print
 file blocks, and to end with a short `===SUMMARY===`. A node whose run changed
 nothing still gets the "no files were written" warning. A read-only role stays
-read-only: its prompt forbids changes and, with Claude, it gets no write tool.
+read-only: its prompt forbids changes and the runner enforces it (see below).
 
 **Claude in agent mode** runs with a fixed tool list and nothing else
 (`--tools`, `--allowedTools` and `--permission-mode dontAsk`, so a tool that is
@@ -1324,7 +1328,21 @@ allow):
 - `Bash` for each prefix in `project.allowed_commands`;
 - read-only git: `git status`, `git diff`, `git log`, `git show`.
 
-A read-only role gets `Read`, `Glob`, `Grep` and the read-only git commands.
+A read-only node gets a fixed set instead: `Read`, `Glob`, `Grep`, `WebSearch`,
+`WebFetch` and `Bash` limited to `ls`, `cat`, `head`, `tail`, `wc`, `pwd`,
+`which`, `file`, `stat`, `du`, `tree`, `rg`, `grep`, `git status`, `git diff`,
+`git log`, `git show`, `git blame`, `git grep`, `go doc` and
+`go list`. It gets no build or test command, no `find` and none of
+`project.allowed_commands`. A deny list (`--disallowedTools`) refuses the
+flags and the redirection that write a file: `git diff|log|show --output`,
+`tree -o`, `rg --pre`, `git grep -O` and `>`.
+
+A read-only node on the other runners: `opencode` runs with a permission config
+(`OPENCODE_CONFIG_CONTENT`, on a private server with `--standalone`) that denies edits and every shell command except the
+same read-only list, with the same deny rules after it. `codex` runs in its
+`read-only` sandbox in agent mode too, and `dsh` in its read-only preset.
+`copilot` cannot run a read-only node yet: the node fails with
+`copilot can't run read-only nodes yet; pick another runner for this role`.
 ```yaml
 # .decsr/project.yaml or ~/.decsr/config.yaml
 project:

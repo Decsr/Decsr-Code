@@ -126,8 +126,9 @@ type CompletionRequest struct {
 	// with its own tools. False keeps it a text generator: decsr writes the
 	// files. HTTP runners ignore it.
 	Agent bool
-	// ReadOnly marks a role that reports only. Only the dsh runner uses it, to
-	// pick its read-only permission preset for an agent run.
+	// ReadOnly marks a role that reports only. In an agent run, claude gets a
+	// read-only tool set, opencode a read-only permission config, codex its
+	// read-only sandbox and dsh its read-only preset; copilot refuses the run.
 	ReadOnly bool
 	// MCP keeps the user's own MCP servers for a Claude run. False (the
 	// default) starts Claude with none. Only the Claude runner uses it.

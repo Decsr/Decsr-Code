@@ -116,16 +116,36 @@ func TestClaudeAgentModeAllowList(t *testing.T) {
 
 func TestClaudeAgentModeReadOnlyRole(t *testing.T) {
 	tools := AgentTools([]string{"go test ./..."}, []string{"dpkg -l"}, true)
-	wantTools := []string{"Read", "Glob", "Grep", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)"}
+	wantTools := []string{"Read", "Glob", "Grep", "WebSearch", "WebFetch",
+		"Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(pwd:*)", "Bash(which:*)",
+		"Bash(file:*)", "Bash(stat:*)", "Bash(du:*)", "Bash(tree:*)", "Bash(rg:*)", "Bash(grep:*)",
+		"Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git blame:*)",
+		"Bash(git grep:*)", "Bash(go doc:*)", "Bash(go list:*)"}
 	if !reflect.DeepEqual(tools, wantTools) {
 		t.Fatalf("read-only tools = %q", tools)
 	}
-	got := claudeArgv(t, CompletionRequest{Agent: true, AllowedTools: tools})
-	joined := strings.Join(got, " ")
-	if strings.Contains(joined, "Edit") || strings.Contains(joined, "Write") || strings.Contains(joined, "go test") {
-		t.Errorf("read-only argv has write or build tools: %q", got)
+	got := claudeArgv(t, CompletionRequest{Agent: true, ReadOnly: true, AllowedTools: tools})
+	want := []string{"--output-format", "stream-json", "--verbose", "--no-session-persistence",
+		"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--setting-sources", "project,local",
+		"--tools", "Read,Glob,Grep,WebSearch,WebFetch,Bash",
+		"--allowedTools", strings.Join(wantTools, ","),
+		"--permission-mode", "dontAsk",
+		"--disallowedTools", "Bash(git diff*--output*),Bash(git log*--output*),Bash(git show*--output*),Bash(tree*-o*),Bash(rg*--pre*),Bash(git grep*-O*),Bash(*>*)",
+		"--model", "claude-opus-5-5", "--effort", "high"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %q\nwant   %q", got, want)
 	}
-	if !strings.Contains(joined, "--tools Read,Glob,Grep,Bash ") {
+	joined := strings.Join(got, " ")
+	for _, bad := range []string{"Edit", "Write", "go test", "dpkg", "Bash(find", "Bash(go test"} {
+		if strings.Contains(joined, bad) {
+			t.Errorf("read-only argv has %q: %q", bad, got)
+		}
+	}
+}
+
+func TestClaudeWritingRunHasNoDisallowedTools(t *testing.T) {
+	got := claudeArgv(t, CompletionRequest{Agent: true, AllowedTools: AgentTools(nil, nil, false)})
+	if strings.Contains(strings.Join(got, " "), "--disallowedTools") {
 		t.Errorf("argv = %q", got)
 	}
 }
@@ -162,14 +182,6 @@ func TestAgentToolsSplitsCommandsIntoPrograms(t *testing.T) {
 	}
 }
 
-func TestAgentToolsReadOnlyHasNoGeneralBash(t *testing.T) {
-	for _, tl := range AgentTools([]string{"go test ./..."}, []string{"dpkg -l"}, true) {
-		if strings.HasPrefix(tl, "Bash(") && !strings.HasPrefix(tl, "Bash(git ") {
-			t.Errorf("read-only role got %s", tl)
-		}
-	}
-}
-
 func codexArgv(t *testing.T, agent bool) []string {
 	t.Helper()
 	return argvOf(t, "codex", func(bin string) error {
@@ -180,6 +192,20 @@ func codexArgv(t *testing.T, agent bool) []string {
 		drain(t, ch)
 		return nil
 	})
+}
+
+func TestCodexReadOnlyAgentUsesReadOnlySandbox(t *testing.T) {
+	got := argvOf(t, "codex", func(bin string) error {
+		ch, err := CodexRunner{Binary: bin}.Complete(context.Background(), CompletionRequest{Agent: true, ReadOnly: true, Messages: []ConvMessage{{Role: "user", Content: "hi"}}})
+		if err != nil {
+			return err
+		}
+		drain(t, ch)
+		return nil
+	})
+	if !reflect.DeepEqual(got, []string{"exec", "--sandbox", "read-only", "--json"}) {
+		t.Errorf("argv = %q", got)
+	}
 }
 
 func TestCodexSandboxFollowsMode(t *testing.T) {

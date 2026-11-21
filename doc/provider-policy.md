@@ -62,6 +62,12 @@ Re-read these when a check is unclear or a rule may have changed:
   plan with an MCP node always waits for the user's `y`, and an automation run
   stops instead of starting it.
 - `/autonomy 3` on a subscription: **open**, it needs a warning or a block.
+- Read-only nodes (role `read_only` or a `writes: false` task): pass. They can
+  read and run read-only shell commands, never edit. claude: fixed allow list
+  plus `--disallowedTools` for write flags and `>`; opencode: a deny-by-default
+  `OPENCODE_CONFIG_CONTENT` permission config (no `--auto`); codex: `read-only`
+  sandbox; dsh: read-only preset; copilot: refused (its `--allow-all-tools`
+  cannot be limited), and routing never picks it.
 - Lead chat: read-only tools, user-started turns only; auto-compact runs only
   in front of a user-started turn.
 - Plan limits in `/usage` and `/status`: pass. They come only from the

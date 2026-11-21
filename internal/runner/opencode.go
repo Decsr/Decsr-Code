@@ -31,7 +31,7 @@ func (r OpenCodeRunner) Complete(ctx context.Context, req CompletionRequest) (<-
 	go func() {
 		defer close(ch)
 		parser := newOpenCodeParser()
-		raw, err := r.runStream(ctx, prompt, model, NormalizeEffort(req.Effort), req.Dir, req.ResumeID, func(line []byte) {
+		raw, err := r.runStream(ctx, prompt, model, NormalizeEffort(req.Effort), req.Dir, req.ResumeID, req.ReadOnly, func(line []byte) {
 			for _, tok := range parser.feed(line) {
 				ch <- tok
 			}
@@ -55,12 +55,12 @@ func (r OpenCodeRunner) Complete(ctx context.Context, req CompletionRequest) (<-
 
 // runRaw runs opencode to completion and returns its whole stdout.
 func (r OpenCodeRunner) runRaw(ctx context.Context, prompt, model, effort, dir string) ([]byte, error) {
-	return r.runStream(ctx, prompt, model, effort, dir, "", nil)
+	return r.runStream(ctx, prompt, model, effort, dir, "", false, nil)
 }
 
 // runStream runs opencode and calls onLine for every stdout line as soon as it
 // is written. It returns the whole stdout once the process has exited.
-func (r OpenCodeRunner) runStream(ctx context.Context, prompt, model, effort, dir, resumeID string, onLine func([]byte)) ([]byte, error) {
+func (r OpenCodeRunner) runStream(ctx context.Context, prompt, model, effort, dir, resumeID string, readOnly bool, onLine func([]byte)) ([]byte, error) {
 	bin := r.Binary
 	if bin == "" {
 		bin = "opencode"
@@ -71,6 +71,11 @@ func (r OpenCodeRunner) runStream(ctx context.Context, prompt, model, effort, di
 	}
 
 	args := []string{"run", "--format", "json"}
+	if readOnly {
+		// The background service keeps its own config; a private server reads
+		// the permission config of this run from the environment.
+		args = append(args, "--standalone")
+	}
 
 	// OpenCode requires "provider/model" format.
 	// For local Ollama models (no provider prefix), add the ollama/ prefix.
@@ -94,6 +99,9 @@ func (r OpenCodeRunner) runStream(ctx context.Context, prompt, model, effort, di
 	cmd := executil.CommandContext(ctx, bin, args...)
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(prompt)
+	if readOnly {
+		cmd.Env = append(cmd.Environ(), "OPENCODE_CONFIG_CONTENT="+OpenCodeReadOnlyConfig())
+	}
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

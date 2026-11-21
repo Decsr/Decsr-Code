@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -179,6 +180,9 @@ func looksLikeCopilotModelID(s string) bool {
 // Complete implements LLMRunner by running the Copilot CLI with the given prompt.
 // Stdout is streamed incrementally so the TUI shows progress live.
 func (r CopilotRunner) Complete(ctx context.Context, req CompletionRequest) (<-chan Token, error) {
+	if req.ReadOnly {
+		return nil, errors.New("copilot can't run read-only nodes yet; pick another runner for this role")
+	}
 	var userContent strings.Builder
 	for _, m := range req.Messages {
 		userContent.WriteString(strings.ToUpper(m.Role))
