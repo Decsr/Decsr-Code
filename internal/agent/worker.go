@@ -149,10 +149,11 @@ func RunWorker(ctx context.Context, r runner.LLMRunner, root string, cfg config.
 	}
 	if agentMode {
 		creq.AllowedTools = runner.AgentTools(req.BuildCommands, req.AllowedCommands, req.ReadOnly)
-		if rules := runner.MCPServerRules(req.MCPServers); len(rules) > 0 {
-			creq.MCP = true
-			creq.AllowedTools = append(creq.AllowedTools, rules...)
-		}
+	}
+	// MCP rules go with both modes; in text mode they are the only allow rules.
+	if rules := runner.MCPServerRules(req.MCPServers); len(rules) > 0 {
+		creq.MCP = true
+		creq.AllowedTools = append(creq.AllowedTools, rules...)
 	}
 	ch, err := r.Complete(ctx, creq)
 	if err != nil {

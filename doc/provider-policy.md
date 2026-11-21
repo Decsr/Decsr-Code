@@ -57,7 +57,8 @@ Re-read these when a check is unclear or a rule may have changed:
   install command, automation runs skip installs, and decsr runs the unmodified
   `claude` binary through its documented flags.
 - MCP: only nodes the lead marks and the user approves load MCP, claude runner
-  only, tools limited to the named servers. decsr runs no MCP server itself, a
+  only, tools limited to the named servers, in text and agent mode with the
+  same allow-list limits. decsr runs no MCP server itself, a
   plan with an MCP node always waits for the user's `y`, and an automation run
   stops instead of starting it.
 - `/autonomy 3` on a subscription: **open**, it needs a warning or a block.

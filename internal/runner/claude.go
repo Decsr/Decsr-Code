@@ -47,7 +47,8 @@ func (r ClaudeRunner) Complete(ctx context.Context, req CompletionRequest) (<-ch
 // claudeBaseArgs is the fixed part of the argument list. Text mode turns every
 // tool off. Agent mode limits the built-in tools to the ones the allow list
 // names and uses dontAsk, so anything not on the list is denied instead of
-// prompting (and a user's own settings cannot widen it).
+// prompting (and a user's own settings cannot widen it). Text mode may carry
+// MCP allow rules only: the built-in tools stay off and the rules are allowed.
 //
 // Every run is lean: no MCP servers (unless the role sets mcp, so the user's
 // own servers load) and only the project and local settings, so a worker does
@@ -72,7 +73,13 @@ func claudeBaseArgs(agent, mcp bool, allowed []string, keep bool) []string {
 	}
 	args = append(args, "--setting-sources", sources)
 	if !agent {
-		return append(args, "--tools", "")
+		args = append(args, "--tools", "")
+		if len(allowed) == 0 {
+			return args
+		}
+		return append(args,
+			"--allowedTools", strings.Join(allowed, ","),
+			"--permission-mode", "dontAsk")
 	}
 	return append(args,
 		"--tools", strings.Join(claudeToolNames(allowed), ","),

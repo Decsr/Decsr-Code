@@ -1168,6 +1168,10 @@ and its tools are still limited by the allow list. A node without `mcp` keeps
 today's arguments. The role option `mcp: true` still keeps all your servers for
 every node of the role.
 
+This works in both role modes. In text mode the node gets no built-in tools,
+only the named servers' tools (`--tools ""` plus the `mcp__<server>` rules with
+`--permission-mode dontAsk`), and decsr still writes the file blocks.
+
 The plan card shows `uses MCP: github, google-workspace` under the node, and a
 plan with an MCP node always waits for `y`, even when every node is read-only
 and at every autonomy level. An automation run stops with `needs you: T2 uses

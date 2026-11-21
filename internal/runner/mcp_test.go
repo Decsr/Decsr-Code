@@ -56,6 +56,19 @@ func TestClaudeArgsForMCP(t *testing.T) {
 		t.Errorf("--tools changed: %q vs %q", toolsOf(mcp), toolsOf(plain))
 	}
 
+	// Text mode: built-in tools stay off; MCP rules ride along with dontAsk.
+	textRules := MCPServerRules([]string{"github", "claude.ai Google Drive"})
+	text := strings.Join(claudeBaseArgs(false, true, textRules, false), " ")
+	if strings.Contains(text, strict) || !strings.Contains(text, "--setting-sources user,project,local") ||
+		toolsOf(text) != "" || !strings.Contains(text, "--allowedTools mcp__github,mcp__claude_ai_Google_Drive --permission-mode dontAsk") {
+		t.Errorf("text mcp args = %s", text)
+	}
+	textPlain := strings.Join(claudeBaseArgs(false, false, nil, false), " ")
+	if !strings.Contains(textPlain, strict+` --mcp-config {"mcpServers":{}}`) || !strings.Contains(textPlain, "--setting-sources project,local ") ||
+		strings.Contains(textPlain, "--allowedTools") || strings.Contains(textPlain, "--permission-mode") {
+		t.Errorf("text plain args = %s", textPlain)
+	}
+
 	// The role option mcp: true keeps all servers and adds no rules.
 	role := strings.Join(claudeBaseArgs(true, true, base, false), " ")
 	if strings.Contains(role, strict) || strings.Contains(role, "mcp__") || !strings.Contains(role, "--setting-sources user,project,local") {

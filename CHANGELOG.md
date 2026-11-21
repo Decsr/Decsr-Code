@@ -279,6 +279,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup screen: the `dsh` runner (DeepSeek Harness) is now listed, so an agent
   configured with it is no longer shown as OpenCode or rewritten to it on save.
   The model is typed (blank uses dsh's default) and the effort row is shown.
+- Workspace: a node the lead marks with `"mcp"` now gets the MCP tools in text
+  mode too (the default when a role sets no mode). It had none there. The node
+  still has no built-in tools; only the named servers' tools are allowed.
 
 ## [0.7.1] - 2026-11-17
 

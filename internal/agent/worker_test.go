@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -334,6 +335,18 @@ func TestRunWorkerTextModeRequestIsNotAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if f.got.Agent || len(f.got.AllowedTools) != 0 || !strings.Contains(f.got.SystemPrompt, "write its path in bold") {
+		t.Errorf("request = %+v", f.got)
+	}
+}
+
+func TestRunWorkerTextModeCarriesMCP(t *testing.T) {
+	f := &workerFake{chunks: []string{"x\n===SUMMARY===\nok"}}
+	req := WorkerRequest{Title: "T", MCPServers: []string{"google-workspace"}}
+	if _, err := RunWorker(context.Background(), f, t.TempDir(), config.DefaultConfig(), req, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !f.got.MCP || f.got.Agent || !reflect.DeepEqual(f.got.AllowedTools, []string{"mcp__google-workspace"}) ||
+		!strings.Contains(f.got.SystemPrompt, "write its path in bold") {
 		t.Errorf("request = %+v", f.got)
 	}
 }
