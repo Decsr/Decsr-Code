@@ -87,6 +87,24 @@ check is done when each item is marked pass, or fail with the guard that fixes i
 Report the result in the hand-off. When a check fails and no guard fits, stop and
 ask the user before building.
 
+## 6. Test Runs Use a Free Agent
+
+**When a test starts a real agent run, use a free OpenCode model, not claude.**
+
+This covers manual and smoke runs of decsr: the Workspace, `decsr task`,
+`decsr run`, `decsr automation run` and any script that spawns a runner.
+
+- Set every role you test to `runner: opencode` with a free model, for example
+  `model: opencode/deepseek-v4.1-flash-free`. Free models change often, so run
+  `opencode models | grep free` to see the current ones.
+- Put the test settings in a throwaway project or config. Do not change the
+  user's own `.decsr/project.yaml` or `~/.decsr/config.yaml` for a test.
+- `go test` uses fakes and starts no runner. Keep it that way: no test may
+  call a real `claude` binary.
+- Use claude only when the change is about the claude runner itself (its
+  flags, auth mode, limits, MCP). Ask the user before such a run, and keep it
+  to one short run.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
