@@ -184,6 +184,12 @@ func ParseSplitOpts(task, output string, roles []Role, existing []string, opts S
 		g.InstallWarnings = installWarns
 		return g
 	}
+	if ask := parseAsk(output); ask != nil {
+		// A question comes alone: any plan in the same reply is ignored.
+		g := withInstalls(&Graph{Task: task, Answer: chat})
+		g.Ask = ask
+		return g, nil
+	}
 	tasksRaw, ok := section(output, markerTasks)
 	if !ok {
 		if answer, found := section(output, markerAnswer); found {
@@ -414,7 +420,7 @@ func section(s, marker string) (string, bool) {
 	}
 	rest := s[i+len(marker):]
 	end := len(rest)
-	for _, m := range []string{markerTitle, markerTasks, markerNewRoles, markerPlugins, markerChanges, markerInstall, markerAnswer, markerEnd} {
+	for _, m := range []string{markerTitle, markerTasks, markerNewRoles, markerPlugins, markerChanges, markerInstall, markerAnswer, markerAsk, markerEnd} {
 		if j := strings.Index(rest, m); j >= 0 && j < end {
 			end = j
 		}
@@ -425,7 +431,7 @@ func section(s, marker string) (string, bool) {
 // chatText is the reply the lead wrote before its first section marker.
 func chatText(s string) string {
 	end := len(s)
-	for _, m := range []string{markerTitle, markerTasks, markerNewRoles, markerPlugins, markerChanges, markerInstall, markerAnswer, markerEnd} {
+	for _, m := range []string{markerTitle, markerTasks, markerNewRoles, markerPlugins, markerChanges, markerInstall, markerAnswer, markerAsk, markerEnd} {
 		if j := strings.Index(s, m); j >= 0 && j < end {
 			end = j
 		}

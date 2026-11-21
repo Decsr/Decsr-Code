@@ -879,7 +879,7 @@ and the marketplaces you added are in its prompt; it may also run `claude plugin
 list --available --json`, `claude plugin list --json`, `claude plugin
 marketplace list --json`, and `claude mcp list`). With exactly
 one match it proposes an install; with several or none it asks you in its reply
-(numbered options, one marked Recommended) or asks for the URL or command. It
+with a question card (one option recommended) or asks for the URL or command. It
 never invents a source. Workers are never given install commands.
 
 A proposal is an `===INSTALL===` section in the lead's reply, a JSON array of
@@ -893,12 +893,15 @@ warning. decsr then shows one card per action, oldest first:
 Reviews pull requests with specialised agents.
 runs: claude plugin install code-review@claude-plugins-official --scope local
 scope: this project only (local)
-› y install · n skip
+› 1. Install
+  2. Skip
 ```
 
-Only `y` and `n` act on the card (no Enter, no number, no cursor), and only when
-the prompt is not focused, so typing never answers it. Esc hides it, `/answer`
-brings it back. Nothing installs without the `y`, at every autonomy level; an
+The card takes the same keys as a [question card](#question-cards): `↑` `↓`
+move, `1` `2` or `Enter` choose, and `y` installs and `n` skips at once. Keys act
+only when the prompt is not focused, so typing never answers it. Esc hides it,
+`/answer` brings it back. Nothing installs without your choice, at every
+autonomy level; an
 automation run never installs: it prints `⚠ install needs you: skipped <name>`
 and leaves an info item in the inbox. An install can run while nodes run (it
 does not touch their worktrees). Esc cancels a running install; it also stops
@@ -919,7 +922,7 @@ connects to third-party code); a stdio server adds `this server will run:
 When a marketplace declares a command that runs while a Claude Code plugin
 installs, claude reports it instead of installing. decsr then shows a second
 card with the command in full and `⚠ this plugin runs a command when installed`;
-`y` runs the install again with `--accept-command <sha256>` for exactly that
+choosing Install runs the install again with `--accept-command <sha256>` for exactly that
 command. decsr never passes `-y`.
 
 Secrets: the lead writes `<ask>` where a secret belongs (an env value, a header
@@ -983,6 +986,19 @@ in the chat (Markdown) and creates nodes only when the message assigns work.
   opinion or a small review is answered in the chat. A reply that has no node
   section is a plain answer: no plan card, no error and no second call. The
   reply text that comes with new nodes is shown above the `split into ...` line.
+- **Questions.** When the lead needs you to choose, it ends its reply with an
+  `===ASK===` block: the question on the first line, then 2 to 4 option lines
+  starting with `- ` (`- SQLite - no server to run (recommended)`), closed by
+  `===END===`. One option carries `(recommended)`; the lead creates no nodes
+  in that reply. decsr shows a `lead asks` card like a [question
+  card](#question-cards): `↑` `↓` move (the cursor starts on the recommended
+  option), `1`-`9` or `Enter` choose, `Esc` hides it and `/answer` brings it
+  back. Choosing sends `Answer: <option>` to the lead as a message you typed;
+  nothing is sent before you press a key. `Type your own answer` focuses the
+  prompt. The card is kept in memory only: it is gone after you leave the
+  Workspace. An automation run has nobody to ask and ends as failed
+  (`the lead asked a question and created no nodes`), and no autonomy level
+  answers it.
 - **One conversation.** The session keeps the lead's own CLI conversation
   (`lead_session_id`, `lead_runner`, `lead_model` in the session file). The
   first turn keeps it and later turns resume it (claude `--resume`, codex
@@ -1224,6 +1240,7 @@ instead.
 
 | Key | Action |
 |-----|--------|
+| `Enter` | Open a small picker: Approve, Edit agents or Cancel (the cursor starts on Approve; `↑` `↓` `1`-`3` `Enter` choose, `Esc` closes it) |
 | `y` | Approve every agent and start the nodes that can run |
 | `n` | Cancel the split: its nodes are removed and a notice says which |
 | `↑` `↓` | Select a node (the selected row is marked `▸`) |
@@ -1587,6 +1604,9 @@ takes keys only while the feed is shown and the prompt is not in focus, so
 nothing is taken while you type; when a question arrives and the prompt is
 empty, the focus moves to the feed.
 
+The same card and keys serve a question of the lead (see [The lead
+chat](#the-lead-chat)).
+
 ### Refused commands
 
 With the `claude` runner in agent mode, the final event of a run lists the tool
@@ -1657,13 +1677,15 @@ Suggested follow-ups
   y plan them · n drop
 ```
 
-The same choice shows as a card in the feed. `y` sends one follow-up task to the
+The same choice shows as a card in the feed, with the options `Plan them` and
+`Drop them`; `↑` `↓`, `1` `2` and `Enter` choose, and `y` and `n` pick them at
+once. Planning sends one follow-up task to the
 lead, as if you had typed it (`Follow-ups suggested by the finished nodes:` and
 one `- T2: ...` line each); the lead splits it and the plan card still needs
-your `y` before anything runs. `n` drops them. The keys act only while the feed
+your approval before anything runs. Dropping forgets them. The keys act only while the feed
 has the focus, so they never take a letter you are typing in the prompt. `Esc`
 hides the card and `/answer` brings it back. The follow-ups are kept until you
-pick `y` or `n` or the next run summary replaces them.
+choose or the next run summary replaces them.
 
 Reply to the node (`m`, or `@T3 <message>`) to answer. The reply archives the
 attempt, with its report, and starts the next one. Its context includes what the

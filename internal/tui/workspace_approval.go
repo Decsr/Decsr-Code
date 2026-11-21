@@ -334,9 +334,9 @@ func renderApprovalCard(c approvalCard, width int) []string {
 			rows = append(rows, text.Render(l))
 		}
 	}
-	keys := "y approve · n cancel · e edit agent · a role · ↑↓ select"
+	keys := "Enter menu · y approve · n cancel · e edit agent · a role · ↑↓ select"
 	if len(c.Rows) == 0 {
-		keys = "y apply · n drop"
+		keys = "Enter menu · y apply · n drop"
 	}
 	rows = append(rows, "", text.Render(keys)+dim.Render("  (/answer shows it again)"))
 

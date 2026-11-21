@@ -135,7 +135,7 @@ func followUpTask(followups []string) string {
 func followCard(followups []string, seq int) askCard {
 	c := askCard{
 		Key: fmt.Sprintf("follow:%d", seq), Head: "Suggested follow-ups", Rec: -1,
-		Hint: "y plan them · n drop · Esc later",
+		Hint: "↑↓ move · Enter choose · y plan them · n drop · Esc later",
 		Opts: []askOpt{{Label: "Plan them", Act: askActPlan, Hot: "y"}, {Label: "Drop them", Act: askActDrop, Hot: "n"}},
 	}
 	for i, f := range followups {

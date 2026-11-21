@@ -289,6 +289,8 @@ type Graph struct {
 	// InstallWarnings the actions dropped from them. Not saved.
 	Installs        []InstallAction `json:"-"`
 	InstallWarnings []string        `json:"-"`
+	// Ask is a question the lead asks the user instead of planning. Not saved.
+	Ask *LeadAsk `json:"-"`
 	// SplitWarnings are the notes of the split that produced the graph (an
 	// unusable skill or plugin dropped). Not saved.
 	SplitWarnings []string `json:"-"`
@@ -541,6 +543,7 @@ func (g *Graph) Clone() *Graph {
 	c.Changes = append([]Change(nil), g.Changes...)
 	c.Installs = append([]InstallAction(nil), g.Installs...)
 	c.InstallWarnings = append([]string(nil), g.InstallWarnings...)
+	c.Ask = g.Ask
 	return &c
 }
 

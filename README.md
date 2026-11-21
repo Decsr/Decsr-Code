@@ -74,7 +74,7 @@ You need a git repository to work in and at least one backend (see [Backends](#b
 3. **First run:** if no runner is usable, `decsr` opens a short setup (pick a runner, connect a key, see the doctor result). `Esc` skips it. Open it again any time with `decsr setup`.
 4. **Start:** `cd your-repo && decsr`
 5. **Describe a task** in the prompt and press `Enter`. The lead splits it into nodes.
-6. **Approve the plan:** the lead assigns the roles. One plan card shows the nodes and agents: `y` starts, `e` edits an agent, `a` picks another role, `n` cancels. A plan that only reads starts at once.
+6. **Approve the plan:** the lead assigns the roles. One plan card shows the nodes and agents: `y` starts, `e` edits an agent, `a` picks another role, `n` cancels, `Enter` opens a picker with the same choices. A plan that only reads starts at once.
 7. **Watch and steer:** nodes run on their own. Press `d` on a node to see its diff, `r` to run one again. You can keep chatting while they run.
 8. **Finish:** type `/merge` to bring the result into your branch, or `/pr` to open a pull request.
 
@@ -105,7 +105,7 @@ The Workspace is a chat with the lead. It answers your questions itself, reading
 
 ### Lean runs and plan card
 
-A question or review is one read-only node, and the lead answers simple questions itself in the chat. Read-only plans start at once; a plan that writes waits on one plan card (`y` start, `e` edit agent, `a` pick role, `n` cancel). One-shot calls run without tools and with trimmed prompts, so they use fewer tokens. See [Lean runs](doc/workspace.md#lean-runs) and [Approval](doc/workspace.md#approval).
+A question or review is one read-only node, and the lead answers simple questions itself in the chat. Read-only plans start at once; a plan that writes waits on one plan card (`y` start, `e` edit agent, `a` pick role, `n` cancel, `Enter` picker). One-shot calls run without tools and with trimmed prompts, so they use fewer tokens. See [Lean runs](doc/workspace.md#lean-runs) and [Approval](doc/workspace.md#approval).
 
 ### Roles and backends
 
@@ -121,7 +121,7 @@ Level 1 (default) runs nothing by itself. Level 2 approves the plan, runs everyt
 
 ### Reply to nodes and node reports
 
-Type `@T3 your message` (or press `m` on a node) to start a new attempt of that node. It resumes the node's own CLI conversation (claude, codex, opencode, dsh), or starts fresh with an excerpt when that is not possible. Every node ends with a report and the run ends with a summary. A node that asks a question shows a card with options and a recommendation; a refused command shows a card with allow for this node, always, or no. A node can suggest follow-ups (`y` plans them). See [Reply to a node](doc/workspace.md#reply-to-a-node), [Question cards](doc/workspace.md#question-cards), [Refused commands](doc/workspace.md#refused-commands), [Run summary](doc/workspace.md#run-summary) and [Suggested follow-ups](doc/workspace.md#suggested-follow-ups).
+Type `@T3 your message` (or press `m` on a node) to start a new attempt of that node. It resumes the node's own CLI conversation (claude, codex, opencode, dsh), or starts fresh with an excerpt when that is not possible. Every node ends with a report and the run ends with a summary. A node that asks a question shows a card with options and a recommendation; a refused command shows a card with allow for this node, always, or no. A node can suggest follow-ups (`y` plans them). Every choice card takes `↑` `↓` and `Enter`, or its number; the lead asks you to choose with the same card. See [Reply to a node](doc/workspace.md#reply-to-a-node), [Question cards](doc/workspace.md#question-cards), [Refused commands](doc/workspace.md#refused-commands), [Run summary](doc/workspace.md#run-summary) and [Suggested follow-ups](doc/workspace.md#suggested-follow-ups).
 
 ### Chatting while nodes run
 

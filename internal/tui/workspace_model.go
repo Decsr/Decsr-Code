@@ -718,8 +718,11 @@ type workspaceModel struct {
 	cancelInstall context.CancelFunc
 
 	// installs the lead proposed (install cards)
-	installQ     []wsInstallItem // waiting for y or n, oldest first
-	instRun      *wsInstallRun   // a claude install in flight
+	installQ     []wsInstallItem    // waiting for y or n, oldest first
+	leadAsk      *workspace.LeadAsk // the question of the lead; kept in memory only
+	leadAskSeq   int                // counts the questions, for the card key
+	planPick     bool               // the plan picker is open
+	instRun      *wsInstallRun      // a claude install in flight
 	instGen      int
 	instLeadName string       // decsr plugin a card started, for the session record
 	installNotes []string     // installs the next message to the lead reports
@@ -1462,6 +1465,7 @@ func (m workspaceModel) startLead(task, shown string) (tea.Model, tea.Cmd) {
 	m.leadKind = ""
 	sess := m.sess.snapshot()
 	task = m.takeInstallNotes() + task
+	m.leadAsk = nil
 	req := wsLeadReq{task: task, summary: m.earlierContext(), conv: workspace.LeadConv{SessionID: sess.LeadSessionID, Runner: sess.LeadRunner, Model: sess.LeadModel}}
 	if m.hasNodes() {
 		for _, n := range m.g.Nodes {
@@ -1518,13 +1522,14 @@ func (m workspaceModel) onSplitDone(msg wsSplitDoneMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.sayLeadNotes(msg.lead)
-	if msg.g != nil && (msg.g.Answer != "" || (len(msg.g.Nodes) == 0 && len(msg.g.Changes) == 0 && (len(msg.g.Installs) > 0 || len(msg.g.InstallWarnings) > 0))) {
+	if msg.g != nil && (msg.g.Answer != "" || msg.g.Ask != nil || (len(msg.g.Nodes) == 0 && len(msg.g.Changes) == 0 && (len(msg.g.Installs) > 0 || len(msg.g.InstallWarnings) > 0))) {
 		m.input.Reset()
 		if msg.g.Answer != "" {
 			m.say("lead", msg.g.Answer)
 		}
 		m.sayTools()
 		m = m.queueInstalls(msg.g)
+		m = m.queueAsk(msg.g)
 		m.saveSession()
 		return m, nil
 	}
@@ -2025,6 +2030,10 @@ func (m workspaceModel) graphKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.pendingReview() >= 0 && m.focus != wsFocusPrompt {
 			return m.reviewResolve(k == "y")
+		}
+	case "enter":
+		if m.focus != wsFocusPrompt && !m.showGraph && m.planPending() {
+			return m.openPlanPick(), nil
 		}
 	case "e":
 		if m.focus != wsFocusPrompt && len(m.g.PendingApproval()) > 0 {
@@ -2888,7 +2897,7 @@ func (m workspaceModel) guidanceParts() (short, long string, isErr bool) {
 		return fmt.Sprintf("%d running", running), fmt.Sprintf("%so shows output, s stops the selected node", via), false
 	}
 	if len(g.PendingApproval()) > 0 || len(m.pendingChanges) > 0 {
-		return "Waiting for your approval on the plan card (y / e / n)", "", false
+		return "Waiting for your approval on the plan card (Enter / y / e / n)", "", false
 	}
 	unassigned := 0
 	for _, n := range g.Nodes {

@@ -123,15 +123,14 @@ func installUntrusted(it wsInstallItem) string {
 	return ""
 }
 
-// installCard is the card of one install. It takes only y and n.
+// installCard is the card of one install: y installs, n skips.
 func installCard(it wsInstallItem) askCard {
 	a := it.act
 	c := askCard{
-		Key:    fmt.Sprintf("install:%s:%s:%s", a.Kind, a.Name, it.accept),
-		Head:   "⬇ Install · " + installLabel(a),
-		Rec:    -1,
-		Strict: true,
-		Hint:   "y install · n skip",
+		Key:  fmt.Sprintf("install:%s:%s:%s", a.Kind, a.Name, it.accept),
+		Head: "⬇ Install · " + installLabel(a),
+		Rec:  -1,
+		Hint: "↑↓ move · Enter choose · y install · n skip · Esc later",
 		Opts: []askOpt{
 			{Label: "Install", Act: askActInstall, Hot: "y"},
 			{Label: "Skip", Act: askActInstallNo, Hot: "n"},
@@ -147,7 +146,7 @@ func installCard(it wsInstallItem) askCard {
 	}
 	if it.accept != "" {
 		c.Warn = true
-		c.Hint = "y accept and install · n skip"
+		c.Hint = "↑↓ move · Enter choose · y accept and install · n skip · Esc later"
 		add("⚠ this plugin runs a command when installed:")
 		add(it.command)
 	}

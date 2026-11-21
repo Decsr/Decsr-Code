@@ -22,6 +22,12 @@ const (
 	askActNo     = "no"     // hide the card
 	askActPlan   = "plan"   // send the suggested follow-ups to the lead
 	askActDrop   = "drop"   // forget the suggested follow-ups
+
+	askActLead     = "lead"     // answer the lead's question
+	askActLeadOwn  = "leadown"  // focus the prompt to answer the lead
+	askActPlanOK   = "planok"   // approve the plan
+	askActPlanEdit = "planedit" // open the agent editor of the plan
+	askActPlanNo   = "planno"   // cancel the plan
 )
 
 // askOpt is one choice of a card.
@@ -44,8 +50,6 @@ type askCard struct {
 	Progs []string // askActAllow and askActAlways: the programs to allow
 	Cmds  []string // the refused commands
 	Hint  string   // the key line, when it is not the usual one
-	// Strict makes the hot keys the only choice: no cursor, no numbers, no Enter.
-	Strict bool
 }
 
 // askOptionSplit cuts "8080 - matches the dev server" into label and reason.
@@ -81,12 +85,21 @@ func questionCard(n *workspace.Node) askCard {
 // node the question comes before the refused commands. A card hidden with Esc
 // is left out.
 func (m workspaceModel) askCards() []askCard {
+	var out []askCard
+	add := func(c askCard) {
+		if !m.askHidden[c.Key] {
+			out = append(out, c)
+		}
+	}
+	if m.planPick && m.planPending() {
+		add(m.planPickCard())
+	}
+	if c, ok := m.leadAskCard(); ok {
+		add(c)
+	}
 	if m.g == nil {
-		var out []askCard
 		for _, c := range m.installCards() {
-			if !m.askHidden[c.Key] {
-				out = append(out, c)
-			}
+			add(c)
 		}
 		return out
 	}
@@ -97,12 +110,6 @@ func (m workspaceModel) askCards() []askCard {
 		}
 	}
 	sort.SliceStable(nodes, func(i, j int) bool { return nodes[i].EndedAt.Before(nodes[j].EndedAt) })
-	var out []askCard
-	add := func(c askCard) {
-		if !m.askHidden[c.Key] {
-			out = append(out, c)
-		}
-	}
 	for _, n := range nodes {
 		if n.Status == workspace.StatusWaiting && !n.Limited() && n.Report != nil && n.Report.Status == workspace.ReportQuestion {
 			add(questionCard(n))
@@ -156,13 +163,7 @@ func renderAskCard(c askCard, sel, width int) []string {
 			rows = append(rows, text.Render(l))
 		}
 	}
-	if c.Strict {
-		rows = append(rows, acc.Render("› ")+text.Render(c.Hint))
-	}
 	for i, o := range c.Opts {
-		if c.Strict {
-			break
-		}
 		mark, st := "  ", text
 		if i == sel {
 			mark, st = acc.Render("› "), acc.Bold(true)
@@ -180,9 +181,6 @@ func renderAskCard(c askCard, sel, width int) []string {
 	keys := fmt.Sprintf("↑↓ move · 1-%d pick · Enter choose · Esc later", min(len(c.Opts), 9))
 	if c.Hint != "" {
 		keys = c.Hint
-	}
-	if c.Strict {
-		keys = "Esc later"
 	}
 	rows = append(rows, "", dim.Render(keys+"  (/answer brings it back)"))
 
@@ -206,19 +204,6 @@ func (m workspaceModel) askKeyPress(msg tea.KeyMsg) (next tea.Model, cmd tea.Cmd
 		return m, nil, false
 	}
 	k := msg.String()
-	if c.Strict {
-		if k == "esc" {
-			m.hideAsk(c)
-			return m, nil, true
-		}
-		for i, o := range c.Opts {
-			if o.Hot == k {
-				nm, cmd := m.askChoose(c, i)
-				return nm, cmd, true
-			}
-		}
-		return m, nil, false
-	}
 	move := func(d int) (tea.Model, tea.Cmd, bool) {
 		m.askKey, m.askSel = c.Key, min(max(sel+d, 0), len(c.Opts)-1)
 		return m, nil, true
@@ -251,6 +236,10 @@ func (m workspaceModel) askKeyPress(msg tea.KeyMsg) (next tea.Model, cmd tea.Cmd
 }
 
 func (m *workspaceModel) hideAsk(c askCard) {
+	if c.Key == planPickKey {
+		m.planPick = false
+		return
+	}
 	hidden := make(map[string]bool, len(m.askHidden)+1)
 	for k, v := range m.askHidden {
 		hidden[k] = v
@@ -263,6 +252,9 @@ func (m *workspaceModel) hideAsk(c askCard) {
 func (m workspaceModel) askChoose(c askCard, i int) (tea.Model, tea.Cmd) {
 	o := c.Opts[i]
 	m.askKey = ""
+	if c.Key == planPickKey {
+		m.planPick = false
+	}
 	switch o.Act {
 	case askActInstall:
 		return m.installYes()
@@ -288,6 +280,17 @@ func (m workspaceModel) askChoose(c askCard, i int) (tea.Model, tea.Cmd) {
 		return m.allowAndRetry(c, o.Act == askActAlways)
 	case askActPlan:
 		return m.planFollowUps()
+	case askActLead:
+		return m.answerLead(o.Label)
+	case askActLeadOwn:
+		m.setFocus(wsFocusPrompt)
+		return m, nil
+	case askActPlanOK:
+		return m.approveAgents()
+	case askActPlanEdit:
+		return m.openAgentEditor()
+	case askActPlanNo:
+		return m.rejectAgents()
 	case askActDrop:
 		m.followups = nil
 		m.setNotice("Suggested follow-ups dropped", false)

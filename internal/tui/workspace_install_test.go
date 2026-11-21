@@ -92,7 +92,9 @@ func TestInstallCardOfAnOfficialPlugin(t *testing.T) {
 	h.want("Reviews pull requests.")
 	h.want("runs: claude plugin install code-review@claude-plugins-official --scope local")
 	h.want("scope: this project only (local)")
-	h.want("› y install · n skip")
+	h.want("› 1. Install")
+	h.want("2. Skip")
+	h.want("y install · n skip")
 	h.wantNot("untrusted")
 	if got := recordedArgs(t, argsFile); got != nil {
 		t.Fatalf("claude ran before y: %q", got)
@@ -126,10 +128,10 @@ func TestInstallCardOfMCPMasksSecrets(t *testing.T) {
 	h2.want("-e TOKEN=••••")
 }
 
-func TestInstallNothingRunsWithoutYAndNSkips(t *testing.T) {
+func TestInstallNothingRunsWithoutAChoiceAndNSkips(t *testing.T) {
 	h, argsFile := installHarness(t, "echo '{}'")
 	h.propose(pluginAct("code-review@claude-plugins-official"))
-	for _, k := range []string{"enter", "1", "down", "o", "x"} {
+	for _, k := range []string{"down", "up", "o", "x"} {
 		if cmd := h.key(k); cmd != nil {
 			if _, ok := cmd().(wsClaudeInstallMsg); ok {
 				t.Fatalf("key %q started an install", k)
@@ -147,6 +149,30 @@ func TestInstallNothingRunsWithoutYAndNSkips(t *testing.T) {
 		t.Errorf("claude ran: %q", got)
 	}
 	h.wantNot("⬇ Install")
+}
+
+func TestInstallCardEnterAndDigitsChoose(t *testing.T) {
+	h, argsFile := installHarness(t, `echo '{"ok":true}'`)
+	h.propose(pluginAct("code-review@claude-plugins-official"))
+	h.runInstall(h.key("enter"))
+	if got := recordedArgs(t, argsFile); len(got) == 0 {
+		t.Error("Enter on Install must run the install")
+	}
+
+	h2, argsFile2 := installHarness(t, "echo '{}'")
+	h2.propose(pluginAct("code-review@claude-plugins-official"))
+	h2.key("down")
+	h2.key("enter")
+	if len(h2.m.installQ) != 0 || recordedArgs(t, argsFile2) != nil {
+		t.Errorf("down, Enter must skip: queue=%d", len(h2.m.installQ))
+	}
+
+	h3, _ := installHarness(t, "echo '{}'")
+	h3.propose(pluginAct("code-review@claude-plugins-official"))
+	h3.key("2")
+	if len(h3.m.installQ) != 0 {
+		t.Error("2 must skip")
+	}
 }
 
 func TestInstallEscHidesTheCardAndAnswerBringsItBack(t *testing.T) {

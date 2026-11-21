@@ -366,7 +366,7 @@ func TestStatusLineWaitsForApprovalNotDependencies(t *testing.T) {
 		t.Fatal("the plan card is not waiting")
 	}
 	short, _, _ := h.m.guidanceParts()
-	if short != "Waiting for your approval on the plan card (y / e / n)" {
+	if short != "Waiting for your approval on the plan card (Enter / y / e / n)" {
 		t.Errorf("status = %q", short)
 	}
 	if strings.Contains(short, "dependencies") {

@@ -131,6 +131,9 @@ func (m workspaceModel) autoObserve(msg tea.Msg) {
 			switch {
 			case msg.err != nil:
 				a.startErr = oneLine(msg.err.Error())
+			case msg.g != nil && msg.g.Ask != nil:
+				// Nobody can answer the question. Nothing else would end the run.
+				a.startErr = "the lead asked a question and created no nodes: " + truncateOneLine(oneLine(msg.g.Ask.Question), 120)
 			case msg.g != nil && msg.g.Answer != "":
 				// The reply is in the chat. Nothing else would end the run.
 				a.startErr = "the lead only answered in the chat and created no nodes: " + truncateOneLine(oneLine(msg.g.Answer), 120)

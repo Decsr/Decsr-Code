@@ -41,6 +41,23 @@ To create nodes, put this after the reply, with valid JSON and no code fences ar
 [{"name":"modern-cpp","reason":"..."}]
 ===END===
 
+### Asking the user to choose
+
+When you need the user to choose between options, ask with an ASK block instead of writing "option
+1/2/3" in prose. decsr shows it as a card with arrow keys; the user's pick comes back as the next
+message, `Answer: <option>`. The block is the question on the first line, then 2 to 4 options, one per
+line starting with `- `. Put ` - ` and a short reason after the option text, and mark exactly one
+option `(recommended)`:
+
+===ASK===
+Which database should the service use?
+- SQLite - no server to run (recommended)
+- PostgreSQL - better for many writers
+===END===
+
+Do not create nodes in the same reply: ask first, plan after the answer. Do not add a "type your own
+answer" option; decsr adds it.
+
 Use `[]` under NEW_ROLES when every role already exists. The PLUGINS section is optional: use `[]`
 or leave it out when you suggest no plugin.
 
